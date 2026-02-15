@@ -97,7 +97,6 @@ class UniversalGameParser:
 
             logger.info(f"✅ Игра #{game_num} ЗАВЕРШЕНА, всего карт: {len(all_cards)}, стартовые: {initial_cards}, добранные: {drawn_cards}")
 
-
             game_data = {
                 'game_num': game_num,
                 'has_r_tag': has_r_tag,
@@ -183,7 +182,7 @@ class UniversalGameParser:
 
         return left_result, cards_text, suits
 
-        @staticmethod
+    @staticmethod
     def _extract_all_suits(text: str):
         suits = []
 
@@ -368,7 +367,7 @@ class Storage:
         self.strategy2_counter += 1
 
         prediction = {
-                        'id': prediction_id,
+            'id': prediction_id,
             'predicted_suit': predicted_suit,
             'confidence': confidence,
             'target_game': target_game,
@@ -399,15 +398,15 @@ class Storage:
             for check_game_num in prediction['check_games']:
                 if check_game_num in self.active_games:
                     all_game_cards = self.active_games[check_game_num]['all_cards']
-            logger.info(f"🃏 Все карты игры #{check_game_num}: {all_game_cards}")
+                    logger.info(f"🃏 Все карты игры #{check_game_num}: {all_game_cards}")
 
-            # Проверяем все карты в игре
-            for idx, found_suit in enumerate(all_game_cards):
-                card_num = idx + 1
-                if compare_suits(check_suit, found_suit):
-                    suit_found = True
-            found_cards.append(card_num)
-            logger.info(f"✅✅✅ НАШЛИ В КАРТЕ #{card_num}!")
+                    # Проверяем все карты в игре
+                    for idx, found_suit in enumerate(all_game_cards):
+                        card_num = idx + 1
+                        if compare_suits(check_suit, found_suit):
+                            suit_found = True
+                            found_cards.append(card_num)
+                            logger.info(f"✅✅✅ НАШЛИ В КАРТЕ #{card_num}!")
 
             if not suit_found:
                 all_found = False
