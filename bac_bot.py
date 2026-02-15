@@ -2,7 +2,6 @@
 import logging
 import re
 import random
-import asyncio
 from datetime import datetime
 from collections import defaultdict
 from telegram import Update
@@ -10,8 +9,7 @@ from telegram.ext import (
     Application,
     MessageHandler,
     filters,
-    ContextTypes,
-    CommandHandler
+    ContextTypes
 )
 
 # === НАСТРОЙКИ ===
@@ -99,6 +97,7 @@ class UniversalGameParser:
 
             logger.info(f"✅ Игра #{game_num} ЗАВЕРШЕНА, всего карт: {len(all_cards)}, стартовые: {initial_cards}, добранные: {drawn_cards}")
 
+
             game_data = {
                 'game_num': game_num,
                 'has_r_tag': has_r_tag,
@@ -123,7 +122,7 @@ class UniversalGameParser:
         return None
 
     @staticmethod
-    def _extract_left_part(self, text: str) -> str:
+    def _extract_left_part(text: str) -> str:
         separators = [
             ' 🔰 ', '🔰',
             ' - ', ' – ', ' — ',
@@ -142,29 +141,29 @@ class UniversalGameParser:
         return text.strip()
 
     @staticmethod
-    def _parse_all_cards(self, left_text: str):
+    def _parse_all_cards(text: str):
         left_result = None
         cards_text = ""
         suits = []
 
         bracket_pattern = r'(\d+)\(([^)]+)\)'
-        bracket_match = re.search(bracket_pattern, left_text)
+        bracket_match = re.search(bracket_pattern, text)
 
         if bracket_match:
             left_result = int(bracket_match.group(1))
             cards_text = bracket_match.group(2)
-            suits = self._extract_all_suits(cards_text)
+            suits = UniversalGameParser._extract_all_suits(cards_text)
         else:
-            num_match = re.search(r'\b(\d+)\b', left_text)
+            num_match = re.search(r'\b(\d+)\b', text)
             if num_match:
                 left_result = int(num_match.group(1))
-                after_num = left_text[num_match.end():]
-                suits = self._extract_all_suits(after_num)
+                after_num = text[num_match.end():]
+                suits = UniversalGameParser._extract_all_suits(after_num)
 
         return left_result, cards_text, suits
 
     @staticmethod
-    def _parse_whole_text(self, text: str):
+    def _parse_whole_text(text: str):
         left_result = None
         cards_text = ""
         suits = []
@@ -178,14 +177,14 @@ class UniversalGameParser:
             card_search = re.search(r'\(([^)]+)\)', text)
             if card_search:
                 cards_text = card_search.group(1)
-                suits = self._extract_all_suits(cards_text)
+                suits = UniversalGameParser._extract_all_suits(cards_text)
             else:
-                suits = self._extract_all_suits(text)
+                suits = UniversalGameParser._extract_all_suits(text)
 
         return left_result, cards_text, suits
 
         @staticmethod
-    def _extract_all_suits(self, text: str):
+    def _extract_all_suits(text: str):
         suits = []
 
         suit_patterns = {
@@ -283,13 +282,12 @@ class Storage:
         self.strategy2_predictions = {}
         self.strategy2_counter = 0
         self.strategy2_stats = {'total': 0, 'wins': 0, 'losses': 0}
-        self.active_games = {}  # отслеживание активных игр с добором карт
+        self.active_games = {}
 
     def add_to_history(self, game_data):
         game_num = game_data['game_num']
         self.game_history[game_num] = game_data
 
-        # Добавляем все карты в анализатор
         if game_data['all_cards']:
             for suit in game_data['all_cards']:
                 self.analyzer.add_suit(suit)
@@ -298,14 +296,11 @@ class Storage:
             oldest_key = min(self.game_history.keys())
             del self.game_history[oldest_key]
 
-        # Обновляем активные игры
         if game_num in self.active_games:
-            # Дополняем историю карт
             existing = self.active_games[game_num]
             existing['drawn_cards'].extend(game_data['drawn_cards'])
             existing['all_cards'] = existing['initial_cards'] + existing['drawn_cards']
         else:
-            # Новая игра
             self.active_games[game_num] = {
                 'initial_cards': game_data['initial_cards'],
                 'drawn_cards': game_data['drawn_cards'],
@@ -344,9 +339,7 @@ class Storage:
 
         best_suit = max(card_stats[card_value].items(), key=lambda x: x[1])
         probability = best_suit[1] / total
-
         return best_suit[0], probability
-
 
     def create_strategy2_prediction(self, game_num, card_value=None):
         if card_value:
@@ -371,11 +364,11 @@ class Storage:
             get_next_game_number(target_game, 2)
         ]
 
-                prediction_id = f"str2_{self.strategy2_counter}"
+        prediction_id = f"str2_{self.strategy2_counter}"
         self.strategy2_counter += 1
 
         prediction = {
-            'id': prediction_id,
+                        'id': prediction_id,
             'predicted_suit': predicted_suit,
             'confidence': confidence,
             'target_game': target_game,
@@ -406,9 +399,10 @@ class Storage:
             for check_game_num in prediction['check_games']:
                 if check_game_num in self.active_games:
                     all_game_cards = self.active_games[check_game_num]['all_cards']
-                    logger.info(f"🃏 Все карты игры #{check_game_num}: {all_game_cards}")
+            logger.info(f"🃏 Все карты игры #{check_game_num}: {all_game_cards}")
 
-                    for idx, found_suit in enumerate(all_game_cards):
+            # Проверяем все карты в игре
+            for idx, found_suit in enumerate(all_game_cards):
                 card_num = idx + 1
                 if compare_suits(check_suit, found_suit):
                     suit_found = True
