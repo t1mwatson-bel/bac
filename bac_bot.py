@@ -87,7 +87,7 @@ class UniversalGameParser:
             card_value_match = re.search(r'(\d+)$', str(left_result))
             card_value = card_value_match.group(1) if card_value_match else None
 
-            # 🔧 ИЗМЕНЕНО: собираем все карты, а не только первые 2 и 3-ю
+            # Собираем все карты, а не только первые 2 и 3-ю
             all_cards = left_suits  # Все найденные карты
             initial_cards = []
             drawn_cards = []
@@ -110,9 +110,9 @@ class UniversalGameParser:
                 'left_cards_count': len(left_suits),
                 'left_suits': left_suits,
                 'initial_cards': initial_cards,
-                'drawn_cards': drawn_cards,  # 🔧 ДОБАВЛЕНО: список добранных карт
-                'all_cards': all_cards,  # 🔧 ДОБАВЛЕНО: все карты
-                'total_cards_count': len(all_cards),  # 🔧 ДОБАВЛЕНО: общее количество карт
+                'drawn_cards': drawn_cards,  # Список добранных карт
+                'all_cards': all_cards,  # Все карты
+                'total_cards_count': len(all_cards),  # Общее количество карт
                 'original_text': text,
                 'is_completed': True,
                 'card_value': card_value
@@ -123,7 +123,7 @@ class UniversalGameParser:
         return None
 
     @staticmethod
-    def _extract_left_part(text: str) -> str:
+    def _extract_left_part(self, text: str) -> str:
         separators = [
             ' 🔰 ', '🔰',
             ' - ', ' – ', ' — ',
@@ -142,7 +142,7 @@ class UniversalGameParser:
         return text.strip()
 
     @staticmethod
-    def _parse_all_cards(left_text: str):
+    def _parse_all_cards(self, left_text: str):
         left_result = None
         cards_text = ""
         suits = []
@@ -153,18 +153,18 @@ class UniversalGameParser:
         if bracket_match:
             left_result = int(bracket_match.group(1))
             cards_text = bracket_match.group(2)
-            suits = UniversalGameParser._extract_all_suits(cards_text)
+            suits = self._extract_all_suits(cards_text)
         else:
             num_match = re.search(r'\b(\d+)\b', left_text)
             if num_match:
                 left_result = int(num_match.group(1))
                 after_num = left_text[num_match.end():]
-                suits = UniversalGameParser._extract_all_suits(after_num)
+                suits = self._extract_all_suits(after_num)
 
         return left_result, cards_text, suits
 
     @staticmethod
-    def _parse_whole_text(text: str):
+    def _parse_whole_text(self, text: str):
         left_result = None
         cards_text = ""
         suits = []
@@ -178,13 +178,13 @@ class UniversalGameParser:
             card_search = re.search(r'\(([^)]+)\)', text)
             if card_search:
                 cards_text = card_search.group(1)
-                suits = UniversalGameParser._extract_all_suits(cards_text)
+                suits = self._extract_all_suits(cards_text)
             else:
-                suits = UniversalGameParser._extract_all_suits(text)
+                suits = self._extract_all_suits(text)
 
         return left_result, cards_text, suits
 
-    @staticmethod
+        @staticmethod
     def _extract_all_suits(self, text: str):
         suits = []
 
@@ -200,9 +200,8 @@ class UniversalGameParser:
             for _ in matches:
                 suits.append(suit_emoji)
 
-        logger.debug(f"🔎 Найдено мастей в тексте: {suits}")  # 🔧 ДОБАВЛЕНО: отладка
+        logger.debug(f"🔎 Найдено мастей в тексте: {suits}")
         return suits
-
 
 def get_next_game_number(current_game, increment=1):
     next_game = current_game + increment
@@ -284,13 +283,13 @@ class Storage:
         self.strategy2_predictions = {}
         self.strategy2_counter = 0
         self.strategy2_stats = {'total': 0, 'wins': 0, 'losses': 0}
-        self.active_games = {}  # 🔧 ДОБАВЛЕНО: отслеживание активных игр с добором карт
+        self.active_games = {}  # отслеживание активных игр с добором карт
 
     def add_to_history(self, game_data):
         game_num = game_data['game_num']
         self.game_history[game_num] = game_data
 
-        # 🔧 ИЗМЕНЕНО: добавляем все карты в анализатор
+        # Добавляем все карты в анализатор
         if game_data['all_cards']:
             for suit in game_data['all_cards']:
                 self.analyzer.add_suit(suit)
@@ -299,7 +298,7 @@ class Storage:
             oldest_key = min(self.game_history.keys())
             del self.game_history[oldest_key]
 
-        # 🔧 ДОБАВЛЕНО: обновляем активные игры
+        # Обновляем активные игры
         if game_num in self.active_games:
             # Дополняем историю карт
             existing = self.active_games[game_num]
@@ -311,7 +310,8 @@ class Storage:
                 'initial_cards': game_data['initial_cards'],
                 'drawn_cards': game_data['drawn_cards'],
                 'all_cards': game_data['all_cards'],
-                'status': 'active'
+                'status': 'active',
+                'created_at': datetime.now()
             }
 
     def is_game_already_in_predictions(self, game_num):
@@ -347,6 +347,7 @@ class Storage:
 
         return best_suit[0], probability
 
+
     def create_strategy2_prediction(self, game_num, card_value=None):
         if card_value:
             predicted_suit, confidence = self.predict_suit_for_card(card_value)
@@ -367,4 +368,131 @@ class Storage:
         check_games = [
             target_game,
             get_next_game_number(target_game, 1),
-            get_next_game_number
+            get_next_game_number(target_game, 2)
+        ]
+
+                prediction_id = f"str2_{self.strategy2_counter}"
+        self.strategy2_counter += 1
+
+        prediction = {
+            'id': prediction_id,
+            'predicted_suit': predicted_suit,
+            'confidence': confidence,
+            'target_game': target_game,
+            'check_games': check_games,
+            'status': 'pending',
+            'created_at': datetime.now(),
+            'wins_in_check': 0,
+            'losses_in_check': 0
+        }
+
+        self.strategy2_predictions[prediction_id] = prediction
+        logger.info(f"🤖 Создан прогноз #{prediction_id}: {predicted_suit} для игры #{target_game}")
+        return prediction_id
+
+    def check_all_predictions(self):
+        """Проверяет все активные прогнозы на завершение"""
+        completed_predictions = []
+
+        for pred_id, prediction in list(self.strategy2_predictions.items()):
+            if prediction['status'] != 'pending':
+                continue
+
+            all_found = True
+            suit_found = False
+            found_cards = []
+            check_suit = prediction['predicted_suit']
+
+            for check_game_num in prediction['check_games']:
+                if check_game_num in self.active_games:
+                    all_game_cards = self.active_games[check_game_num]['all_cards']
+                    logger.info(f"🃏 Все карты игры #{check_game_num}: {all_game_cards}")
+
+                    for idx, found_suit in enumerate(all_game_cards):
+                card_num = idx + 1
+                if compare_suits(check_suit, found_suit):
+                    suit_found = True
+            found_cards.append(card_num)
+            logger.info(f"✅✅✅ НАШЛИ В КАРТЕ #{card_num}!")
+
+            if not suit_found:
+                all_found = False
+
+            if all_found:
+                prediction['status'] = 'win'
+                prediction['wins_in_check'] += 1
+                self.strategy2_stats['wins'] += 1
+                logger.info(f"🏆 ПРОГНОЗ #{pred_id} ВЫИГРАЛ!")
+                completed_predictions.append(pred_id)
+            else:
+                prediction['status'] = 'loss'
+                prediction['losses_in_check'] += 1
+                self.strategy2_stats['losses'] += 1
+                logger.info(f"💥 ПРОГНОЗ #{pred_id} ПРОИГРАЛ")
+                completed_predictions.append(pred_id)
+
+        return completed_predictions
+
+    def cleanup_finished_games(self):
+        """Очищает завершённые игры из активных"""
+        current_time = datetime.now()
+        to_remove = []
+
+        for game_num, game_data in self.active_games.items():
+            # Убираем игры старше 1 часа
+            if 'created_at' in game_data:
+                if (current_time - game_data['created_at']).total_seconds() > 3600:
+                    to_remove.append(game_num)
+
+        for game_num in to_remove:
+            if game_num in self.active_games:
+                del self.active_games[game_num]
+                logger.info(f"🗑️ Игра #{game_num} удалена из активных (устарела)")
+
+# === ОБРАБОТЧИКИ СООБЩЕНИЙ ===
+async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.channel_post and update.channel_post.chat.id == INPUT_CHANNEL_ID:
+        text = update.channel_post.text or update.channel_post.caption or ""
+        if not text:
+            return
+
+        game_data = UniversalGameParser.extract_game_data(text)
+        if game_data:
+            storage.add_to_history(game_data)
+            # Запускаем проверку прогнозов
+            completed = storage.check_all_predictions()
+            for pred_id in completed:
+                await send_prediction_result(update, context, pred_id)
+
+async def send_prediction_result(update: Update, context: ContextTypes.DEFAULT_TYPE, pred_id: str):
+    prediction = storage.strategy2_predictions.get(pred_id)
+    if not prediction:
+        return
+
+    # ОЧИСТКА АКТИВНЫХ ИГР
+    if prediction['target_game'] in storage.active_games:
+        del storage.active_games[prediction['target_game']]
+        logger.info(f"🗑️ Игра #{prediction['target_game']} удалена из активных после завершения прогноза")
+
+    result_text = ""
+    if prediction['status'] == 'win':
+        result_text = f"{get_win_phrase()}\n\n🎯 Прогноз #{pred_id}\n🃏 Масть: {prediction['predicted_suit']}\n🏆 ВЫИГРЫШ!\n📊 Статистика: {storage.strategy2_stats['wins']} побед, {storage.strategy2_stats['losses']} поражений"
+    else:
+        result_text = f"{get_loss_phrase()}\n\n🎯 Прогноз #{pred_id}\n🃏 Масть: {prediction['predicted_suit']}\n💥 ПРОИГРЫШ\n📊 Статистика: {storage.strategy2_stats['wins']} побед, {storage.strategy2_stats['losses']} поражений"
+
+    await context.bot.send_message(
+        chat_id=OUTPUT_CHANNEL_ID,
+        text=result_text
+    )
+
+# ИНИЦИАЛИЗАЦИЯ ХРАНИЛИЩА
+storage = Storage()
+
+# === ЗАПУСК БОТА ===
+def main():
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(MessageHandler(filters.Chat(INPUT_CHANNEL_ID), handle_new_game))
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
