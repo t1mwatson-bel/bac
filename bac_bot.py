@@ -64,7 +64,7 @@ def init_db():
 
 # Класс для парсинга вашего формата
 class BaccaratParser:
-    def init(self):
+    def __init__(self):
         # Соответствие мастей
         self.suit_map = {
             '♠️': 'пики',
@@ -110,8 +110,7 @@ class BaccaratParser:
             
             # Определяем победителя
             if '✅' in hand1_raw or '✅' in hand2_raw:
-
-winner = 'hand1' if '✅' in hand1_raw else 'hand2'
+                winner = 'hand1' if '✅' in hand1_raw else 'hand2'
             elif '🔰' in hand1_raw or '🔰' in hand2_raw:
                 winner = 'hand1' if '🔰' in hand1_raw else 'hand2'
             else:
@@ -187,7 +186,7 @@ winner = 'hand1' if '✅' in hand1_raw else 'hand2'
 
 # Класс для алгоритма сигналов
 class SignalAlgorithm:
-    def init(self):
+    def __init__(self):
         self.parser = BaccaratParser()
     
     def is_even_decade(self, game_number):
@@ -221,8 +220,8 @@ class SignalAlgorithm:
             }
         
         return rules.get(first_suit, first_suit)
-
-def process_game_signal(self, user_id, game_number, first_suit):
+    
+    def process_game_signal(self, user_id, game_number, first_suit):
         """
         Обрабатывает игру и создает/обновляет сигналы
         """
@@ -312,8 +311,8 @@ def process_game_signal(self, user_id, game_number, first_suit):
                 
                 if not predicted_suit:
                     predicted_suit = signal_suit
-
-conn.commit()
+        
+        conn.commit()
         conn.close()
         
         return signals, predicted_suit, is_confirmation
@@ -349,7 +348,7 @@ conn.commit()
 
 # Основной класс для обработки игр
 class GameAnalyzer:
-    def init(self):
+    def __init__(self):
         self.parser = BaccaratParser()
         self.signal_algorithm = SignalAlgorithm()
     
@@ -411,8 +410,7 @@ class GameAnalyzer:
         
         # Сохраняем статистику мастей
         for suit, count in suit_analysis.items():
-
-c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_position)
+            c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_position)
                          VALUES (?, ?, ?, ?, ?)''',
                       (user_id, game_id, suit, count, 'both'))
         
@@ -508,6 +506,9 @@ c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_positio
             result.append("   Правило нечетного десятка: пики↔трефы, черви↔бубны")
         
         return "\n".join(result)
+
+# Инициализация бота
+bot = telebot.TeleBot(TOKEN)
 
 # Команды бота
 @bot.message_handler(commands=['start'])
@@ -616,8 +617,7 @@ def process_prediction_request(message):
     else:
         result = [f"🔮 ПРОГНОЗ НА ИГРУ #{game_number}", "=" * 40, ""]
         for from_game, suit in signals:
-
-result.append(f"🆓 Сигнал от игры #{from_game}")
+            result.append(f"🆓 Сигнал от игры #{from_game}")
             result.append(f"   Ожидаемая масть: {suit}")
             result.append("")
         
@@ -723,8 +723,7 @@ def check_algorithm(message):
     for r in results:
         mark = "✅" if r['correct'] else "❌"
         report.append(f"{mark} {r['type'].upper()} сигнал: {r['from']} → {r['to']}")
-
-report.append(f"   Ожидалось: {r['expected']}, Факт: {r['actual']}")
+        report.append(f"   Ожидалось: {r['expected']}, Факт: {r['actual']}")
         report.append("")
     
     accuracy = (correct_predictions / total_predictions * 100)
@@ -882,7 +881,7 @@ def go_back(message):
     start(message)
 
 # Запуск бота
-if name == 'main':
+if __name__ == '__main__':
     init_db()
     print("🤖 Бот запущен с СИСТЕМОЙ СИГНАЛОВ...")
     print("📊 Первичный сигнал: N → N+3")
