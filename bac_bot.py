@@ -1,39 +1,22 @@
-import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+import telebot
+from telebot import types
 import sqlite3
 from datetime import datetime
-import matplotlib.pyplot as plt
-import io
-import re
-from collections import defaultdict, Counter
 import json
-import math
-import os
+import re
+from collections import defaultdict
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# Конфигурация
+# Конфигурация - ЗАМЕНИТЕ НА СВОЙ ТОКЕН!
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 ADMIN_ID = 683219603
 
-# Состояния для ConversationHandler
-ENTERING_GAME = 1
-ENTERING_PREDICTION = 2
-
 # Инициализация базы данных
 def init_db():
-    conn = sqlite3.connect('baccarat_stats.db')
+    conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
     c = conn.cursor()
     
-    # Таблица для игр в вашем формате
     c.execute('''CREATE TABLE IF NOT EXISTS games_analysis
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER,
@@ -50,17 +33,14 @@ def init_db():
                   is_confirmation BOOLEAN DEFAULT 0,
                   raw_data TEXT)''')
     
-    # Таблица для статистики мастей
     c.execute('''CREATE TABLE IF NOT EXISTS suit_stats
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER,
                   game_id INTEGER,
                   suit TEXT,
                   count INTEGER,
-                  hand_position TEXT,
-                  FOREIGN KEY (game_id) REFERENCES games_analysis (id))''')
+                  hand_position TEXT)''')
     
-    # Таблица для отслеживания сигналов
     c.execute('''CREATE TABLE IF NOT EXISTS signals
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER,
@@ -75,74 +55,50 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Класс для парсинга вашего формата
+# Класс для парсинга формата "Макс Москва"
 class BaccaratParser:
     def __init__(self):
-        # Соответствие мастей
         self.suit_map = {
-            '♠️': 'пики',
-            '♣️': 'трефы',
-            '♥️': 'черви',
-            '♦️': 'бубны'
+            '♠️': 'пики', '♣️': 'трефы', '♥️': 'черви', '♦️': 'бубны'
         }
-        
-        # Значения карт в очках баккары
         self.card_values = {
             'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
             '10': 0, 'J': 0, 'Q': 0, 'K': 0
         }
     
     def parse_game(self, text):
-        """Парсит строку в формате #N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩"""
         try:
-            # Извлекаем номер игры
             game_num_match = re.search(r'#N(\d+)', text)
             game_number = int(game_num_match.group(1)) if game_num_match else 0
             
-            # Извлекаем общее количество очков
             total_points_match = re.search(r'#T(\d+)', text)
             total_points = int(total_points_match.group(1)) if total_points_match else 0
             
-            # Разделяем на две руки
-            # Ищем паттерн с возможным ✅ или 🔰 в любой руке
             hands_pattern = r'([✅🔰]?\d+)\(([^)]+)\)\s*-\s*([✅🔰]?\d+)\(([^)]+)\)'
             hands_match = re.search(hands_pattern, text)
             
             if not hands_match:
                 return None
             
-            # Парсим первую руку
             hand1_raw = hands_match.group(1)
             hand1_cards_str = hands_match.group(2)
             hand1_score = int(re.sub(r'[✅🔰]', '', hand1_raw))
             
-            # Парсим вторую руку
             hand2_raw = hands_match.group(3)
             hand2_cards_str = hands_match.group(4)
             hand2_score = int(re.sub(r'[✅🔰]', '', hand2_raw))
             
-            # Определяем победителя
             if '✅' in hand1_raw or '✅' in hand2_raw:
                 winner = 'hand1' if '✅' in hand1_raw else 'hand2'
             elif '🔰' in hand1_raw or '🔰' in hand2_raw:
                 winner = 'hand1' if '🔰' in hand1_raw else 'hand2'
             else:
-                if hand1_score > hand2_score:
-                    winner = 'hand1'
-                elif hand2_score > hand1_score:
-                    winner = 'hand2'
-                else:
-                    winner = 'tie'
+                winner = 'hand1' if hand1_score > hand2_score else ('hand2' if hand2_score > hand1_score else 'tie')
             
-            # Парсим карты первой руки
             hand1_cards = self.parse_cards(hand1_cards_str)
-            # Парсим карты второй руки
             hand2_cards = self.parse_cards(hand2_cards_str)
-            
-            # Определяем первую масть (первая карта в первой руке)
             first_suit = hand1_cards[0]['suit'] if hand1_cards else None
             
-            # Вычисляем очки
             calculated_hand1_points = self.calculate_hand_points(hand1_cards)
             calculated_hand2_points = self.calculate_hand_points(hand2_cards)
             
@@ -159,20 +115,15 @@ class BaccaratParser:
                 'first_suit': first_suit,
                 'raw_data': text
             }
-            
         except Exception as e:
             print(f"Ошибка парсинга: {e}")
             return None
     
     def parse_cards(self, cards_str):
-        """Парсит строку с картами вида '2♠️ J♥️ A♥️'"""
         cards = []
-        # Разделяем по пробелам
         card_items = cards_str.strip().split()
-        
         for item in card_items:
             if len(item) >= 2:
-                # Значение может быть одной цифрой/буквой или '10'
                 if item.startswith('10'):
                     value = '10'
                     suit_symbol = item[2:]
@@ -182,845 +133,357 @@ class BaccaratParser:
                 
                 suit = self.suit_map.get(suit_symbol, 'unknown')
                 points = self.card_values.get(value, 0)
-                
-                cards.append({
-                    'value': value,
-                    'suit': suit,
-                    'points': points,
-                    'symbol': suit_symbol
-                })
-        
+                cards.append({'value': value, 'suit': suit, 'points': points, 'symbol': suit_symbol})
         return cards
     
     def calculate_hand_points(self, cards):
-        """Вычисляет очки руки в баккаре"""
-        total = sum(card['points'] for card in cards)
-        return total % 10
+        return sum(card['points'] for card in cards) % 10
 
-# Класс для алгоритма сигналов
+# Класс алгоритма сигналов
 class SignalAlgorithm:
     def __init__(self):
         self.parser = BaccaratParser()
     
     def is_even_decade(self, game_number):
-        """Проверяет, является ли десяток четным"""
-        decade = game_number // 10
-        return decade % 2 == 0
+        return (game_number // 10) % 2 == 0
     
     def get_signal_suit(self, game_number, first_suit):
-        """
-        Определяет масть для сигнала по алгоритму
-        
-        Правила:
-        - В четных десятках: пики ↔ бубны, черви ↔ трефы
-        - В нечетных десятках: пики ↔ трефы, черви ↔ бубны
-        """
         if self.is_even_decade(game_number):
-            # Четные десятки
-            rules = {
-                'пики': 'бубны',
-                'бубны': 'пики',
-                'черви': 'трефы',
-                'трефы': 'черви'
-            }
+            rules = {'пики': 'бубны', 'бубны': 'пики', 'черви': 'трефы', 'трефы': 'черви'}
         else:
-            # Нечетные десятки
-            rules = {
-                'пики': 'трефы',
-                'трефы': 'пики',
-                'черви': 'бубны',
-                'бубны': 'черви'
-            }
-        
+            rules = {'пики': 'трефы', 'трефы': 'пики', 'черви': 'бубны', 'бубны': 'черви'}
         return rules.get(first_suit, first_suit)
     
     def process_game_signal(self, user_id, game_number, first_suit):
-        """
-        Обрабатывает игру и создает/обновляет сигналы
-        """
-        conn = sqlite3.connect('baccarat_stats.db')
+        conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
         c = conn.cursor()
         
-        # Получаем предыдущую игру
-        c.execute('''SELECT game_number, first_suit FROM games_analysis 
-                     WHERE user_id = ? AND game_number < ?
-                     ORDER BY game_number DESC LIMIT 1''', (user_id, game_number))
+        c.execute('SELECT game_number, first_suit FROM games_analysis WHERE user_id = ? AND game_number < ? ORDER BY game_number DESC LIMIT 1', 
+                  (user_id, game_number))
         prev_game = c.fetchone()
         
         signals = []
         predicted_suit = None
         is_confirmation = False
         
-        # Проверяем, был ли активный сигнал на эту игру
-        c.execute('''SELECT id, from_game, suit FROM signals 
-                     WHERE user_id = ? AND to_game = ? AND is_active = 1''', 
+        c.execute('SELECT id, from_game, suit FROM signals WHERE user_id = ? AND to_game = ? AND is_active = 1', 
                   (user_id, game_number))
         active_signal = c.fetchone()
         
         if active_signal:
             signal_id, from_game, expected_suit = active_signal
-            
-            # Проверяем, совпала ли масть
             if expected_suit == first_suit:
-                # Сигнал подтвердился!
                 is_confirmation = True
-                
-                # Обновляем сигнал
-                c.execute('''UPDATE signals 
-                             SET is_confirmed = 1, is_active = 0, confirmed_at = ? 
-                             WHERE id = ?''', (datetime.now(), signal_id))
-                
-                # Даем повторный сигнал на следующую игру (+1)
+                c.execute('UPDATE signals SET is_confirmed = 1, is_active = 0, confirmed_at = ? WHERE id = ?', 
+                         (datetime.now(), signal_id))
                 next_game = game_number + 1
-                c.execute('''INSERT INTO signals (user_id, from_game, to_game, suit, is_active, created_at)
-                             VALUES (?, ?, ?, ?, 1, ?)''',
-                          (user_id, game_number, next_game, expected_suit, datetime.now()))
-                
-                signals.append({
-                    'type': 'confirmation',
-                    'from_game': from_game,
-                    'to_game': game_number,
-                    'suit': expected_suit,
-                    'next_signal': next_game
-                })
-                
+                c.execute('INSERT INTO signals (user_id, from_game, to_game, suit, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)',
+                         (user_id, game_number, next_game, expected_suit, datetime.now()))
+                signals.append({'type': 'confirmation', 'from_game': from_game, 'to_game': game_number, 'suit': expected_suit, 'next_signal': next_game})
                 predicted_suit = expected_suit
             else:
-                # Сигнал не подтвердился
-                c.execute('''UPDATE signals SET is_active = 0 WHERE id = ?''', (signal_id,))
-                
-                signals.append({
-                    'type': 'failure',
-                    'from_game': from_game,
-                    'to_game': game_number,
-                    'expected': expected_suit,
-                    'actual': first_suit
-                })
+                c.execute('UPDATE signals SET is_active = 0 WHERE id = ?', (signal_id,))
+                signals.append({'type': 'failure', 'from_game': from_game, 'to_game': game_number, 'expected': expected_suit, 'actual': first_suit})
         
-        # Создаем новый сигнал по алгоритму (от текущей игры)
         if first_suit:
             signal_suit = self.get_signal_suit(game_number, first_suit)
-            
-            # Сигнал дается на игру +3 (как в вашем примере 803→806)
             target_game = game_number + 3
-            
-            # Проверяем, нет ли уже активного сигнала на эту игру
-            c.execute('''SELECT id FROM signals 
-                         WHERE user_id = ? AND to_game = ? AND is_active = 1''',
-                      (user_id, target_game))
-            existing = c.fetchone()
-            
-            if not existing:
-                c.execute('''INSERT INTO signals (user_id, from_game, to_game, suit, is_active, created_at)
-                             VALUES (?, ?, ?, ?, 1, ?)''',
-                          (user_id, game_number, target_game, signal_suit, datetime.now()))
-                
-                signals.append({
-                    'type': 'new_signal',
-                    'from_game': game_number,
-                    'to_game': target_game,
-                    'suit': signal_suit
-                })
-                
+            c.execute('SELECT id FROM signals WHERE user_id = ? AND to_game = ? AND is_active = 1', (user_id, target_game))
+            if not c.fetchone():
+                c.execute('INSERT INTO signals (user_id, from_game, to_game, suit, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)',
+                         (user_id, game_number, target_game, signal_suit, datetime.now()))
+                signals.append({'type': 'new_signal', 'from_game': game_number, 'to_game': target_game, 'suit': signal_suit})
                 if not predicted_suit:
                     predicted_suit = signal_suit
-        
+
         conn.commit()
         conn.close()
-        
         return signals, predicted_suit, is_confirmation
-    
-    def get_active_signals(self, user_id):
-        """Получает все активные сигналы"""
-        conn = sqlite3.connect('baccarat_stats.db')
-        c = conn.cursor()
-        
-        c.execute('''SELECT from_game, to_game, suit, created_at 
-                     FROM signals 
-                     WHERE user_id = ? AND is_active = 1
-                     ORDER BY to_game''', (user_id,))
-        
-        signals = c.fetchall()
-        conn.close()
-        
-        return signals
-    
-    def check_game_signals(self, user_id, game_number):
-        """Проверяет, есть ли сигналы на указанную игру"""
-        conn = sqlite3.connect('baccarat_stats.db')
-        c = conn.cursor()
-        
-        c.execute('''SELECT from_game, suit FROM signals 
-                     WHERE user_id = ? AND to_game = ? AND is_active = 1''', 
-                  (user_id, game_number))
-        
-        signals = c.fetchall()
-        conn.close()
-        
-        return signals
 
-# Основной класс для обработки игр
+# Основной анализатор
 class GameAnalyzer:
     def __init__(self):
         self.parser = BaccaratParser()
         self.signal_algorithm = SignalAlgorithm()
     
     def process_game_data(self, text, user_id):
-        """Обрабатывает данные игры"""
-        
-        # Парсим данные
         parsed = self.parser.parse_game(text)
-        
         if not parsed:
-            return None, "Не удалось распарсить данные. Проверьте формат."
+            return None, "❌ Не удалось распарсить данные. Проверьте формат."
         
-        # Проверяем соответствие очков
         points_warning = ""
-        
         if parsed['hand1_score'] != parsed['hand1_calculated']:
-            points_warning += f"⚠️ В первой руке указано {parsed['hand1_score']} очков, но по картам получается {parsed['hand1_calculated']}\n"
-        
+            points_warning += f"⚠️ 1-я рука: указано {parsed['hand1_score']}, по картам {parsed['hand1_calculated']}\n"
         if parsed['hand2_score'] != parsed['hand2_calculated']:
-            points_warning += f"⚠️ Во второй руке указано {parsed['hand2_score']} очков, но по картам получается {parsed['hand2_calculated']}\n"
+            points_warning += f"⚠️ 2-я рука: указано {parsed['hand2_score']}, по картам {parsed['hand2_calculated']}\n"
         
-        total_calculated = (parsed['hand1_calculated'] + parsed['hand2_calculated']) % 10
-        if parsed['total_points'] != total_calculated:
-            points_warning += f"⚠️ Общее количество очков #T{parsed['total_points']}, но сумма очков рук = {total_calculated}\n"
-        
-        # Анализируем масти
         suit_analysis = self.analyze_suits(parsed)
-        
-        # Обрабатываем сигналы
         signals, predicted_suit, is_confirmation = self.signal_algorithm.process_game_signal(
             user_id, parsed['game_number'], parsed['first_suit']
         )
         
-        # Сохраняем в базу данных
-        conn = sqlite3.connect('baccarat_stats.db')
+        conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
         c = conn.cursor()
-        
-        # Сохраняем игру
         c.execute('''INSERT INTO games_analysis 
-                     (user_id, game_number, game_date, hand1_score, hand1_cards, 
-                      hand2_score, hand2_cards, total_points, winner, first_suit, 
-                      predicted_suit, is_confirmation, raw_data)
+                     (user_id, game_number, game_date, hand1_score, hand1_cards, hand2_score, hand2_cards, 
+                      total_points, winner, first_suit, predicted_suit, is_confirmation, raw_data)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (user_id, 
-                   parsed['game_number'],
-                   datetime.now(),
-                   parsed['hand1_score'],
-                   json.dumps(parsed['hand1_cards'], ensure_ascii=False),
-                   parsed['hand2_score'],
-                   json.dumps(parsed['hand2_cards'], ensure_ascii=False),
-                   parsed['total_points'],
-                   parsed['winner'],
-                   parsed['first_suit'],
-                   predicted_suit,
-                   is_confirmation,
-                   parsed['raw_data']))
+                  (user_id, parsed['game_number'], datetime.now(), parsed['hand1_score'],
+                   json.dumps(parsed['hand1_cards'], ensure_ascii=False), parsed['hand2_score'],
+                   json.dumps(parsed['hand2_cards'], ensure_ascii=False), parsed['total_points'],
+                   parsed['winner'], parsed['first_suit'], predicted_suit, is_confirmation, parsed['raw_data']))
         
         game_id = c.lastrowid
-        
-        # Сохраняем статистику мастей
         for suit, count in suit_analysis.items():
-            c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_position)
-                         VALUES (?, ?, ?, ?, ?)''',
-                      (user_id, game_id, suit, count, 'both'))
+            c.execute('INSERT INTO suit_stats (user_id, game_id, suit, count, hand_position) VALUES (?, ?, ?, ?, ?)',
+                     (user_id, game_id, suit, count, 'both'))
         
         conn.commit()
         conn.close()
-        
-        # Формируем результат анализа
-        analysis_result = self.generate_analysis(parsed, signals, points_warning)
-        
-        return parsed, analysis_result
+        return parsed, self.generate_analysis(parsed, signals, points_warning)
     
     def analyze_suits(self, parsed_data):
-        """Анализирует распределение мастей в игре"""
         suit_stats = defaultdict(int)
-        
         for card in parsed_data['hand1_cards'] + parsed_data['hand2_cards']:
             suit_stats[card['suit']] += 1
-        
         return dict(suit_stats)
     
     def generate_analysis(self, parsed, signals, points_warning=""):
-        """Генерирует анализ игры"""
-        
-        result = []
-        result.append("🔍 АНАЛИЗ ИГРЫ")
-        result.append("=" * 50)
-        result.append(f"🎮 Игра #{parsed['game_number']}")
-        result.append("")
+        result = ["🔍 АНАЛИЗ ИГРЫ Макс Москва", "═" * 50, f"🎮 Игра #{parsed['game_number']}", ""]
         
         if points_warning:
-            result.append("⚠️ ВНИМАНИЕ! Несоответствие очков:")
-            result.append(points_warning)
-            result.append("")
+            result.extend(["⚠️ ВНИМАНИЕ! Несоответствие очков:", points_warning, ""])
         
-        # Рука 1
-        result.append("🤚 ПЕРВАЯ РУКА:")
-        cards_str = [f"{c['value']}{c['symbol']}" for c in parsed['hand1_cards']]
-        result.append(f"   Карты: {' '.join(cards_str)}")
-        result.append(f"   Очки: {parsed['hand1_score']}")
-        result.append(f"   Первая масть: {parsed['first_suit']} ⭐")
-        result.append("")
+        cards1 = [f"{c['value']}{c['symbol']}" for c in parsed['hand1_cards']]
+        result.extend(["🤚 ПЕРВАЯ РУКА:", f"   Карты: {' '.join(cards1)}", 
+                      f"   Очки: {parsed['hand1_score']}", f"   Первая масть: {parsed['first_suit']} ⭐", ""])
         
-        # Рука 2
-        result.append("✋ ВТОРАЯ РУКА:")
-        cards_str = [f"{c['value']}{c['symbol']}" for c in parsed['hand2_cards']]
-        result.append(f"   Карты: {' '.join(cards_str)}")
-        result.append(f"   Очки: {parsed['hand2_score']}")
-        result.append("")
+        cards2 = [f"{c['value']}{c['symbol']}" for c in parsed['hand2_cards']]
+        result.extend(["✋ ВТОРАЯ РУКА:", f"   Карты: {' '.join(cards2)}", f"   Очки: {parsed['hand2_score']}"])
         
-        # Победитель
-        winner_text = {
-            'hand1': 'ПЕРВАЯ РУКА ✓',
-            'hand2': 'ВТОРАЯ РУКА ✓',
-            'tie': 'НИЧЬЯ'
-        }.get(parsed['winner'], '')
-        result.append(f"🏆 ПОБЕДИТЕЛЬ: {winner_text}")
-        result.append("")
-        
-        # АНАЛИЗ СИГНАЛОВ
-        result.append("📊 АНАЛИЗ СИГНАЛОВ")
-        result.append("-" * 30)
+        winner_text = {'hand1': 'ПЕРВАЯ РУКА ✓', 'hand2': 'ВТОРАЯ РУКА ✓', 'tie': 'НИЧЬЯ'}.get(parsed['winner'], '')
+        result.extend([f"🏆 ПОБЕДИТЕЛЬ: {winner_text}", "", "📊 АНАЛИЗ СИГНАЛОВ", "─" * 30])
         
         for signal in signals:
             if signal['type'] == 'confirmation':
-                result.append(f"✅ ПОДТВЕРЖДЕНИЕ СИГНАЛА!")
-                result.append(f"   Сигнал от игры #{signal['from_game']} на масть {signal['suit']}")
-                result.append(f"   ✅ СОВПАЛО! Масть {signal['suit']} подтверждена")
-                result.append(f"   🔄 ДАЮ ПОВТОРНЫЙ СИГНАЛ на игру #{signal['next_signal']}")
-                result.append(f"   Ожидаемая масть: {signal['suit']} (повтор)")
-            
+                result.extend([f"✅ ПОДТВЕРЖДЕНИЕ СИГНАЛА!", f"   #{signal['from_game']} → {signal['suit']} ✓",
+                              f"   🔄 Новый сигнал на #{signal['next_signal']}: {signal['suit']}"])
             elif signal['type'] == 'failure':
-                result.append(f"❌ СИГНАЛ НЕ ПОДТВЕРДИЛСЯ")
-                result.append(f"   Ожидалась масть: {signal['expected']}")
-                result.append(f"   Получена масть: {signal['actual']}")
-            
+                result.extend([f"❌ СИГНАЛ НЕ СОВПАЛ", f"   Ожидалось: {signal['expected']}", f"   Было: {signal['actual']}"])
             elif signal['type'] == 'new_signal':
-                result.append(f"🆕 НОВЫЙ СИГНАЛ")
-                result.append(f"   От игры #{signal['from_game']} → на игру #{signal['to_game']}")
-                result.append(f"   Ожидаемая масть: {signal['suit']}")
+                result.extend([f"🆕 НОВЫЙ СИГНАЛ", f"   #{signal['from_game']} → #{signal['to_game']}: {signal['suit']}"])
         
-        if not signals:
-            result.append("   Нет активных сигналов")
-        
-        # Информация о десятке
-        result.append("")
-        result.append("📌 ИНФОРМАЦИЯ О ДЕСЯТКЕ:")
         decade_type = "ЧЕТНЫЙ" if self.signal_algorithm.is_even_decade(parsed['game_number']) else "НЕЧЕТНЫЙ"
-        result.append(f"   Игра #{parsed['game_number']} - {decade_type} десяток")
+        rules = "пики↔бубны, черви↔трефы" if decade_type == "ЧЕТНЫЙ" else "пики↔трефы, черви↔бубны"
+        result.extend(["", f"📌 ДЕСЯТОК: {decade_type}", f"   Правило: {rules}"])
         
-        if self.signal_algorithm.is_even_decade(parsed['game_number']):
-            result.append("   Правило четного десятка: пики↔бубны, черви↔трефы")
-        else:
-            result.append("   Правило нечетного десятка: пики↔трефы, черви↔бубны")
-        
-        return "\n".join(result)
+        return '\n'.join(result)
 
-# Создаем клавиатуру
-def get_main_keyboard():
-    keyboard = [
-        [KeyboardButton("📊 Ввести игру"), KeyboardButton("📈 Моя статистика")],
-        [KeyboardButton("📊 Активные сигналы"), KeyboardButton("📊 Проверка алгоритма")],
-        [KeyboardButton("📋 История игр"), KeyboardButton("🔮 Прогноз на игру")],
-        [KeyboardButton("ℹ️ Помощь"), KeyboardButton("📝 Пример формата")]
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+# ═══════════════════════════════════════════════════════════════════════════════
+# КОМАНДЫ БОТА "МАКС МОСКВА"
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def get_back_keyboard():
-    keyboard = [[KeyboardButton("◀️ Назад")]]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-# Обработчик ошибок
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
-    logger.error(f"Ошибка: {context.error}")
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add('📊 Ввести игру', '📈 Статистика')
+    markup.add('🔔 Сигналы', '🔮 Прогноз')
+    markup.add('📋 История', '🧪 Тест алгоритма')
+    markup.add('ℹ️ Помощь')
     
-    # Отправляем сообщение пользователю, если это возможно
-    if update and update.effective_chat:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Произошла внутренняя ошибка. Пожалуйста, попробуйте еще раз."
-        )
+    bot.send_message(message.chat.id,
+        "🎰 <b>МАКС МОСКВА - БОТ БАККАРЫ</b>\n\n"
+        "🔥 Система сигналов:\n"
+        "• N → N+3 (первичный)\n"
+        "• N+1 (повтор при подтверждении)\n\n"
+        "Выберите действие:", parse_mode='HTML', reply_markup=markup)
 
-# Обработчики команд
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Добро пожаловать в бота-анализатор баккары!\n\n"
-        "СИСТЕМА СИГНАЛОВ:\n"
-        "• Первый сигнал: от игры N → на игру N+3\n"
-        "• При подтверждении: повторный сигнал на N+1\n"
-        "• Пример: #803(пики) → сигнал на #806(бубны)\n"
-        "• #806(бубны) подтверждение → повторный сигнал на #807(бубны)\n\n"
-        "Выберите действие:",
-        reply_markup=get_main_keyboard()
-    )
+@bot.message_handler(func=lambda m: 'Ввести игру' in m.text)
+def enter_game(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True).add('◀️ Назад')
+    bot.send_message(message.chat.id,
+        "📝 <b>ФОРМАТ:</b>\n"
+        "#N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9\n\n"
+        "Введите данные игры:", parse_mode='HTML', reply_markup=markup)
+    bot.register_next_step_handler(message, process_game_input)
 
-async def enter_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📝 Введите данные игры в вашем формате:\n\n"
-        "Пример 1: #N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩\n"
-        "Пример 2: #N806. 8(5♠️ 3♦️) 🔰 8(3♠️ 5♦️) #T16 #X🟡 #R\n\n"
-        "Где:\n"
-        "#N803 - номер игры\n"
-        "✅ или 🔰 - обозначение победителя\n"
-        "#T9 - общее количество очков",
-        reply_markup=get_back_keyboard()
-    )
-    return ENTERING_GAME
-
-async def process_game_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return ConversationHandler.END
-    
-    if update.message.text == '◀️ Назад':
-        await start(update, context)
-        return ConversationHandler.END
+def process_game_input(message):
+    if message.text == '◀️ Назад':
+        start(message)
+        return
     
     analyzer = GameAnalyzer()
-    parsed, analysis = analyzer.process_game_data(update.message.text, update.message.from_user.id)
+    parsed, analysis = analyzer.process_game_data(message.text, message.from_user.id)
     
-    if parsed:
-        await update.message.reply_text(analysis)
-    else:
-        await update.message.reply_text(
-            "❌ Ошибка в формате. Попробуйте снова или нажмите '📝 Пример формата'"
-        )
-    
-    await start(update, context)
-    return ConversationHandler.END
+    bot.send_message(message.chat.id, analysis, parse_mode='HTML')
+    start(message)
 
-async def show_active_signals(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return
-    
-    algorithm = SignalAlgorithm()
-    signals = algorithm.get_active_signals(update.message.from_user.id)
+@bot.message_handler(func=lambda m: 'Сигналы' in m.text)
+def show_signals(message):
+    conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute('SELECT from_game, to_game, suit, created_at FROM signals WHERE user_id = ? AND is_active = 1 ORDER BY to_game', 
+              (message.from_user.id,))
+    signals = c.fetchall()
+    conn.close()
     
     if not signals:
-        await update.message.reply_text("📭 Нет активных сигналов")
+        bot.send_message(message.chat.id, "📭 Нет активных сигналов")
         return
     
-    result = ["📊 АКТИВНЫЕ СИГНАЛЫ", "=" * 40, ""]
-    
+    result = ["🔔 <b>АКТИВНЫЕ СИГНАЛЫ</b>", "═" * 30]
     for from_game, to_game, suit, created_at in signals:
-        created = datetime.fromisoformat(created_at).strftime('%d.%m %H:%M')
-        result.append(f"🆓 Сигнал от игры #{from_game}")
-        result.append(f"   → на игру #{to_game}")
-        result.append(f"   Ожидаемая масть: {suit}")
-        result.append(f"   Создан: {created}")
-        result.append("")
+        created = datetime.fromisoformat(created_at).strftime('%H:%M')
+        result.extend([f"#{from_game} → <b>#{to_game}</b>: {suit}", f"   ⏰ {created}", ""])
     
-    await update.message.reply_text("\n".join(result))
+    bot.send_message(message.chat.id, '\n'.join(result), parse_mode='HTML')
 
-async def predict_for_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return ConversationHandler.END
-    
-    await update.message.reply_text(
-        "Введите номер игры для прогноза:",
-        reply_markup=get_back_keyboard()
-    )
-    return ENTERING_PREDICTION
+@bot.message_handler(func=lambda m: 'Прогноз' in m.text)
+def predict_game(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True).add('◀️ Назад')
+    bot.send_message(message.chat.id, "🔮 Номер игры для прогноза:", reply_markup=markup)
+    bot.register_next_step_handler(message, process_predict)
 
-async def process_prediction_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return ConversationHandler.END
-    
-    if update.message.text == '◀️ Назад':
-        await start(update, context)
-        return ConversationHandler.END
+def process_predict(message):
+    if message.text == '◀️ Назад':
+        start(message)
+        return
     
     try:
-        game_number = int(update.message.text)
-    except:
-        await update.message.reply_text("❌ Введите корректный номер игры")
-        await start(update, context)
-        return ConversationHandler.END
-    
-    algorithm = SignalAlgorithm()
-    signals = algorithm.check_game_signals(update.message.from_user.id, game_number)
-    
-    if not signals:
-        await update.message.reply_text(f"📭 Нет активных сигналов на игру #{game_number}")
-    else:
-        result = [f"🔮 ПРОГНОЗ НА ИГРУ #{game_number}", "=" * 40, ""]
-        for from_game, suit in signals:
-            result.append(f"🆓 Сигнал от игры #{from_game}")
-            result.append(f"   Ожидаемая масть: {suit}")
-            result.append("")
-        
-        # Проверяем, есть ли запись этой игры
-        conn = sqlite3.connect('baccarat_stats.db')
+        game_num = int(message.text)
+        conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
         c = conn.cursor()
-        c.execute('''SELECT first_suit FROM games_analysis 
-                     WHERE user_id = ? AND game_number = ?''', 
-                  (update.message.from_user.id, game_number))
+        c.execute('SELECT from_game, suit FROM signals WHERE user_id = ? AND to_game = ? AND is_active = 1', 
+                 (message.from_user.id, game_num))
+        signals = c.fetchall()
+        
+        c.execute('SELECT first_suit FROM games_analysis WHERE user_id = ? AND game_number = ?', 
+                 (message.from_user.id, game_num))
         game_data = c.fetchone()
         conn.close()
         
-        if game_data:
-            actual_suit = game_data[0]
-            result.append(f"📊 Игра уже сыграна:")
-            result.append(f"   Фактическая масть: {actual_suit}")
-            
-            if actual_suit == suit:
-                result.append("   ✅ ПРОГНОЗ ПОДТВЕРДИЛСЯ!")
-            else:
-                result.append("   ❌ ПРОГНОЗ НЕ ПОДТВЕРДИЛСЯ")
-        
-        await update.message.reply_text("\n".join(result))
+        if not signals:
+            bot.send_message(message.chat.id, f"📭 Нет сигналов на игру #{game_num}")
+        else:
+            result = [f"🔮 <b>ПРОГНОЗ #{game_num}</b>", "═" * 30]
+            for from_game, suit in signals:
+                result.extend([f"💎 #{from_game} → <b>{suit}</b>", ""])
+            if game_data:
+                actual = game_data[0]
+                status = "✅ УДАЧНО!" if actual == signals[0][1] else "❌ НЕ СОВПАЛО"
+                result.append(f"📊 Факт: <b>{actual}</b> {status}")
+            bot.send_message(message.chat.id, '\n'.join(result), parse_mode='HTML')
+    except:
+        bot.send_message(message.chat.id, "❌ Неверный номер игры")
     
-    await start(update, context)
-    return ConversationHandler.END
+    start(message)
 
-async def check_algorithm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверяет работу алгоритма на истории игр"""
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return
-    
-    conn = sqlite3.connect('baccarat_stats.db')
+@bot.message_handler(func=lambda m: 'Статистика' in m.text)
+def show_stats(message):
+    conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
     c = conn.cursor()
     
-    # Получаем все игры с первой мастью
-    c.execute('''SELECT game_number, first_suit 
-                 FROM games_analysis 
-                 WHERE user_id = ? AND first_suit IS NOT NULL
-                 ORDER BY game_number''', (update.message.from_user.id,))
+    c.execute('SELECT COUNT(*), SUM(winner = "hand1"), SUM(winner = "hand2"), SUM(winner = "tie") FROM games_analysis WHERE user_id = ?', 
+              (message.from_user.id,))
+    total, h1, h2, ties = c.fetchone() or (0,0,0,0)
     
-    games = c.fetchall()
+    c.execute('SELECT COUNT(*), SUM(is_confirmed) FROM signals WHERE user_id = ?', (message.from_user.id,))
+    sig_total, sig_conf = c.fetchone() or (0,0)
     conn.close()
     
-    if len(games) < 3:
-        await update.message.reply_text("Недостаточно данных для проверки. Нужно минимум 3 игры.")
-        return
-    
-    algorithm = SignalAlgorithm()
-    game_dict = {num: suit for num, suit in games}
-    
-    results = []
-    correct_predictions = 0
-    total_predictions = 0
-    
-    for i in range(len(games) - 1):
-        current_num, current_suit = games[i]
-        
-        # Первый сигнал (N → N+3)
-        target1 = current_num + 3
-        if target1 in game_dict:
-            expected = algorithm.get_signal_suit(current_num, current_suit)
-            actual = game_dict[target1]
-            
-            is_correct = (expected == actual)
-            if is_correct:
-                correct_predictions += 1
-            total_predictions += 1
-            
-            results.append({
-                'from': current_num,
-                'to': target1,
-                'type': 'первичный',
-                'expected': expected,
-                'actual': actual,
-                'correct': is_correct
-            })
-            
-            # Если первичный сигнал подтвердился, проверяем повторный (на +1)
-            if is_correct:
-                target2 = target1 + 1
-                if target2 in game_dict:
-                    expected_repeat = expected  # Та же масть
-                    actual_repeat = game_dict[target2]
-                    
-                    is_repeat_correct = (expected_repeat == actual_repeat)
-                    if is_repeat_correct:
-                        correct_predictions += 1
-                    total_predictions += 1
-                    
-                    results.append({
-                        'from': target1,
-                        'to': target2,
-                        'type': 'повторный',
-                        'expected': expected_repeat,
-                        'actual': actual_repeat,
-                        'correct': is_repeat_correct
-                    })
-    
-    if total_predictions == 0:
-        await update.message.reply_text("Нет пар для проверки")
-        return
-    
-    report = ["📊 ПРОВЕРКА АЛГОРИТМА", "=" * 50, ""]
-    
-    for r in results:
-        mark = "✅" if r['correct'] else "❌"
-        report.append(f"{mark} {r['type'].upper()} сигнал: {r['from']} → {r['to']}")
-        report.append(f"   Ожидалось: {r['expected']}, Факт: {r['actual']}")
-        report.append("")
-    
-    accuracy = (correct_predictions / total_predictions * 100)
-    report.append("📈 ИТОГИ:")
-    report.append(f"   Всего проверок: {total_predictions}")
-    report.append(f"   Совпадений: {correct_predictions}")
-    report.append(f"   Точность: {accuracy:.1f}%")
-    
-    bar = '█' * int(accuracy / 5) + '░' * (20 - int(accuracy / 5))
-    report.append(f"   [{bar}]")
-    
-    await update.message.reply_text("\n".join(report))
+    stats = f"""📈 <b>СТАТИСТИКА МАКС МОСКВА</b>
+{'═' * 25}
+🎮 Игр: <b>{total}</b>
+1-я рука: <b>{h1}</b> ({h1/total*100:.0f}%)
+2-я рука: <b>{h2}</b> ({h2/total*100:.0f}%)
+Ничьи: <b>{ties}</b>
 
-async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return
-    
-    conn = sqlite3.connect('baccarat_stats.db')
-    c = conn.cursor()
-    
-    # Общая статистика
-    c.execute('''SELECT COUNT(*), 
-                        SUM(CASE WHEN winner = 'hand1' THEN 1 ELSE 0 END),
-                        SUM(CASE WHEN winner = 'hand2' THEN 1 ELSE 0 END),
-                        SUM(CASE WHEN winner = 'tie' THEN 1 ELSE 0 END)
-                 FROM games_analysis WHERE user_id = ?''', (update.message.from_user.id,))
-    
-    total, h1_wins, h2_wins, ties = c.fetchone()
-    
-    if not total:
-        await update.message.reply_text("Нет данных")
-        conn.close()
-        return
-    
-    # Статистика сигналов
-    c.execute('''SELECT COUNT(*), SUM(is_confirmed) FROM signals WHERE user_id = ?''', 
-              (update.message.from_user.id,))
-    total_signals, confirmed = c.fetchone()
-    
-    stats = f"📊 ВАША СТАТИСТИКА\n"
-    stats += "=" * 40 + "\n"
-    stats += f"Всего игр: {total}\n"
-    stats += f"Победы 1-й руки: {h1_wins} ({h1_wins/total*100:.1f}%)\n"
-    stats += f"Победы 2-й руки: {h2_wins} ({h2_wins/total*100:.1f}%)\n"
-    stats += f"Ничьи: {ties} ({ties/total*100:.1f}%)\n\n"
-    
-    if total_signals:
-        stats += f"📊 СТАТИСТИКА СИГНАЛОВ\n"
-        stats += f"Всего сигналов: {total_signals}\n"
-        stats += f"Подтверждено: {confirmed or 0}\n"
-        if total_signals > 0:
-            stats += f"Точность: {(confirmed or 0)/total_signals*100:.1f}%\n"
-    
-    await update.message.reply_text(stats)
-    conn.close()
+🔔 Сигналов: <b>{sig_total}</b>
+✅ Подтверждено: <b>{sig_conf}</b> ({sig_conf/sig_total*100:.0f}%)
+"""
+    bot.send_message(message.chat.id, stats, parse_mode='HTML')
 
-async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return
-    
-    conn = sqlite3.connect('baccarat_stats.db')
+@bot.message_handler(func=lambda m: m.text in ['📋 История', 'История'])
+def show_history(message):
+    conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
     c = conn.cursor()
-    
-    c.execute('''SELECT game_number, first_suit, is_confirmation, predicted_suit, raw_data
-                 FROM games_analysis 
-                 WHERE user_id = ? 
-                 ORDER BY game_number DESC 
-                 LIMIT 20''', (update.message.from_user.id,))
-    
+    c.execute('SELECT game_number, first_suit, is_confirmation, predicted_suit FROM games_analysis WHERE user_id = ? ORDER BY game_number DESC LIMIT 15', 
+              (message.from_user.id,))
     games = c.fetchall()
     conn.close()
     
     if not games:
-        await update.message.reply_text("Нет игр")
+        bot.send_message(message.chat.id, "📭 Нет игр")
         return
     
-    history = ["📋 ИСТОРИЯ ИГР", "=" * 50, ""]
+    result = ["📋 <b>ПОСЛЕДНИЕ ИГРЫ</b>", "─" * 25]
+    for num, suit, conf, pred in games:
+        mark = "✅" if conf else ""
+        pred_text = f" → <b>{pred}</b>" if pred else ""
+        result.append(f"#{num}: <b>{suit}</b>{mark}{pred_text}")
     
-    for game_num, first_suit, is_conf, pred_suit, raw in games:
-        confirm_mark = " ✓" if is_conf else ""
-        pred_mark = f" → прогноз {pred_suit}" if pred_suit else ""
-        history.append(f"#{game_num}: {first_suit}{confirm_mark}{pred_mark}")
-        history.append(f"   {raw[:60]}...")
-        history.append("")
-    
-    await update.message.reply_text("\n".join(history))
+    bot.send_message(message.chat.id, '\n'.join(result), parse_mode='HTML')
 
-async def show_example(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
+@bot.message_handler(func=lambda m: 'Тест алгоритма' in m.text)
+def test_algorithm(message):
+    conn = sqlite3.connect('baccarat_stats.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute('SELECT game_number, first_suit FROM games_analysis WHERE user_id = ? AND first_suit IS NOT NULL ORDER BY game_number', 
+              (message.from_user.id,))
+    games = c.fetchall()
+    conn.close()
+    
+    if len(games) < 4:
+        bot.send_message(message.chat.id, "Нужно минимум 4 игры для теста")
         return
     
-    example = """
-📝 ПРИМЕРЫ ФОРМАТА:
-
-1. Обычная игра:
-#N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩
-
-2. Игра с подтверждением:
-#N806. 8(5♠️ 3♦️) 🔰 8(3♠️ 5♦️) #T16 #X🟡 #R
-
-СИСТЕМА СИГНАЛОВ:
-
-🔵 ПЕРВИЧНЫЙ СИГНАЛ:
-• Игра #803: первая масть ПИКИ
-• Четный десяток (80) → пики дают бубны
-• Сигнал на игру #806: БУБНЫ
-
-🟢 ПОДТВЕРЖДЕНИЕ:
-• Игра #806: первая масть БУБНЫ ✓
-• Сигнал подтвердился!
-• ДАЕМ ПОВТОРНЫЙ СИГНАЛ на #807: БУБНЫ
-
-ПРАВИЛА:
-Четные десятки: пики↔бубны, черви↔трефы
-Нечетные десятки: пики↔трефы, черви↔бубны
-    """
-    await update.message.reply_text(example)
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return
+    algorithm = SignalAlgorithm()
+    correct, total = 0, 0
     
-    help_text = """
-🤖 БОТ-АНАЛИЗАТОР БАККАРЫ
-    С СИСТЕМОЙ СИГНАЛОВ
+    for i in range(len(games)-3):
+        curr_num, curr_suit = games[i]
+        target = curr_num + 3
+        if next((g for g in games[i+3:] if g[0] == target), None):
+            expected = algorithm.get_signal_suit(curr_num, curr_suit)
+            actual = next(g[1] for g in games if g[0] == target)
+            total += 1
+            if expected == actual: correct += 1
+    
+    accuracy = correct/total*100 if total else 0
+    bot.send_message(message.chat.id, 
+        f"🧪 <b>ТЕСТ АЛГОРИТМА</b>\n"
+        f"Проверок: {total}\n"
+        f"✅ Совпадений: {correct}\n"
+        f"📊 Точность: <b>{accuracy:.1f}%</b>", parse_mode='HTML')
 
-ОСНОВНЫЕ ФУНКЦИИ:
-• 📊 Ввести игру - запись игры в вашем формате
-• 📈 Моя статистика - общая статистика
-• 📊 Активные сигналы - текущие ожидаемые сигналы
-• 🔮 Прогноз на игру - проверить сигналы на конкретную игру
-• 📊 Проверка алгоритма - тест на истории
-• 📋 История игр - последние 20 игр
+@bot.message_handler(func=lambda m: 'Помощь' in m.text)
+def show_help(message):
+    help_text = """ℹ️ <b>МАКС МОСКВА - ПОМОЩЬ</b>
 
-СИСТЕМА СИГНАЛОВ:
+🎯 <b>СИСТЕМА СИГНАЛОВ:</b>
+• Первичный: игра N → N+3
+• Повторный: при ✓ → N+1 (та же масть)
 
-1️⃣ ПЕРВИЧНЫЙ СИГНАЛ:
-   От игры N → на игру N+3
-   Масть определяется по правилам десятков
-
-2️⃣ ПРИ ПОДТВЕРЖДЕНИИ:
-   Если сигнал совпал → повторный сигнал на N+1
-   С той же мастью!
-
-ПРАВИЛА ПО ДЕСЯТКАМ:
-
-ЧЕТНЫЕ десятки (20,40,60,80...):
+🔢 <b>ПРАВИЛА ДЕСЯТКОВ:</b>
+ЧЕТНЫЕ (20,40,60,80):
 • пики ↔ бубны
 • черви ↔ трефы
 
-НЕЧЕТНЫЕ десятки (10,30,50,70...):
+НЕЧЕТНЫЕ (10,30,50,70):
 • пики ↔ трефы
 • черви ↔ бубны
 
-ПРИМЕР:
-#803(пики) → сигнал на #806(бубны)
-#806(бубны) подтверждение → сигнал на #807(бубны)
-    """
-    await update.message.reply_text(help_text)
+📝 <b>ФОРМАТ ВВОДА:</b>
+#N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9"""
+    
+    bot.send_message(message.chat.id, help_text, parse_mode='HTML')
 
-async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return
-    
-    await start(update, context)
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
-    return ConversationHandler.END
-
-# Обработчик текстовых сообщений для главного меню
-async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик для главного меню с проверкой типа сообщения"""
-    # Проверяем, что это текстовое сообщение
-    if not update.message or not update.message.text:
-        return ConversationHandler.END
-    
-    text = update.message.text
-    
-    if text == '📊 Ввести игру':
-        return await enter_game(update, context)
-    elif text == '📈 Моя статистика':
-        await show_stats(update, context)
-    elif text == '📊 Активные сигналы':
-        await show_active_signals(update, context)
-    elif text == '📊 Проверка алгоритма':
-        await check_algorithm(update, context)
-    elif text == '📋 История игр':
-        await show_history(update, context)
-    elif text == '🔮 Прогноз на игру':
-        return await predict_for_game(update, context)
-    elif text == 'ℹ️ Помощь':
-        await help_command(update, context)
-    elif text == '📝 Пример формата':
-        await show_example(update, context)
-    elif text == '◀️ Назад':
-        await start(update, context)
-    else:
-        await update.message.reply_text("Используйте кнопки меню")
-    
-    return ConversationHandler.END
-
-def main():
-    # Инициализация БД
-    init_db()
-    
-    # Создание приложения
-    application = Application.builder().token(TOKEN).build()
-    
-    # Добавляем обработчик ошибок
-    application.add_error_handler(error_handler)
-    
-    # Создание ConversationHandler для ввода игры
-    game_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Text("📊 Ввести игру"), enter_game)],
-        states={
-            ENTERING_GAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_game_input)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel), MessageHandler(filters.Text("◀️ Назад"), cancel)]
-    )
-    
-    # Создание ConversationHandler для прогноза
-    prediction_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Text("🔮 Прогноз на игру"), predict_for_game)],
-        states={
-            ENTERING_PREDICTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_prediction_request)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel), MessageHandler(filters.Text("◀️ Назад"), cancel)]
-    )
-    
-    # Регистрация обработчиков
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(game_conv_handler)
-    application.add_handler(prediction_conv_handler)
-    application.add_handler(MessageHandler(filters.Text("📈 Моя статистика"), show_stats))
-    application.add_handler(MessageHandler(filters.Text("📊 Активные сигналы"), show_active_signals))
-    application.add_handler(MessageHandler(filters.Text("📊 Проверка алгоритма"), check_algorithm))
-    application.add_handler(MessageHandler(filters.Text("📋 История игр"), show_history))
-    application.add_handler(MessageHandler(filters.Text("ℹ️ Помощь"), help_command))
-    application.add_handler(MessageHandler(filters.Text("📝 Пример формата"), show_example))
-    application.add_handler(MessageHandler(filters.Text("◀️ Назад"), go_back))
-    
-    # Обработчик для всех остальных текстовых сообщений (главное меню)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main_menu))
-    
-    # Запуск бота
-    print("🤖 Бот запущен с СИСТЕМОЙ СИГНАЛОВ (python-telegram-bot)...")
-    print("📊 Первичный сигнал: N → N+3")
-    print("📊 Повторный сигнал: при подтверждении N+1")
-    print("Пример: 803(пики) → 806(бубны) → 807(бубны)")
-    
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+@bot.message_handler(func=lambda m: m.text == '◀️ Назад')
+def go_back(message):
+    start(message)
 
 if __name__ == '__main__':
-    main()
+    init_db()
+    print("🤖 Макс Москва - Бот Баккары запущен!")
+    print("📱 Сигналы: N → N+3 | Повтор: N+1")
+    bot.infinity_polling()
