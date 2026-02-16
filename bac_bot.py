@@ -534,6 +534,18 @@ def get_back_keyboard():
     keyboard = [[KeyboardButton("◀️ Назад")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# Обработчик ошибок
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ошибок"""
+    logger.error(f"Ошибка: {context.error}")
+    
+    # Отправляем сообщение пользователю, если это возможно
+    if update and update.effective_chat:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Произошла внутренняя ошибка. Пожалуйста, попробуйте еще раз."
+        )
+
 # Обработчики команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -561,6 +573,10 @@ async def enter_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTERING_GAME
 
 async def process_game_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return ConversationHandler.END
+    
     if update.message.text == '◀️ Назад':
         await start(update, context)
         return ConversationHandler.END
@@ -579,6 +595,10 @@ async def process_game_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 async def show_active_signals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     algorithm = SignalAlgorithm()
     signals = algorithm.get_active_signals(update.message.from_user.id)
     
@@ -599,6 +619,10 @@ async def show_active_signals(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(result))
 
 async def predict_for_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return ConversationHandler.END
+    
     await update.message.reply_text(
         "Введите номер игры для прогноза:",
         reply_markup=get_back_keyboard()
@@ -606,6 +630,10 @@ async def predict_for_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTERING_PREDICTION
 
 async def process_prediction_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return ConversationHandler.END
+    
     if update.message.text == '◀️ Назад':
         await start(update, context)
         return ConversationHandler.END
@@ -655,6 +683,10 @@ async def process_prediction_request(update: Update, context: ContextTypes.DEFAU
 
 async def check_algorithm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверяет работу алгоритма на истории игр"""
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     conn = sqlite3.connect('baccarat_stats.db')
     c = conn.cursor()
     
@@ -746,6 +778,10 @@ async def check_algorithm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(report))
 
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     conn = sqlite3.connect('baccarat_stats.db')
     c = conn.cursor()
     
@@ -786,6 +822,10 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     conn = sqlite3.connect('baccarat_stats.db')
     c = conn.cursor()
     
@@ -814,6 +854,10 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(history))
 
 async def show_example(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     example = """
 📝 ПРИМЕРЫ ФОРМАТА:
 
@@ -842,6 +886,10 @@ async def show_example(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(example)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     help_text = """
 🤖 БОТ-АНАЛИЗАТОР БАККАРЫ
     С СИСТЕМОЙ СИГНАЛОВ
@@ -881,6 +929,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text)
 
 async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return
+    
     await start(update, context)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -889,6 +941,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Обработчик текстовых сообщений для главного меню
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик для главного меню с проверкой типа сообщения"""
+    # Проверяем, что это текстовое сообщение
+    if not update.message or not update.message.text:
+        return ConversationHandler.END
+    
     text = update.message.text
     
     if text == '📊 Ввести игру':
@@ -920,6 +977,9 @@ def main():
     
     # Создание приложения
     application = Application.builder().token(TOKEN).build()
+    
+    # Добавляем обработчик ошибок
+    application.add_error_handler(error_handler)
     
     # Создание ConversationHandler для ввода игры
     game_conv_handler = ConversationHandler(
