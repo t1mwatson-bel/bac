@@ -1,759 +1,900 @@
-# -*- coding: utf-8 -*-
-import logging
-import re
-import random
-import asyncio
-import os
-import sys
-import fcntl
-import urllib.request
-import urllib.error
-import json
+Макс Москва, [16.02.2026 19:02]
+import telebot
+from telebot import types
+import sqlite3
 from datetime import datetime
-from collections import defaultdict
-from telegram import Update
-from telegram.ext import (
-    Application,
-    MessageHandler,
-    filters,
-    ContextTypes
-)
-from telegram.error import Conflict
+import matplotlib.pyplot as plt
+import io
+import re
+from collections import defaultdict, Counter
+import json
+import math
 
-# === НАСТРОЙКИ ===
+# Конфигурация
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 ADMIN_ID = 683219603
 
-# Уникальный lock-файл для этого бота
-LOCK_FILE = f'/tmp/bot1_{TOKEN[-10:]}.lock'
-
-MAX_GAME_NUMBER = 1440
-
-# Время ожидания добора карт (в секундах)
-DRAW_WAIT_TIME = 30
-
-FUNNY_PHRASES = [
-    "🎰 ВА-БАНК! ОБНАРУЖЕН СУПЕР ПАТТЕРН! 🎰",
-    "🚀 РАКЕТА ЗАПУЩЕНА! ЛЕТИМ ЗА ПОБЕДОЙ! 🚀",
-    "💎 АЛМАЗНЫЙ СИГНАЛ ПРИЛЕТЕЛ! 💎",
-    "🎯 СНАЙПЕР В ЦЕЛИ! ТОЧНЫЙ РАСЧЕТ! 🎯",
-    "🔥 ГОРИМ ЖЕЛАНИЕМ ПОБЕДИТЬ! 🔥"
-]
-
-WIN_PHRASES = [
-    "🎉 УРА! СТРАТЕГИЯ СРАБОТАЛА! 🎉",
-    "💰 КАЗИНО В ШОКЕ! МЫ ВЫИГРАЛИ! 💰",
-    "🥇 ЗОЛОТАЯ ПОБЕДА! ТОЧНО В ЦЕЛЬ! 🥇",
-    "🏅 ОЛИМПИЙСКАЯ ТОЧНОСТЬ! ПОБЕДА! 🏅",
-    "🎯 БИНГО! ПОПАДАНИЕ В ЯБЛОЧКО! 🎯"
-]
-
-LOSS_PHRASES = [
-    "😔 УВЫ, НЕ СЕГОДНЯ...",
-    "🌧️ НЕБО ПЛАЧЕТ, И МЫ ТОЖЕ...",
-    "🍀 НЕ ПОВЕЗЛО В ЭТОТ РАЗ...",
-    "🎭 ДРАМА... НО МЫ НЕ СДАЕМСЯ!",
-    "🤡 ЦИРК ВЕРНУЛСЯ... ШУТКА НЕ УДАЛАСЬ"
-]
-
-DRAW_PHRASES = [
-    "🔄 ИГРОК ДОБИРАЕТ КАРТУ! ЖДЕМ РЕЗУЛЬТАТ...",
-    "🎴 ДОБОР! СМОТРИМ, ЧТО ВЫПАДЕТ...",
-    "🤞 ИГРОК РИСКУЕТ И ДОБИРАЕТ!",
-    "⚡️ ВОЛНУЮЩИЙ МОМЕНТ - ДОБОР КАРТЫ!"
-]
-
-SUITS = ["♥️", "♠️", "♣️", "♦️"]
-
-# НОВЫЕ ПРАВИЛА СМЕНЫ МАСТЕЙ (Красная -> Красная, Черная -> Черная)
-SUIT_CHANGE_RULES = {
-    '♥️': '♦️',  # Черва (красная) -> Бубна (красная)
-    '♦️': '♥️',  # Бубна (красная) -> Черва (красная)
-    '♠️': '♣️',  # Пики (черная) -> Трефа (черная)
-    '♣️': '♠️'   # Трефа (черная) -> Пики (черная)
-}
-
-# НОВЫЙ ДИАПАЗОН (1-9, 20-29, 40-49 и т.д.)
-VALID_RANGES = [
-    (1, 9), (20, 29), (40, 49), (60, 69), (80, 89),
-    (100, 109), (120, 129), (140, 149), (160, 169), (180, 189),
-    (200, 209), (220, 229), (240, 249), (260, 269), (280, 289),
-    (300, 309), (320, 329), (340, 349), (360, 369), (380, 389),
-    (400, 409), (420, 429), (440, 449), (460, 469), (480, 489),
-    (500, 509), (520, 529), (540, 549), (560, 569), (580, 589),
-    (600, 609), (620, 629), (640, 649), (660, 669), (680, 689),
-    (700, 709), (720, 729), (740, 749), (760, 769), (780, 789),
-    (800, 809), (820, 829), (840, 849), (860, 869), (880, 889),
-    (900, 909), (920, 929), (940, 949), (960, 969), (980, 989),
-    (1000, 1009), (1020, 1029), (1040, 1049), (1060, 1069), (1080, 1089),
-    (1100, 1109), (1120, 1129), (1140, 1149), (1160, 1169), (1180, 1189),
-    (1200, 1209), (1220, 1229), (1240, 1249), (1260, 1269), (1280, 1289),
-    (1300, 1309), (1320, 1329), (1340, 1349), (1360, 1369), (1380, 1389),
-    (1400, 1409), (1420, 1429), (1440, 1440)
-]
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-pending_games = {}
-prediction_messages = {}
-lock_fd = None
-
-# Статистика замен
-card_stats = defaultdict(lambda: defaultdict(int))
-
-# Хранилище для отслеживания игр в процессе добора
-pending_draws = {}
-
-def is_valid_game(game_num):
-    """Проверяет, входит ли номер игры в допустимые диапазоны (для создания паттернов)"""
-    for start, end in VALID_RANGES:
-        if start <= game_num <= end:
-            return True
-    return False
-
-def acquire_lock():
-    """Блокировка для предотвращения множественных запусков"""
-    global lock_fd
-    try:
-        lock_fd = open(LOCK_FILE, 'w')
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        logger.info(f"🔒 Блокировка получена: {LOCK_FILE}")
-        return True
-    except (IOError, OSError):
-        logger.error(f"❌ Бот уже запущен (lock файл: {LOCK_FILE})")
-        return False
-
-def release_lock():
-    """Освобождение блокировки"""
-    global lock_fd
-    if lock_fd:
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            lock_fd.close()
-            if os.path.exists(LOCK_FILE):
-                os.unlink(LOCK_FILE)
-            logger.info("🔓 Блокировка освобождена")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при освобождении блокировки: {e}")
-
-def check_bot_token():
-    """Проверка токена бота"""
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/getMe"
-        req = urllib.request.Request(url, method='GET')
-        
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            if data.get('ok'):
-                bot_info = data['result']
-                logger.info(f"✅ Бот @{bot_info['username']} авторизован")
-                return True
-            else:
-                logger.error(f"❌ Ошибка авторизации: {data}")
-                return False
-    except Exception as e:
-        logger.error(f"❌ Ошибка при проверке токена: {e}")
-        return False
-
-def extract_left_part(text):
-    """Извлекает левую часть сообщения (руку игрока)"""
-    # Ищем разделители, после которых идет правая рука
-    separators = [' 👈 ', '👈', ' - ', ' – ', '—', '-', '👉👈', '👈👉', '🔰']
+# Инициализация базы данных
+def init_db():
+    conn = sqlite3.connect('baccarat_stats.db')
+    c = conn.cursor()
     
-    for sep in separators:
-        if sep in text:
-            parts = text.split(sep, 1)
-            left_part = parts[0].strip()
-            # Убираем номер игры из левой части если он там есть
-            left_part = re.sub(r'#N\d+\.?\s*', '', left_part)
-            return left_part
+    # Таблица для игр в вашем формате
+    c.execute('''CREATE TABLE IF NOT EXISTS games_analysis
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  game_number INTEGER,
+                  game_date TIMESTAMP,
+                  hand1_score INTEGER,
+                  hand1_cards TEXT,
+                  hand2_score INTEGER,
+                  hand2_cards TEXT,
+                  total_points INTEGER,
+                  winner TEXT,
+                  first_suit TEXT,
+                  predicted_suit TEXT,
+                  is_confirmation BOOLEAN DEFAULT 0,
+                  raw_data TEXT)''')
     
-    return text.strip()
+    # Таблица для статистики мастей
+    c.execute('''CREATE TABLE IF NOT EXISTS suit_stats
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  game_id INTEGER,
+                  suit TEXT,
+                  count INTEGER,
+                  hand_position TEXT,
+                  FOREIGN KEY (game_id) REFERENCES games_analysis (id))''')
+    
+    # Таблица для отслеживания сигналов
+    c.execute('''CREATE TABLE IF NOT EXISTS signals
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  from_game INTEGER,
+                  to_game INTEGER,
+                  suit TEXT,
+                  is_active BOOLEAN DEFAULT 1,
+                  is_confirmed BOOLEAN DEFAULT 0,
+                  created_at TIMESTAMP,
+                  confirmed_at TIMESTAMP)''')
+    
+    conn.commit()
+    conn.close()
 
-def parse_game_data(text):
-    """Парсит данные игры из текста - ТОЛЬКО ЛЕВАЯ РУКА (БЕЗ ПРОВЕРКИ ДИАПАЗОНОВ)"""
-    # Ищем номер игры
-    match = re.search(r'#N(\d+)', text)
-    if not match:
-        return None
-    
-    game_num = int(match.group(1))
-    
-    # Проверяем наличие специальных тегов
-    has_r_tag = '#R' in text
-    has_x_tag = '#X' in text or '#X🟡' in text
-    has_check = '✅' in text
-    has_t = re.search(r'#T\d+', text) is not None
-    
-    # Извлекаем ТОЛЬКО левую часть (руку игрока)
-    left_part = extract_left_part(text)
-    logger.info(f"👈 Левая рука (ИГРОК): {left_part}")
-    
-    # Ищем масти ТОЛЬКО в левой части
-    suits = []
-    suit_patterns = {
-        '♥️': r'[♥❤♡]',
-        '♠️': r'[♠♤]',
-        '♣️': r'[♣♧]',
-        '♦️': r'[♦♢]'
-    }
-    
-    for suit, pattern in suit_patterns.items():
-        matches = re.findall(pattern, left_part)
-        for _ in matches:
-            suits.append(suit)
-    
-    if not suits:
-        logger.warning(f"⚠️ В левой руке игры #{game_num} не найдено мастей")
-        return None
-    
-    # Определяем первую карту (бот1 смотрит только на первую)
-    first_suit = suits[0] if len(suits) > 0 else None
-    
-    logger.info(f"📊 Левая рука игры #{game_num}: карты {suits}")
-    logger.info(f"📊 Теги: #R={has_r_tag}, #X={has_x_tag}")
-    
-    return {
-        'game_num': game_num,
-        'first_suit': first_suit,
-        'all_suits': suits,
-        'left_cards': suits,
-        'has_r_tag': has_r_tag,
-        'has_x_tag': has_x_tag,
-        'has_check': has_check,
-        'has_t': has_t
-    }
-
-def compare_suits(suit1, suit2):
-    """Сравнивает две масти"""
-    if not suit1 or not suit2:
-        return False
-    
-    suit_map = {
-        '♥️': '♥', '♥': '♥', '❤': '♥', '♡': '♥',
-        '♠️': '♠', '♠': '♠', '♤': '♠',
-        '♣️': '♣', '♣': '♣', '♧': '♣',
-        '♦️': '♦', '♦': '♦', '♢': '♦'
-    }
-    
-    s1 = suit_map.get(suit1, suit1)
-    s2 = suit_map.get(suit2, suit2)
-    
-    s1 = s1.replace('\ufe0f', '').replace('️', '').strip()
-    s2 = s2.replace('\ufe0f', '').replace('️', '').strip()
-    
-    return s1 == s2
-
-class SuitAnalyzer:
-    def __init__(self):
-        self.suit_history = []
-        self.frequency = defaultdict(int)
-        
-    def add_suit(self, suit):
-        if suit:
-            if '♥' in suit or '❤' in suit or '♡' in suit:
-                normalized = '♥️'
-            elif '♠' in suit or '♤' in suit:
-                normalized = '♠️'
-            elif '♣' in suit or '♧' in suit:
-                normalized = '♣️'
-            elif '♦' in suit or '♢' in suit:
-                normalized = '♦️'
-            else:
-                return
-            
-            self.suit_history.append(normalized)
-            self.frequency[normalized] += 1
-            
-            if len(self.suit_history) > 20:
-                removed_suit = self.suit_history.pop(0)
-                self.frequency[removed_suit] -= 1
-                if self.frequency[removed_suit] == 0:
-                    del self.frequency[removed_suit]
-    
-    def predict_next_suit(self):
-        if not self.suit_history:
-            suit = random.choice(SUITS)
-            confidence = 0.5
-        else:
-            total = sum(self.frequency.values())
-            weights = [self.frequency[s] / total if total > 0 else 0.25 for s in SUITS]
-            suit = random.choices(SUITS, weights=weights, k=1)[0]
-            confidence = 0.6
-        
-        logger.info(f"🤖 AI выбрал: {suit} ({confidence*100:.1f}%)")
-        return suit, confidence
-
-class Storage:
-    def __init__(self):
-        self.analyzer = SuitAnalyzer()
-        self.game_history = {}
-        self.strategy2_predictions = {}
-        self.strategy2_counter = 0
-        self.strategy2_stats = {'total': 0, 'wins': 0, 'losses': 0}
-        self.patterns = {}  # Ожидающие паттерны
-        self.predictions = {}  # Активные прогнозы
-        
-    def add_to_history(self, game_data):
-        game_num = game_data['game_num']
-        
-        # Обновляем историю, сохраняя все карты игры
-        if game_num in self.game_history:
-            existing = self.game_history[game_num]
-            existing['all_suits'] = game_data['all_suits']
-            existing['last_update'] = datetime.now()
-        else:
-            self.game_history[game_num] = game_data
-        
-        # Добавляем все карты в анализатор для обучения
-        if game_data['all_suits']:
-            for suit in game_data['all_suits']:
-                self.analyzer.add_suit(suit)
-        
-        # Ограничиваем размер истории
-        if len(self.game_history) > 200:
-            oldest_key = min(self.game_history.keys())
-            del self.game_history[oldest_key]
-    
-    def is_game_already_in_predictions(self, game_num):
-        for pred in self.strategy2_predictions.values():
-            if pred['status'] == 'pending' and game_num in pred['check_games']:
-                return True
-        return False
-    
-    def was_game_in_finished_predictions(self, game_num):
-        for pred in self.strategy2_predictions.values():
-            if pred['status'] in ['win', 'loss'] and game_num in pred['check_games']:
-                return True
-        return False
-    
-    def check_deal_before_game(self, game_num):
-        prev_game_num = get_next_game_number(game_num, -1)
-        if prev_game_num in self.game_history:
-            prev_game = self.game_history[prev_game_num]
-            if prev_game.get('has_r_tag', False):
-                return True
-        return False
-    
-    def predict_suit_for_card(self, card_value):
-        if card_value not in card_stats or not card_stats[card_value]:
-            return random.choice(SUITS), 0.5
-        
-        total = sum(card_stats[card_value].values())
-        if total == 0:
-            return random.choice(SUITS), 0.5
-        
-        best_suit = max(card_stats[card_value].items(), key=lambda x: x[1])
-        probability = best_suit[1] / total
-        
-        return best_suit[0], probability
-
-# ===== ГЛОБАЛЬНЫЙ STORAGE =====
-storage = Storage()
-
-def get_next_game_number(current_game, increment=1):
-    next_game = current_game + increment
-    while next_game > MAX_GAME_NUMBER:
-        next_game -= MAX_GAME_NUMBER
-    while next_game < 1:
-        next_game += MAX_GAME_NUMBER
-    return next_game
-
-def get_funny_phrase():
-    return random.choice(FUNNY_PHRASES)
-
-def get_win_phrase():
-    return random.choice(WIN_PHRASES)
-
-def get_loss_phrase():
-    return random.choice(LOSS_PHRASES)
-
-def get_draw_phrase():
-    return random.choice(DRAW_PHRASES)
-
-async def check_predictions(current_game_num, game_data, context):
-    """Проверяет активные прогнозы ТОЛЬКО когда пришла следующая игра"""
-    logger.info(f"\n{'🔍'*30}")
-    logger.info(f"🔍 ПРОВЕРКА ПРОГНОЗОВ для игры #{current_game_num}")
-    logger.info(f"{'🔍'*30}")
-    
-    # Показываем все активные прогнозы
-    active_preds = [p for p in storage.strategy2_predictions.values() if p['status'] == 'pending']
-    logger.info(f"📊 Активных прогнозов: {len(active_preds)}")
-    
-    for pred_id, pred in list(storage.strategy2_predictions.items()):
-        if pred['status'] != 'pending':
-            continue
-        
-        target_game = pred['target_game']
-        logger.info(f"\n🎯 Прогноз #{pred_id}: целевая игра #{target_game}, ищем масть {pred['original_suit']}")
-        
-        # Проверяем, является ли текущая игра следующей после целевой
-        if current_game_num == target_game + 1:
-            logger.info(f"✅ Игра #{current_game_num} - это следующая игра после целевой #{target_game}")
-            logger.info(f"   Значит, игра #{target_game} уже завершена и можно проверять результат")
-            
-            # Получаем данные целевой игры из истории
-            target_game_data = storage.game_history.get(target_game)
-            
-            if not target_game_data:
-                logger.info(f"⚠️ Данные игры #{target_game} еще не сохранены, пропускаем")
-                continue
-            
-            target_cards = target_game_data.get('all_suits', [])
-            logger.info(f"🃏 Карты левой руки целевой игры #{target_game}: {target_cards}")
-            
-            # BOT1 смотрит ТОЛЬКО на первую карту
-            suit_found = False
-            if target_cards and compare_suits(pred['original_suit'], target_cards[0]):
-                suit_found = True
-                logger.info(f"   ✅✅✅ НАШЛИ в первой карте игры #{target_game}: {target_cards[0]}")
-            
-            # Также проверяем теги в целевой игре
-            has_r_tag = target_game_data.get('has_r_tag', False)
-            has_x_tag = target_game_data.get('has_x_tag', False)
-            has_check = target_game_data.get('has_check', False)
-            
-            if suit_found or has_r_tag or has_x_tag or has_check:
-                if suit_found:
-                    logger.info(f"✅ ПРОГНОЗ #{pred_id} ВЫИГРАЛ! Нашли масть {pred['original_suit']} в первой карте игры #{target_game}")
-                else:
-                    logger.info(f"✅ ПРОГНОЗ #{pred_id} ВЫИГРАЛ по тегу в игре #{target_game}!")
-                
-                pred['status'] = 'win'
-                storage.strategy2_stats['wins'] += 1
-                await update_prediction_result(pred, target_game, 'win', context)
-            else:
-                logger.info(f"❌ Масть {pred['original_suit']} не найдена в первой карте игры #{target_game}")
-                
-                # Проверяем, есть ли еще попытки (догоны)
-                if pred['attempt'] >= 2:  # Всего 3 попытки (0,1,2)
-                    logger.info(f"💔 Все попытки исчерпаны")
-                    pred['status'] = 'loss'
-                    storage.strategy2_stats['losses'] += 1
-                    await update_prediction_result(pred, target_game, 'loss', context)
-                else:
-                    # Переходим к следующей попытке (догону)
-                    pred['attempt'] += 1
-                    # Сдвигаем целевую игру для догона
-                    pred['target_game'] = pred['check_games'][pred['attempt']]
-                    logger.info(f"🔄 Прогноз #{pred_id} переходит к догону {pred['attempt']}, новая целевая игра: #{pred['target_game']}")
-                    await update_dogon_message(pred, context)
-
-async def check_patterns(game_num, game_data, context):
-    """Проверяет ожидающие паттерны и создает прогнозы (ТОЛЬКО для нужных диапазонов)"""
-    first_suit = game_data['first_suit']
-    
-    if not first_suit:
-        return
-    
-    # Проверяем, четная или нечетная игра
-    is_odd = game_num % 2 != 0
-    
-    # Проверяем, есть ли паттерн для этой игры
-    if game_num in storage.patterns:
-        pattern = storage.patterns[game_num]
-        expected_suit = pattern['suit']
-        
-        # Проверяем только первую карту (бот1 смотрит только на первую)
-        suit_found = False
-        if compare_suits(expected_suit, first_suit):
-            suit_found = True
-            logger.info(f"✅ Нашли масть {expected_suit} в первой карте левой руки игры #{game_num}")
-        
-        if suit_found:
-            # Паттерн подтвердился! Создаем прогноз
-            target_game = game_num + 1
-            predicted_suit = SUIT_CHANGE_RULES.get(expected_suit)
-            
-            if predicted_suit:
-                storage.strategy2_counter += 1
-                pred_id = storage.strategy2_counter
-                
-                # Игры для догона (следующие 3 игры после целевой)
-                check_games = [
-                    target_game,
-                    target_game + 1,
-                    target_game + 2
-                ]
-                
-                prediction = {
-                    'id': pred_id,
-                    'game_num': pattern['source_game'],
-                    'target_game': target_game,
-                    'original_suit': predicted_suit,
-                    'confidence': 0.8,
-                    'check_games': check_games,
-                    'status': 'pending',
-                    'attempt': 0,
-                    'created_at': datetime.now(),
-                    'result_game': None,
-                    'channel_message_id': None,
-                    'checked_games': [],
-                    'found_in_cards': [],
-                    'win_announced': False
-                }
-                
-                storage.strategy2_predictions[pred_id] = prediction
-                
-                logger.info(f"🎯 ПАТТЕРН ПОДТВЕРЖДЕН!")
-                logger.info(f"   Исходная игра #{pattern['source_game']}: масть {pattern['suit']}")
-                logger.info(f"   Проверочная игра #{game_num}: масть найдена в первой карте")
-                logger.info(f"🤖 НОВЫЙ ПРОГНОЗ #{pred_id}: {predicted_suit} в игре #{target_game}")
-                
-                # Отправляем прогноз в канал
-                await send_prediction_to_channel(prediction, context)
-        else:
-            logger.info(f"❌ Паттерн не подтвержден: в первой карте игры #{game_num} нет масти {expected_suit}")
-        
-        # Удаляем обработанный паттерн
-        del storage.patterns[game_num]
-    
-    # Создаем новый паттерн ТОЛЬКО от НЕЧЕТНЫХ игр и ТОЛЬКО в нужных диапазонах
-    if is_odd and is_valid_game(game_num):
-        check_game = game_num + 3
-        storage.patterns[check_game] = {
-            'suit': first_suit,
-            'source_game': game_num,
-            'created': datetime.now()
+# Класс для парсинга вашего формата
+class BaccaratParser:
+    def init(self):
+        # Соответствие мастей
+        self.suit_map = {
+            '♠️': 'пики',
+            '♣️': 'трефы',
+            '♥️': 'черви',
+            '♦️': 'бубны'
         }
         
-        logger.info(f"📝 Создан паттерн от НЕЧЕТНОЙ игры #{game_num}({first_suit}) -> проверка в #{check_game}")
-    elif is_odd and not is_valid_game(game_num):
-        logger.info(f"⏭️ Игра #{game_num} НЕЧЕТНАЯ, но вне диапазона - паттерн не создаем")
-    else:
-        logger.info(f"⏭️ Игра #{game_num} ЧЕТНАЯ - пропускаем создание паттерна")
-
-async def send_prediction_to_channel(prediction, context):
-    """Отправляет прогноз в канал"""
-    try:
-        text = (
-            f"🎯 *BOT1 - НОВЫЙ ПРОГНОЗ #{prediction['id']}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📊 *ДЕТАЛИ:*\n"
-            f"┣ 🎯 Целевая игра: #{prediction['target_game']}\n"
-            f"┣ 🃏 Прогнозируемая масть: {prediction['original_suit']}\n"
-            f"┣ 🔄 Догон 1: #{prediction['check_games'][1]}\n"
-            f"┣ 🔄 Догон 2: #{prediction['check_games'][2]}\n"
-            f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
-        )
-        
-        message = await context.bot.send_message(
-            chat_id=OUTPUT_CHANNEL_ID,
-            text=text,
-            parse_mode='Markdown'
-        )
-        
-        prediction['channel_message_id'] = message.message_id
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка при отправке прогноза: {e}")
-
-async def update_dogon_message(prediction, context):
-    """Обновляет сообщение о догоне"""
-    try:
-        if prediction['attempt'] == 1:
-            dogon_text = "🔄 *ПЕРЕХОД К ДОГОНУ 1*"
-            previous_attempt = 0
-        else:
-            dogon_text = "🔄 *ПЕРЕХОД К ДОГОНУ 2*"
-            previous_attempt = 1
-        
-        next_game = prediction['target_game']
-        
-        text = (
-            f"{dogon_text}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 *BOT1 - ПРОГНОЗ #{prediction['id']} ПРОДОЛЖАЕТСЯ*\n\n"
-            f"📊 *СТАТУС:*\n"
-            f"┣ 🔄 Текущий догон: {prediction['attempt']}/2\n"
-            f"┣ 🎮 Предыдущая игра: #{prediction['check_games'][previous_attempt]}\n"
-            f"┣ 🎲 Искали масть: {prediction['original_suit']} в левой руке\n"
-            f"┣ ❌ Результат: не найдена\n"
-            f"┣ 🎯 Следующая игра: #{next_game}\n"
-            f"┗ 🎲 Ищем масть: {prediction['original_suit']} в левой руке\n\n"
-            f"⏳ *ОЖИДАЕМ РЕЗУЛЬТАТ...*"
-        )
-        
-        if prediction.get('channel_message_id'):
-            await context.bot.edit_message_text(
-                chat_id=OUTPUT_CHANNEL_ID,
-                message_id=prediction['channel_message_id'],
-                text=text,
-                parse_mode='Markdown'
-            )
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
-
-async def update_prediction_result(prediction, game_num, result, context):
-    """Обновляет результат прогноза"""
-    try:
-        if not prediction.get('channel_message_id'):
-            return
-        
-        if result == 'win':
-            emoji = "✅"
-            status = "ЗАШЁЛ"
-            result_emoji = "🏆"
+        # Значения карт в очках баккары
+        self.card_values = {
+            'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+            '10': 0, 'J': 0, 'Q': 0, 'K': 0
+        }
+    
+    def parse_game(self, text):
+        """Парсит строку в формате #N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩"""
+        try:
+            # Извлекаем номер игры
+            game_num_match = re.search(r'#N(\d+)', text)
+            game_number = int(game_num_match.group(1)) if game_num_match else 0
             
-            text = (
-                f"{emoji} *BOT1 - ПРОГНОЗ #{prediction['id']} {status}!* {result_emoji}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"📊 *РЕЗУЛЬТАТ:*\n"
-                f"┣ 🎯 Целевая игра: #{prediction['target_game']}\n"
-                f"┣ 🃏 Масть: {prediction['original_suit']}\n"
-                f"┣ 🔄 Попытка: {['основная', 'догон 1', 'догон 2'][prediction['attempt']]}\n"
-                f"┣ 🎮 Проверено в игре: #{game_num}\n"
-                f"┣ 📊 Статистика: {storage.strategy2_stats['wins']}✅ / {storage.strategy2_stats['losses']}❌\n"
-                f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
-            )
-        else:
-            loss_phrase = get_loss_phrase()
-            text = (
-                f"{loss_phrase}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"😔 *BOT1 - ПРОГНОЗ #{prediction['id']} НЕ ЗАШЁЛ*\n\n"
-                f"💔 *РЕЗУЛЬТАТ:*\n"
-                f"┣ 🎯 Масть {prediction['original_suit']} не появилась в первой карте\n"
-                f"┣ 🎮 Проверено игр: {len(prediction['check_games'])}\n"
-                f"┣ 🔄 Попыток: {prediction['attempt'] + 1}\n"
-                f"┣ 📊 Статистика: {storage.strategy2_stats['wins']}✅ / {storage.strategy2_stats['losses']}❌\n"
-                f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
-            )
+            # Извлекаем общее количество очков
+            total_points_match = re.search(r'#T(\d+)', text)
+            total_points = int(total_points_match.group(1)) if total_points_match else 0
+            
+            # Разделяем на две руки
+            # Ищем паттерн с возможным ✅ или 🔰 в любой руке
+            hands_pattern = r'([✅🔰]?\d+)\(([^)]+)\)\s*-\s*([✅🔰]?\d+)\(([^)]+)\)'
+            hands_match = re.search(hands_pattern, text)
+            
+            if not hands_match:
+                return None
+            
+            # Парсим первую руку
+            hand1_raw = hands_match.group(1)
+            hand1_cards_str = hands_match.group(2)
+            hand1_score = int(re.sub(r'[✅🔰]', '', hand1_raw))
+            
+            # Парсим вторую руку
+            hand2_raw = hands_match.group(3)
+            hand2_cards_str = hands_match.group(4)
+            hand2_score = int(re.sub(r'[✅🔰]', '', hand2_raw))
+            
+            # Определяем победителя
+            if '✅' in hand1_raw or '✅' in hand2_raw:
+
+Макс Москва, [16.02.2026 19:02]
+winner = 'hand1' if '✅' in hand1_raw else 'hand2'
+            elif '🔰' in hand1_raw or '🔰' in hand2_raw:
+                winner = 'hand1' if '🔰' in hand1_raw else 'hand2'
+            else:
+                if hand1_score > hand2_score:
+                    winner = 'hand1'
+                elif hand2_score > hand1_score:
+                    winner = 'hand2'
+                else:
+                    winner = 'tie'
+            
+            # Парсим карты первой руки
+            hand1_cards = self.parse_cards(hand1_cards_str)
+            # Парсим карты второй руки
+            hand2_cards = self.parse_cards(hand2_cards_str)
+            
+            # Определяем первую масть (первая карта в первой руке)
+            first_suit = hand1_cards[0]['suit'] if hand1_cards else None
+            
+            # Вычисляем очки
+            calculated_hand1_points = self.calculate_hand_points(hand1_cards)
+            calculated_hand2_points = self.calculate_hand_points(hand2_cards)
+            
+            return {
+                'game_number': game_number,
+                'hand1_score': hand1_score,
+                'hand1_cards': hand1_cards,
+                'hand1_calculated': calculated_hand1_points,
+                'hand2_score': hand2_score,
+                'hand2_cards': hand2_cards,
+                'hand2_calculated': calculated_hand2_points,
+                'total_points': total_points,
+                'winner': winner,
+                'first_suit': first_suit,
+                'raw_data': text
+            }
+            
+        except Exception as e:
+            print(f"Ошибка парсинга: {e}")
+            return None
+    
+    def parse_cards(self, cards_str):
+        """Парсит строку с картами вида '2♠️ J♥️ A♥️'"""
+        cards = []
+        # Разделяем по пробелам
+        card_items = cards_str.strip().split()
         
-        await context.bot.edit_message_text(
-            chat_id=OUTPUT_CHANNEL_ID,
-            message_id=prediction['channel_message_id'],
-            text=text,
-            parse_mode='Markdown'
+        for item in card_items:
+            if len(item) >= 2:
+                # Значение может быть одной цифрой/буквой или '10'
+                if item.startswith('10'):
+                    value = '10'
+                    suit_symbol = item[2:]
+                else:
+                    value = item[0]
+                    suit_symbol = item[1:]
+                
+                suit = self.suit_map.get(suit_symbol, 'unknown')
+                points = self.card_values.get(value, 0)
+                
+                cards.append({
+                    'value': value,
+                    'suit': suit,
+                    'points': points,
+                    'symbol': suit_symbol
+                })
+        
+        return cards
+    
+    def calculate_hand_points(self, cards):
+        """Вычисляет очки руки в баккаре"""
+        total = sum(card['points'] for card in cards)
+        return total % 10
+
+# Класс для алгоритма сигналов
+class SignalAlgorithm:
+    def init(self):
+        self.parser = BaccaratParser()
+    
+    def is_even_decade(self, game_number):
+        """Проверяет, является ли десяток четным"""
+        decade = game_number // 10
+        return decade % 2 == 0
+    
+    def get_signal_suit(self, game_number, first_suit):
+        """
+        Определяет масть для сигнала по алгоритму
+        
+        Правила:
+        - В четных десятках: пики ↔ бубны, черви ↔ трефы
+        - В нечетных десятках: пики ↔ трефы, черви ↔ бубны
+        """
+        if self.is_even_decade(game_number):
+            # Четные десятки
+            rules = {
+                'пики': 'бубны',
+                'бубны': 'пики',
+                'черви': 'трефы',
+                'трефы': 'черви'
+            }
+        else:
+            # Нечетные десятки
+            rules = {
+                'пики': 'трефы',
+                'трефы': 'пики',
+                'черви': 'бубны',
+                'бубны': 'черви'
+            }
+        
+        return rules.get(first_suit, first_suit)
+
+Макс Москва, [16.02.2026 19:02]
+def process_game_signal(self, user_id, game_number, first_suit):
+        """
+        Обрабатывает игру и создает/обновляет сигналы
+        """
+        conn = sqlite3.connect('baccarat_stats.db')
+        c = conn.cursor()
+        
+        # Получаем предыдущую игру
+        c.execute('''SELECT game_number, first_suit FROM games_analysis 
+                     WHERE user_id = ? AND game_number < ?
+                     ORDER BY game_number DESC LIMIT 1''', (user_id, game_number))
+        prev_game = c.fetchone()
+        
+        signals = []
+        predicted_suit = None
+        is_confirmation = False
+        
+        # Проверяем, был ли активный сигнал на эту игру
+        c.execute('''SELECT id, from_game, suit FROM signals 
+                     WHERE user_id = ? AND to_game = ? AND is_active = 1''', 
+                  (user_id, game_number))
+        active_signal = c.fetchone()
+        
+        if active_signal:
+            signal_id, from_game, expected_suit = active_signal
+            
+            # Проверяем, совпала ли масть
+            if expected_suit == first_suit:
+                # Сигнал подтвердился!
+                is_confirmation = True
+                
+                # Обновляем сигнал
+                c.execute('''UPDATE signals 
+                             SET is_confirmed = 1, is_active = 0, confirmed_at = ? 
+                             WHERE id = ?''', (datetime.now(), signal_id))
+                
+                # Даем повторный сигнал на следующую игру (+1)
+                next_game = game_number + 1
+                c.execute('''INSERT INTO signals (user_id, from_game, to_game, suit, is_active, created_at)
+                             VALUES (?, ?, ?, ?, 1, ?)''',
+                          (user_id, game_number, next_game, expected_suit, datetime.now()))
+                
+                signals.append({
+                    'type': 'confirmation',
+                    'from_game': from_game,
+                    'to_game': game_number,
+                    'suit': expected_suit,
+                    'next_signal': next_game
+                })
+                
+                predicted_suit = expected_suit
+            else:
+                # Сигнал не подтвердился
+                c.execute('''UPDATE signals SET is_active = 0 WHERE id = ?''', (signal_id,))
+                
+                signals.append({
+                    'type': 'failure',
+                    'from_game': from_game,
+                    'to_game': game_number,
+                    'expected': expected_suit,
+                    'actual': first_suit
+                })
+        
+        # Создаем новый сигнал по алгоритму (от текущей игры)
+        if first_suit:
+            signal_suit = self.get_signal_suit(game_number, first_suit)
+            
+            # Сигнал дается на игру +3 (как в вашем примере 803→806)
+            target_game = game_number + 3
+            
+            # Проверяем, нет ли уже активного сигнала на эту игру
+            c.execute('''SELECT id FROM signals 
+                         WHERE user_id = ? AND to_game = ? AND is_active = 1''',
+                      (user_id, target_game))
+            existing = c.fetchone()
+            
+            if not existing:
+                c.execute('''INSERT INTO signals (user_id, from_game, to_game, suit, is_active, created_at)
+                             VALUES (?, ?, ?, ?, 1, ?)''',
+                          (user_id, game_number, target_game, signal_suit, datetime.now()))
+                
+                signals.append({
+                    'type': 'new_signal',
+                    'from_game': game_number,
+                    'to_game': target_game,
+                    'suit': signal_suit
+                })
+                
+                if not predicted_suit:
+                    predicted_suit = signal_suit
+
+Макс Москва, [16.02.2026 19:02]
+conn.commit()
+        conn.close()
+        
+        return signals, predicted_suit, is_confirmation
+    
+    def get_active_signals(self, user_id):
+        """Получает все активные сигналы"""
+        conn = sqlite3.connect('baccarat_stats.db')
+        c = conn.cursor()
+        
+        c.execute('''SELECT from_game, to_game, suit, created_at 
+                     FROM signals 
+                     WHERE user_id = ? AND is_active = 1
+                     ORDER BY to_game''', (user_id,))
+        
+        signals = c.fetchall()
+        conn.close()
+        
+        return signals
+    
+    def check_game_signals(self, user_id, game_number):
+        """Проверяет, есть ли сигналы на указанную игру"""
+        conn = sqlite3.connect('baccarat_stats.db')
+        c = conn.cursor()
+        
+        c.execute('''SELECT from_game, suit FROM signals 
+                     WHERE user_id = ? AND to_game = ? AND is_active = 1''', 
+                  (user_id, game_number))
+        
+        signals = c.fetchall()
+        conn.close()
+        
+        return signals
+
+# Основной класс для обработки игр
+class GameAnalyzer:
+    def init(self):
+        self.parser = BaccaratParser()
+        self.signal_algorithm = SignalAlgorithm()
+    
+    def process_game_data(self, text, user_id):
+        """Обрабатывает данные игры"""
+        
+        # Парсим данные
+        parsed = self.parser.parse_game(text)
+        
+        if not parsed:
+            return None, "Не удалось распарсить данные. Проверьте формат."
+        
+        # Проверяем соответствие очков
+        points_warning = ""
+        
+        if parsed['hand1_score'] != parsed['hand1_calculated']:
+            points_warning += f"⚠️ В первой руке указано {parsed['hand1_score']} очков, но по картам получается {parsed['hand1_calculated']}\n"
+        
+        if parsed['hand2_score'] != parsed['hand2_calculated']:
+            points_warning += f"⚠️ Во второй руке указано {parsed['hand2_score']} очков, но по картам получается {parsed['hand2_calculated']}\n"
+        
+        total_calculated = (parsed['hand1_calculated'] + parsed['hand2_calculated']) % 10
+        if parsed['total_points'] != total_calculated:
+            points_warning += f"⚠️ Общее количество очков #T{parsed['total_points']}, но сумма очков рук = {total_calculated}\n"
+        
+        # Анализируем масти
+        suit_analysis = self.analyze_suits(parsed)
+        
+        # Обрабатываем сигналы
+        signals, predicted_suit, is_confirmation = self.signal_algorithm.process_game_signal(
+            user_id, parsed['game_number'], parsed['first_suit']
         )
         
-    except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        # Сохраняем в базу данных
+        conn = sqlite3.connect('baccarat_stats.db')
+        c = conn.cursor()
+        
+        # Сохраняем игру
+        c.execute('''INSERT INTO games_analysis 
+                     (user_id, game_number, game_date, hand1_score, hand1_cards, 
+                      hand2_score, hand2_cards, total_points, winner, first_suit, 
+                      predicted_suit, is_confirmation, raw_data)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (user_id, 
+                   parsed['game_number'],
+                   datetime.now(),
+                   parsed['hand1_score'],
+                   json.dumps(parsed['hand1_cards'], ensure_ascii=False),
+                   parsed['hand2_score'],
+                   json.dumps(parsed['hand2_cards'], ensure_ascii=False),
+                   parsed['total_points'],
+                   parsed['winner'],
+                   parsed['first_suit'],
+                   predicted_suit,
+                   is_confirmation,
+                   parsed['raw_data']))
+        
+        game_id = c.lastrowid
+        
+        # Сохраняем статистику мастей
+        for suit, count in suit_analysis.items():
 
-async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает входящие сообщения"""
-    try:
-        message = update.channel_post or update.message
-        if not message or not message.text:
-            return
+Макс Москва, [16.02.2026 19:02]
+c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_position)
+                         VALUES (?, ?, ?, ?, ?)''',
+                      (user_id, game_id, suit, count, 'both'))
         
-        if update.effective_chat.id != INPUT_CHANNEL_ID:
-            return
+        conn.commit()
+        conn.close()
         
-        text = message.text
-        logger.info(f"\n{'='*60}")
-        logger.info(f"📥 Получено: {text[:150]}...")
+        # Формируем результат анализа
+        analysis_result = self.generate_analysis(parsed, signals, points_warning)
         
-        # Парсим данные игры (БЕЗ ПРОВЕРКИ ДИАПАЗОНОВ)
-        game_data = parse_game_data(text)
-        if not game_data:
-            return
+        return parsed, analysis_result
+    
+    def analyze_suits(self, parsed_data):
+        """Анализирует распределение мастей в игре"""
+        suit_stats = defaultdict(int)
         
-        game_num = game_data['game_num']
-        first_suit = game_data['first_suit']
+        for card in parsed_data['hand1_cards'] + parsed_data['hand2_cards']:
+            suit_stats[card['suit']] += 1
         
-        logger.info(f"📊 Игра #{game_num} ({'НЕЧЕТНАЯ' if game_num%2 else 'ЧЕТНАЯ'}): первая карта {first_suit}")
-        logger.info(f"📊 Теги: #R={game_data.get('has_r_tag', False)}, #X={game_data.get('has_x_tag', False)}")
+        return dict(suit_stats)
+    
+    def generate_analysis(self, parsed, signals, points_warning=""):
+        """Генерирует анализ игры"""
         
-        # Сохраняем в историю (ВСЕГДА)
-        storage.add_to_history(game_data)
+        result = []
+        result.append("🔍 АНАЛИЗ ИГРЫ")
+        result.append("=" * 50)
+        result.append(f"🎮 Игра #{parsed['game_number']}")
+        result.append("")
         
-        # 1. Проверяем активные прогнозы
-        await check_predictions(game_num, game_data, context)
+        if points_warning:
+            result.append("⚠️ ВНИМАНИЕ! Несоответствие очков:")
+            result.append(points_warning)
+            result.append("")
         
-        # 2. ПОТОМ проверяем паттерны и создаем новые прогнозы (только для нужных диапазонов)
-        await check_patterns(game_num, game_data, context)
+        # Рука 1
+        result.append("🤚 ПЕРВАЯ РУКА:")
+        cards_str = [f"{c['value']}{c['symbol']}" for c in parsed['hand1_cards']]
+        result.append(f"   Карты: {' '.join(cards_str)}")
+        result.append(f"   Очки: {parsed['hand1_score']}")
+        result.append(f"   Первая масть: {parsed['first_suit']} ⭐")
+        result.append("")
         
-        # Ограничиваем историю
-        if len(storage.game_history) > 200:
-            oldest = min(storage.game_history.keys())
-            del storage.game_history[oldest]
+        # Рука 2
+        result.append("✋ ВТОРАЯ РУКА:")
+        cards_str = [f"{c['value']}{c['symbol']}" for c in parsed['hand2_cards']]
+        result.append(f"   Карты: {' '.join(cards_str)}")
+        result.append(f"   Очки: {parsed['hand2_score']}")
+        result.append("")
         
-        # Очищаем старые паттерны (> 50 игр)
-        for check_game in list(storage.patterns.keys()):
-            if check_game < game_num - 50:
-                logger.info(f"🗑️ Удаляем старый паттерн для игры #{check_game}")
-                del storage.patterns[check_game]
+        # Победитель
+        winner_text = {
+            'hand1': 'ПЕРВАЯ РУКА ✓',
+            'hand2': 'ВТОРАЯ РУКА ✓',
+            'tie': 'НИЧЬЯ'
+        }.get(parsed['winner'], '')
+        result.append(f"🏆 ПОБЕДИТЕЛЬ: {winner_text}")
+        result.append("")
         
-    except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ошибки"""
-    try:
-        if isinstance(context.error, Conflict):
-            logger.warning("⚠️ Обнаружен конфликт с другим экземпляром бота")
-            release_lock()
-            sys.exit(1)
+        # АНАЛИЗ СИГНАЛОВ
+        result.append("📊 АНАЛИЗ СИГНАЛОВ")
+        result.append("-" * 30)
+        
+        for signal in signals:
+            if signal['type'] == 'confirmation':
+                result.append(f"✅ ПОДТВЕРЖДЕНИЕ СИГНАЛА!")
+                result.append(f"   Сигнал от игры #{signal['from_game']} на масть {signal['suit']}")
+                result.append(f"   ✅ СОВПАЛО! Масть {signal['suit']} подтверждена")
+                result.append(f"   🔄 ДАЮ ПОВТОРНЫЙ СИГНАЛ на игру #{signal['next_signal']}")
+                result.append(f"   Ожидаемая масть: {signal['suit']} (повтор)")
+            
+            elif signal['type'] == 'failure':
+                result.append(f"❌ СИГНАЛ НЕ ПОДТВЕРДИЛСЯ")
+                result.append(f"   Ожидалась масть: {signal['expected']}")
+                result.append(f"   Получена масть: {signal['actual']}")
+            
+            elif signal['type'] == 'new_signal':
+                result.append(f"🆕 НОВЫЙ СИГНАЛ")
+                result.append(f"   От игры #{signal['from_game']} → на игру #{signal['to_game']}")
+                result.append(f"   Ожидаемая масть: {signal['suit']}")
+        
+        if not signals:
+            result.append("   Нет активных сигналов")
+        
+        # Информация о десятке
+        result.append("")
+        result.append("📌 ИНФОРМАЦИЯ О ДЕСЯТКЕ:")
+        decade_type = "ЧЕТНЫЙ" if self.signal_algorithm.is_even_decade(parsed['game_number']) else "НЕЧЕТНЫЙ"
+        result.append(f"   Игра #{parsed['game_number']} - {decade_type} десяток")
+        
+        if self.signal_algorithm.is_even_decade(parsed['game_number']):
+            result.append("   Правило четного десятка: пики↔бубны, черви↔трефы")
         else:
-            logger.error(f"❌ Ошибка: {context.error}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка в error_handler: {e}")
+            result.append("   Правило нечетного десятка: пики↔трефы, черви↔бубны")
+        
+        return "\n".join(result)
 
-def main():
-    print("\n" + "="*60)
-    print("🤖 BOT1 (КРАСНАЯ->КРАСНАЯ, ЧЕРНАЯ->ЧЕРНАЯ) ЗАПУЩЕН")
-    print("="*60)
-    print(f"✅ Диапазоны для создания паттернов: 1-9, 20-29, 40-49... до 1440")
-    print(f"✅ Всего диапазонов: {len(VALID_RANGES)}")
-    print("✅ ПРОВЕРЯЕТ ПРОГНОЗЫ ТОЛЬКО ПОСЛЕ ЗАВЕРШЕНИЯ ИГРЫ")
-    print("✅ Анализирует ТОЛЬКО ПЕРВУЮ карту левой руки")
-    print("✅ Новые правила смены мастей:")
-    print("   - Черва (♥️) -> Бубна (♦️) (красная -> красная)")
-    print("   - Бубна (♦️) -> Черва (♥️) (красная -> красная)")
-    print("   - Пики (♠️) -> Трефа (♣️) (черная -> черная)")
-    print("   - Трефа (♣️) -> Пики (♠️) (черная -> черная)")
-    print("✅ Выходной канал: -1003842401391")
-    print("="*60)
+Макс Москва, [16.02.2026 19:02]
+# Команды бота
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add('📊 Ввести игру', '📈 Моя статистика')
+    markup.add('📊 Активные сигналы', '📊 Проверка алгоритма')
+    markup.add('📋 История игр', '🔮 Прогноз на игру')
+    markup.add('ℹ️ Помощь', '📝 Пример формата')
     
-    # Проверяем блокировку
-    if not acquire_lock():
-        logger.error("❌ Не удалось получить блокировку. Возможно бот уже запущен.")
-        sys.exit(1)
+    bot.send_message(
+        message.chat.id,
+        "👋 Добро пожаловать в бота-анализатор баккары!\n\n"
+        "СИСТЕМА СИГНАЛОВ:\n"
+        "• Первый сигнал: от игры N → на игру N+3\n"
+        "• При подтверждении: повторный сигнал на N+1\n"
+        "• Пример: #803(пики) → сигнал на #806(бубны)\n"
+        "• #806(бубны) подтверждение → повторный сигнал на #807(бубны)\n\n"
+        "Выберите действие:",
+        reply_markup=markup
+    )
+
+@bot.message_handler(func=lambda message: message.text == '📊 Ввести игру')
+def enter_game(message):
+    msg = bot.send_message(
+        message.chat.id,
+        "📝 Введите данные игры в вашем формате:\n\n"
+        "Пример 1: #N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩\n"
+        "Пример 2: #N806. 8(5♠️ 3♦️) 🔰 8(3♠️ 5♦️) #T16 #X🟡 #R\n\n"
+        "Где:\n"
+        "#N803 - номер игры\n"
+        "✅ или 🔰 - обозначение победителя\n"
+        "#T9 - общее количество очков",
+        reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add('◀️ Назад')
+    )
+    bot.register_next_step_handler(msg, process_game_input)
+
+def process_game_input(message):
+    if message.text == '◀️ Назад':
+        start(message)
+        return
     
-    # Проверяем токен
-    if not check_bot_token():
-        logger.error("❌ Ошибка авторизации бота")
-        release_lock()
-        sys.exit(1)
+    analyzer = GameAnalyzer()
+    parsed, analysis = analyzer.process_game_data(message.text, message.from_user.id)
     
-    # Создаем приложение
-    application = Application.builder().token(TOKEN).build()
+    if parsed:
+        bot.send_message(message.chat.id, analysis, parse_mode='HTML')
+    else:
+        bot.send_message(
+            message.chat.id,
+            "❌ Ошибка в формате. Попробуйте снова или нажмите '📝 Пример формата'"
+        )
     
-    # Добавляем обработчик ошибок
-    application.add_error_handler(error_handler)
+    start(message)
+
+@bot.message_handler(func=lambda message: message.text == '📊 Активные сигналы')
+def show_active_signals(message):
+    algorithm = SignalAlgorithm()
+    signals = algorithm.get_active_signals(message.from_user.id)
     
-    # Добавляем обработчик сообщений
-    application.add_handler(MessageHandler(
-        filters.Chat(INPUT_CHANNEL_ID) & filters.TEXT,
-        handle_new_game
-    ))
+    if not signals:
+        bot.send_message(message.chat.id, "📭 Нет активных сигналов")
+        return
+    
+    result = ["📊 АКТИВНЫЕ СИГНАЛЫ", "=" * 40, ""]
+    
+    for from_game, to_game, suit, created_at in signals:
+        created = datetime.fromisoformat(created_at).strftime('%d.%m %H:%M')
+        result.append(f"🆓 Сигнал от игры #{from_game}")
+        result.append(f"   → на игру #{to_game}")
+        result.append(f"   Ожидаемая масть: {suit}")
+        result.append(f"   Создан: {created}")
+        result.append("")
+    
+    bot.send_message(message.chat.id, "\n".join(result))
+
+@bot.message_handler(func=lambda message: message.text == '🔮 Прогноз на игру')
+def predict_for_game(message):
+    msg = bot.send_message(
+        message.chat.id,
+        "Введите номер игры для прогноза:",
+        reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add('◀️ Назад')
+    )
+    bot.register_next_step_handler(msg, process_prediction_request)
+
+def process_prediction_request(message):
+    if message.text == '◀️ Назад':
+        start(message)
+        return
     
     try:
-        # Запускаем бота
-        application.run_polling(
-            allowed_updates=['channel_post'],
-            drop_pending_updates=True
+        game_number = int(message.text)
+    except:
+        bot.send_message(message.chat.id, "❌ Введите корректный номер игры")
+        start(message)
+        return
+    
+    algorithm = SignalAlgorithm()
+    signals = algorithm.check_game_signals(message.from_user.id, game_number)
+    
+    if not signals:
+        bot.send_message(
+            message.chat.id,
+            f"📭 Нет активных сигналов на игру #{game_number}"
         )
-    except Conflict:
-        logger.error("❌ Конфликт при запуске")
-        release_lock()
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
-        release_lock()
-        sys.exit(1)
-    finally:
-        release_lock()
+    else:
+        result = [f"🔮 ПРОГНОЗ НА ИГРУ #{game_number}", "=" * 40, ""]
+        for from_game, suit in signals:
 
-if __name__ == "__main__":
-    main()
+Макс Москва, [16.02.2026 19:02]
+result.append(f"🆓 Сигнал от игры #{from_game}")
+            result.append(f"   Ожидаемая масть: {suit}")
+            result.append("")
+        
+        # Проверяем, есть ли запись этой игры
+        conn = sqlite3.connect('baccarat_stats.db')
+        c = conn.cursor()
+        c.execute('''SELECT first_suit FROM games_analysis 
+                     WHERE user_id = ? AND game_number = ?''', 
+                  (message.from_user.id, game_number))
+        game_data = c.fetchone()
+        conn.close()
+        
+        if game_data:
+            actual_suit = game_data[0]
+            result.append(f"📊 Игра уже сыграна:")
+            result.append(f"   Фактическая масть: {actual_suit}")
+            
+            if actual_suit == suit:
+                result.append("   ✅ ПРОГНОЗ ПОДТВЕРДИЛСЯ!")
+            else:
+                result.append("   ❌ ПРОГНОЗ НЕ ПОДТВЕРДИЛСЯ")
+        
+        bot.send_message(message.chat.id, "\n".join(result))
+    
+    start(message)
+
+@bot.message_handler(func=lambda message: message.text == '📊 Проверка алгоритма')
+def check_algorithm(message):
+    """Проверяет работу алгоритма на истории игр"""
+    conn = sqlite3.connect('baccarat_stats.db')
+    c = conn.cursor()
+    
+    # Получаем все игры с первой мастью
+    c.execute('''SELECT game_number, first_suit 
+                 FROM games_analysis 
+                 WHERE user_id = ? AND first_suit IS NOT NULL
+                 ORDER BY game_number''', (message.from_user.id,))
+    
+    games = c.fetchall()
+    conn.close()
+    
+    if len(games) < 3:
+        bot.send_message(message.chat.id, "Недостаточно данных для проверки. Нужно минимум 3 игры.")
+        return
+    
+    algorithm = SignalAlgorithm()
+    game_dict = {num: suit for num, suit in games}
+    
+    results = []
+    correct_predictions = 0
+    total_predictions = 0
+    
+    for i in range(len(games) - 1):
+        current_num, current_suit = games[i]
+        
+        # Первый сигнал (N → N+3)
+        target1 = current_num + 3
+        if target1 in game_dict:
+            expected = algorithm.get_signal_suit(current_num, current_suit)
+            actual = game_dict[target1]
+            
+            is_correct = (expected == actual)
+            if is_correct:
+                correct_predictions += 1
+            total_predictions += 1
+            
+            results.append({
+                'from': current_num,
+                'to': target1,
+                'type': 'первичный',
+                'expected': expected,
+                'actual': actual,
+                'correct': is_correct
+            })
+            
+            # Если первичный сигнал подтвердился, проверяем повторный (на +1)
+            if is_correct:
+                target2 = target1 + 1
+                if target2 in game_dict:
+                    expected_repeat = expected  # Та же масть
+                    actual_repeat = game_dict[target2]
+                    
+                    is_repeat_correct = (expected_repeat == actual_repeat)
+                    if is_repeat_correct:
+                        correct_predictions += 1
+                    total_predictions += 1
+                    
+                    results.append({
+                        'from': target1,
+                        'to': target2,
+                        'type': 'повторный',
+                        'expected': expected_repeat,
+                        'actual': actual_repeat,
+                        'correct': is_repeat_correct
+                    })
+    
+    if total_predictions == 0:
+        bot.send_message(message.chat.id, "Нет пар для проверки")
+        return
+    
+    report = ["📊 ПРОВЕРКА АЛГОРИТМА", "=" * 50, ""]
+    
+    for r in results:
+        mark = "✅" if r['correct'] else "❌"
+        report.append(f"{mark} {r['type'].upper()} сигнал: {r['from']} → {r['to']}")
+
+Макс Москва, [16.02.2026 19:02]
+report.append(f"   Ожидалось: {r['expected']}, Факт: {r['actual']}")
+        report.append("")
+    
+    accuracy = (correct_predictions / total_predictions * 100)
+    report.append("📈 ИТОГИ:")
+    report.append(f"   Всего проверок: {total_predictions}")
+    report.append(f"   Совпадений: {correct_predictions}")
+    report.append(f"   Точность: {accuracy:.1f}%")
+    
+    bar = '█' * int(accuracy / 5) + '░' * (20 - int(accuracy / 5))
+    report.append(f"   [{bar}]")
+    
+    bot.send_message(message.chat.id, "\n".join(report))
+
+@bot.message_handler(func=lambda message: message.text == '📈 Моя статистика')
+def show_stats(message):
+    conn = sqlite3.connect('baccarat_stats.db')
+    c = conn.cursor()
+    
+    # Общая статистика
+    c.execute('''SELECT COUNT(*), 
+                        SUM(CASE WHEN winner = 'hand1' THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN winner = 'hand2' THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN winner = 'tie' THEN 1 ELSE 0 END)
+                 FROM games_analysis WHERE user_id = ?''', (message.from_user.id,))
+    
+    total, h1_wins, h2_wins, ties = c.fetchone()
+    
+    if not total:
+        bot.send_message(message.chat.id, "Нет данных")
+        conn.close()
+        return
+    
+    # Статистика сигналов
+    c.execute('''SELECT COUNT(*), SUM(is_confirmed) FROM signals WHERE user_id = ?''', 
+              (message.from_user.id,))
+    total_signals, confirmed = c.fetchone()
+    
+    stats = f"📊 ВАША СТАТИСТИКА\n"
+    stats += "=" * 40 + "\n"
+    stats += f"Всего игр: {total}\n"
+    stats += f"Победы 1-й руки: {h1_wins} ({h1_wins/total*100:.1f}%)\n"
+    stats += f"Победы 2-й руки: {h2_wins} ({h2_wins/total*100:.1f}%)\n"
+    stats += f"Ничьи: {ties} ({ties/total*100:.1f}%)\n\n"
+    
+    if total_signals:
+        stats += f"📊 СТАТИСТИКА СИГНАЛОВ\n"
+        stats += f"Всего сигналов: {total_signals}\n"
+        stats += f"Подтверждено: {confirmed or 0}\n"
+        if total_signals > 0:
+            stats += f"Точность: {(confirmed or 0)/total_signals*100:.1f}%\n"
+    
+    bot.send_message(message.chat.id, stats)
+    conn.close()
+
+@bot.message_handler(func=lambda message: message.text == '📋 История игр')
+def show_history(message):
+    conn = sqlite3.connect('baccarat_stats.db')
+    c = conn.cursor()
+    
+    c.execute('''SELECT game_number, first_suit, is_confirmation, predicted_suit, raw_data
+                 FROM games_analysis 
+                 WHERE user_id = ? 
+                 ORDER BY game_number DESC 
+                 LIMIT 20''', (message.from_user.id,))
+    
+    games = c.fetchall()
+    conn.close()
+    
+    if not games:
+        bot.send_message(message.chat.id, "Нет игр")
+        return
+    
+    history = ["📋 ИСТОРИЯ ИГР", "=" * 50, ""]
+    
+    for game_num, first_suit, is_conf, pred_suit, raw in games:
+        confirm_mark = " ✓" if is_conf else ""
+        pred_mark = f" → прогноз {pred_suit}" if pred_suit else ""
+        history.append(f"#{game_num}: {first_suit}{confirm_mark}{pred_mark}")
+        history.append(f"   {raw[:60]}...")
+        history.append("")
+    
+    bot.send_message(message.chat.id, "\n".join(history))
+
+@bot.message_handler(func=lambda message: message.text == '📝 Пример формата')
+def show_example(message):
+    example = """
+📝 ПРИМЕРЫ ФОРМАТА:
+
+1. Обычная игра:
+#N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩
+
+2. Игра с подтверждением:
+#N806. 8(5♠️ 3♦️) 🔰 8(3♠️ 5♦️) #T16 #X🟡 #R
+
+СИСТЕМА СИГНАЛОВ:
+
+🔵 ПЕРВИЧНЫЙ СИГНАЛ:
+• Игра #803: первая масть ПИКИ
+• Четный десяток (80) → пики дают бубны
+• Сигнал на игру #806: БУБНЫ
+
+🟢 ПОДТВЕРЖДЕНИЕ:
+• Игра #806: первая масть БУБНЫ ✓
+• Сигнал подтвердился!
+• ДАЕМ ПОВТОРНЫЙ СИГНАЛ на #807: БУБНЫ
+
+ПРАВИЛА:
+Четные десятки: пики↔бубны, черви↔трефы
+Нечетные десятки: пики↔трефы, черви↔бубны
+    """
+    bot.send_message(message.chat.id, example)
+
+@bot.message_handler(func=lambda message: message.text == 'ℹ️ Помощь')
+def help_command(message):
+    help_text = """
+🤖 БОТ-АНАЛИЗАТОР БАККАРЫ
+    С СИСТЕМОЙ СИГНАЛОВ
+
+Макс Москва, [16.02.2026 19:02]
+ОСНОВНЫЕ ФУНКЦИИ:
+• 📊 Ввести игру - запись игры в вашем формате
+• 📈 Моя статистика - общая статистика
+• 📊 Активные сигналы - текущие ожидаемые сигналы
+• 🔮 Прогноз на игру - проверить сигналы на конкретную игру
+• 📊 Проверка алгоритма - тест на истории
+• 📋 История игр - последние 20 игр
+
+СИСТЕМА СИГНАЛОВ:
+
+1️⃣ ПЕРВИЧНЫЙ СИГНАЛ:
+   От игры N → на игру N+3
+   Масть определяется по правилам десятков
+
+2️⃣ ПРИ ПОДТВЕРЖДЕНИИ:
+   Если сигнал совпал → повторный сигнал на N+1
+   С той же мастью!
+
+ПРАВИЛА ПО ДЕСЯТКАМ:
+
+ЧЕТНЫЕ десятки (20,40,60,80...):
+• пики ↔ бубны
+• черви ↔ трефы
+
+НЕЧЕТНЫЕ десятки (10,30,50,70...):
+• пики ↔ трефы
+• черви ↔ бубны
+
+ПРИМЕР:
+#803(пики) → сигнал на #806(бубны)
+#806(бубны) подтверждение → сигнал на #807(бубны)
+    """
+    bot.send_message(message.chat.id, help_text)
+
+@bot.message_handler(func=lambda message: message.text == '◀️ Назад')
+def go_back(message):
+    start(message)
+
+# Запуск бота
+if name == 'main':
+    init_db()
+    print("🤖 Бот запущен с СИСТЕМОЙ СИГНАЛОВ...")
+    print("📊 Первичный сигнал: N → N+3")
+    print("📊 Повторный сигнал: при подтверждении N+1")
+    print("Пример: 803(пики) → 806(бубны) → 807(бубны)")
+    bot.polling(none_stop=True)
