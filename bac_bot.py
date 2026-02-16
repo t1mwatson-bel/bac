@@ -1,4 +1,3 @@
-Макс Москва, [16.02.2026 19:02]
 import telebot
 from telebot import types
 import sqlite3
@@ -112,7 +111,6 @@ class BaccaratParser:
             # Определяем победителя
             if '✅' in hand1_raw or '✅' in hand2_raw:
 
-Макс Москва, [16.02.2026 19:02]
 winner = 'hand1' if '✅' in hand1_raw else 'hand2'
             elif '🔰' in hand1_raw or '🔰' in hand2_raw:
                 winner = 'hand1' if '🔰' in hand1_raw else 'hand2'
@@ -224,7 +222,6 @@ class SignalAlgorithm:
         
         return rules.get(first_suit, first_suit)
 
-Макс Москва, [16.02.2026 19:02]
 def process_game_signal(self, user_id, game_number, first_suit):
         """
         Обрабатывает игру и создает/обновляет сигналы
@@ -316,7 +313,6 @@ def process_game_signal(self, user_id, game_number, first_suit):
                 if not predicted_suit:
                     predicted_suit = signal_suit
 
-Макс Москва, [16.02.2026 19:02]
 conn.commit()
         conn.close()
         
@@ -416,7 +412,6 @@ class GameAnalyzer:
         # Сохраняем статистику мастей
         for suit, count in suit_analysis.items():
 
-Макс Москва, [16.02.2026 19:02]
 c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_position)
                          VALUES (?, ?, ?, ?, ?)''',
                       (user_id, game_id, suit, count, 'both'))
@@ -514,7 +509,6 @@ c.execute('''INSERT INTO suit_stats (user_id, game_id, suit, count, hand_positio
         
         return "\n".join(result)
 
-Макс Москва, [16.02.2026 19:02]
 # Команды бота
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -623,7 +617,6 @@ def process_prediction_request(message):
         result = [f"🔮 ПРОГНОЗ НА ИГРУ #{game_number}", "=" * 40, ""]
         for from_game, suit in signals:
 
-Макс Москва, [16.02.2026 19:02]
 result.append(f"🆓 Сигнал от игры #{from_game}")
             result.append(f"   Ожидаемая масть: {suit}")
             result.append("")
@@ -731,7 +724,6 @@ def check_algorithm(message):
         mark = "✅" if r['correct'] else "❌"
         report.append(f"{mark} {r['type'].upper()} сигнал: {r['from']} → {r['to']}")
 
-Макс Москва, [16.02.2026 19:02]
 report.append(f"   Ожидалось: {r['expected']}, Факт: {r['actual']}")
         report.append("")
     
@@ -851,7 +843,6 @@ def help_command(message):
 🤖 БОТ-АНАЛИЗАТОР БАККАРЫ
     С СИСТЕМОЙ СИГНАЛОВ
 
-Макс Москва, [16.02.2026 19:02]
 ОСНОВНЫЕ ФУНКЦИИ:
 • 📊 Ввести игру - запись игры в вашем формате
 • 📈 Моя статистика - общая статистика
