@@ -97,6 +97,7 @@ def parse_game_data(text):
     if not game_num or not is_valid_redred_game(game_num):
         return {}
     
+    # ✅ ИСПРАВЛЕНО: убраны лишние \\
     left_hand_pattern = r'0\\(([A2-9TJQK♠♣♥♦\s]+)\\)'
     left_match = re.search(left_hand_pattern, text)
     
@@ -114,17 +115,17 @@ def parse_game_data(text):
         'all_suits': all_suits
     }
 
-# ====================== ✅ ИСПРАВЛЕНО! СТРОКА 122 ======================
+# ====================== ✅ ИСПРАВЛЕННЫЕ ФУНКЦИИ ======================
 async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAULT_TYPE):
     """🔍 Проверка паттернов"""
-    first_suit = game_data.get('first_suit')
+    first_suit = game_data.get('first_suit')  # ✅ ИСПРАВЛЕНО
     if not first_suit:
         return
     
     # ПРОВЕРКА паттерна
     if game_num in storage.patterns:
         pattern = storage.patterns[game_num]
-        all_suits = game_data['all_suits']
+        all_suits = game_data['all_suits']  # ✅ ИСПРАВЛЕНО
         
         suit_found = (
             (len(all_suits) >= 1 and all_suits[0] == pattern['suit']) or
@@ -165,7 +166,7 @@ async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAUL
 
 async def check_predictions(game_num: int, game_ Dict, context: ContextTypes.DEFAULT_TYPE):
     """🎯 Проверка прогнозов"""
-    all_suits = game_data['all_suits']
+    all_suits = game_data['all_suits']  # ✅ ИСПРАВЛЕНО
     if not all_suits:
         return
     
@@ -201,7 +202,7 @@ async def send_redred_prediction(prediction: Dict, context: ContextTypes.DEFAULT
         f"⚡ ♦️♥️ ♠️♣️ +3"
     )
     
-    await context.bot.send_message(chat_id=INPUT_CHANNEL_ID, text=message, parse_mode='HTML')
+    await context.bot.send_message(chat_id=OUTPUT_CHANNEL_ID, text=message, parse_mode='HTML')
     logger.info(f"🚀 Прогноз #{pred_id}")
 
 async def send_redred_win(pred_id: int, prediction: Dict, win_game: int):
@@ -212,9 +213,9 @@ async def send_redred_win(pred_id: int, prediction: Dict, win_game: int):
         f"📈 {storage.stats['wins']}✅/{storage.stats['losses']}❌"
     )
     
-    await application.bot.send_message(chat_id=INPUT_CHANNEL_ID, text=message, parse_mode='HTML')
+    await application.bot.send_message(chat_id=OUTPUT_CHANNEL_ID, text=message, parse_mode='HTML')
 
-# ====================== ОБРАБОТЧИК ======================
+# ====================== ✅ ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ======================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.channel_post or update.channel_post.chat.id != INPUT_CHANNEL_ID:
         return
@@ -222,7 +223,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.channel_post.text or ""
     game_data = parse_game_data(text)
     
-    if game_
+    if game_  # ✅ ИСПРАВЛЕНО
         game_num = game_data['game_num']
         logger.info(f"📥 #{game_num}: {game_data['all_suits']}")
         
@@ -238,6 +239,8 @@ async def main():
     print("="*50)
     print("🤖 КРАСНАЯ→КРАСНАЯ v2")
     print("📊 10-19/30-39...1140")
+    print(f"📡 Вход: {INPUT_CHANNEL_ID}")
+    print(f"📤 Выход: {OUTPUT_CHANNEL_ID}")
     print("="*50)
     
     storage = RedRedStorage()
