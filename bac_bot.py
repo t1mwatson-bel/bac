@@ -309,7 +309,7 @@ class Storage:
         # Обновляем историю, сохраняя все карты игры
         if game_num in self.game_history:
             existing = self.game_history[game_num]
-            existing['left_suits'] = game_data['left_suits']
+            existing['left_suits'] = game_data['all_suits']
             existing['drawn_cards'] = game_data.get('drawn_cards', [])
             existing['has_drawn'] = game_data.get('has_drawn', False)
             existing['initial_cards'] = game_data.get('initial_cards', [])
@@ -359,6 +359,9 @@ class Storage:
         probability = best_suit[1] / total
         
         return best_suit[0], probability
+
+# ===== ВАЖНО: СОЗДАЕМ ГЛОБАЛЬНЫЙ ЭКЗЕМПЛЯР STORAGE =====
+storage = Storage()
 
 def get_next_game_number(current_game, increment=1):
     next_game = current_game + increment
@@ -522,17 +525,17 @@ async def check_patterns(game_num, game_data, context):
         # Удаляем обработанный паттерн
         del storage.patterns[game_num]
     
-    # Создаем новый паттерн ТОЛЬКО от НЕЧЕТНЫХ игр и ТОЛЬКО в нужных диапазонах
-    if is_odd and is_valid_game(game_num):
+    # Создаем новый паттерн от ВСЕХ НЕЧЕТНЫХ игр (без ограничений)
+    if is_odd:
         check_game = game_num + 3
         storage.patterns[check_game] = {
             'suit': first_suit,
             'source_game': game_num,
             'created': datetime.now()
         }
-        logger.info(f"📝 Создан паттерн от НЕЧЕТНОЙ игры #{game_num}({first_suit}) -> проверка в #{check_game}")
-    elif is_odd and not is_valid_game(game_num):
-        logger.info(f"⏭️ Игра #{game_num} НЕЧЕТНАЯ, но вне диапазона - паттерн не создаем")
+        logger.info(f"📝 Создан паттерн для НЕЧЕТНОЙ игры #{game_num}({first_suit}) -> проверка в #{check_game}")
+    else:
+        logger.info(f"⏭️ Игра #{game_num} ЧЕТНАЯ - пропускаем создание паттерна")
 
 async def wait_for_draw(game_num, context):
     """Ожидает добор карт для игры"""
@@ -779,8 +782,6 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         game_num = game_data['game_num']
-        first_suit = game_data['first_suit']
-        second_suit = game_data['second_suit']
         
         logger.info(f"📊 Игра #{game_num} ({'НЕЧЕТНАЯ' if game_num%2 else 'ЧЕТНАЯ'}): левая рука - {game_data['all_suits']}")
         logger.info(f"📊 Теги: #R={game_data.get('has_r_tag', False)}, #X={game_data.get('has_x_tag', False)}")
@@ -791,7 +792,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 1. СНАЧАЛА проверяем активные прогнозы (для ЛЮБЫХ игр, включая #R и #X)
         await check_predictions(game_num, game_data, context)
         
-        # 2. ПОТОМ проверяем паттерны и создаем новые прогнозы (только для нужных диапазонов)
+        # 2. ПОТОМ проверяем паттерны и создаем новые прогнозы
         await check_patterns(game_num, game_data, context)
         
         # Проверка доборов (старая логика)
