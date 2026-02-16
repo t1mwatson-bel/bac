@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
 import logging
 import re
-import random
 import asyncio
 import os
 import sys
 import fcntl
 import urllib.request
-import urllib.error
 import json
 from datetime import datetime
 from collections import defaultdict
 from telegram import Update
 from telegram.ext import (
-    Application, MessageHandler, filters, ContextTypes
+    ApplicationBuilder, MessageHandler, filters, ContextTypes  # ✅ ApplicationBuilder!
 )
 from telegram.error import Conflict
 
@@ -21,17 +19,13 @@ from telegram.error import Conflict
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
-
 LOCK_FILE = f'/tmp/bot1_{TOKEN[-10:]}.lock'
-MAX_GAME_NUMBER = 1440
 
-# ✅ ПРАВИЛА (Красная→Красная, Черная→Черная)
 SUIT_CHANGE_RULES = {
     '♥️': '♦️', '♦️': '♥️',  # КРАСНЫЕ
     '♠️': '♣️', '♣️': '♠️'   # ЧЕРНЫЕ
 }
 
-# ✅ ДИАПАЗОНЫ (10-19, 30-39...)
 VALID_RANGES = [
     (10, 19), (30, 39), (50, 59), (70, 79), (90, 99),
     (110, 119), (130, 139), (150, 159), (170, 179), (190, 199),
@@ -56,11 +50,10 @@ def is_valid_game(game_num):
     return any(start <= game_num <= end for start, end in VALID_RANGES)
 
 def acquire_lock():
-    """🔒 ИСПРАВЛЕН fcntl"""
     global lock_fd
     try:
         lock_fd = open(LOCK_FILE, 'w')
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # ✅ .fileno()
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         logger.info(f"🔒 Lock: {LOCK_FILE}")
         return True
     except (IOError, OSError):
@@ -132,89 +125,153 @@ class Storage:
 
 storage = Storage()
 
+async def check_predictions(game_num, game_data, context):
+    logger.info(f"\n🔍 ПРОВЕРКА ПРОГНОЗОВ #{game_num}")
+    for pred_id, prediction in list(storage.strategy2_predictions.items()):
+        if prediction['status'] != 'pending': continue
+        
+        if game_num in prediction['check_games']:
+            idx = prediction['check_games'].index(game_num)
+            if idx == prediction['attempt']:
+                player_cards = game_data['all_suits']
+                predicted_suit = prediction['original_suit']
+                
+                suit_found = any(compare_suits(predicted_suit, card) for card in player_cards)
+                
+                if suit_found:
+                    prediction['status'] = 'win'
+                    prediction['result_game'] = game_num
+                    storage.strategy2_stats['wins'] += 1
+                    await update_prediction_result(pred_id, 'win', game_num, context)
+                else:
+                    if idx < len(prediction['check_games']) - 1:
+                        prediction['attempt'] += 1
+                        await update_dogon_status(pred_id, context)
+                    else:
+                        prediction['status'] = 'loss'
+                        storage.strategy2_stats['losses'] += 1
+                        await update_prediction_result(pred_id, 'loss', game_num, context)
+
 async def check_patterns(game_num, game_data, context):
-    """🎯 ПАТТЕРНЫ + ПРОГНОЗЫ"""
     logger.info(f"\n🔍 ПАТТЕРНЫ #{game_num}")
-    
     first_suit = game_data['first_suit']
-    all_suits = game_data['all_suits']
-    
     if not first_suit: return
     
-    # 1️⃣ ПРОВЕРКА ПАТТЕРНА
+    # ✅ ПРОВЕРКА ПАТТЕРНА
     if game_num in storage.patterns:
         pattern = storage.patterns[game_num]
-        expected_suit = pattern['suit']
-        source_game = pattern['source_game']
+        all_suits = game_data['all_suits']
         
-        # 1-я ИЛИ 2-я карта
-        suit_found = False
-        if len(all_suits) >= 1 and compare_suits(expected_suit, all_suits[0]):
-            suit_found = True
-            logger.info(f"✅ #{source_game}→#{game_num}: 1-я {expected_suit}")
-        elif len(all_suits) >= 2 and compare_suits(expected_suit, all_suits[1]):
-            suit_found = True
-            logger.info(f"✅ #{source_game}→#{game_num}: 2-я {expected_suit}")
+        suit_found = (len(all_suits) >= 1 and compare_suits(pattern['suit'], all_suits[0])) or \
+                    (len(all_suits) >= 2 and compare_suits(pattern['suit'], all_suits[1]))
         
         if suit_found:
-            # 🎯 ПРОГНОЗ!
             target_game = game_num + 1
-            predicted_suit = SUIT_CHANGE_RULES.get(expected_suit)
-            
-            logger.info(f"🎯 ПАТТЕРН ✓ #{source_game}({expected_suit})→#{game_num}")
-            logger.info(f"📤 ПРОГНОЗ {predicted_suit} #{target_game}")
-            
+            predicted_suit = SUIT_CHANGE_RULES.get(pattern['suit'])
             if predicted_suit:
                 storage.strategy2_counter += 1
                 pred_id = storage.strategy2_counter
-                
                 prediction = {
-                    'id': pred_id,
-                    'source_game': source_game,
-                    'target_game': target_game,
-                    'original_suit': predicted_suit,
+                    'id': pred_id, 'source_game': pattern['source_game'],
+                    'target_game': target_game, 'original_suit': predicted_suit,
                     'check_games': [target_game, target_game+1, target_game+2],
-                    'status': 'pending',
-                    'attempt': 0
+                    'status': 'pending', 'attempt': 0, 'channel_message_id': None
                 }
                 storage.strategy2_predictions[pred_id] = prediction
                 await send_prediction_to_channel(prediction, context)
+                logger.info(f"🎯 ПРОГНОЗ #{pred_id}: {predicted_suit} #{target_game}")
         
         del storage.patterns[game_num]
     
-    # 2️⃣ ✅ НОВЫЙ ПАТТЕРН +3!
+    # ✅ НОВЫЙ ПАТТЕРН +3!
     is_odd = game_num % 2 != 0
     if is_odd and is_valid_game(game_num):
-        check_game = game_num + 3  # ✅ ИСПРАВЛЕНО: +3 вместо +2!
+        check_game = game_num + 3  # ✅ ИСПРАВЛЕНО +3!
         storage.patterns[check_game] = {
             'suit': first_suit,
             'source_game': game_num
         }
-        logger.info(f"📝 #{game_num}({first_suit}) → #{check_game}")
+        logger.info(f"📝 #{game_num}({first_suit}) → #{check_game} (+3!)")
 
 async def send_prediction_to_channel(prediction, context):
-    """📤 BOT1 формат"""
     try:
         text = (
             f"🎯 *BOT1 - НОВЫЙ ПРОГНОЗ #{prediction['id']}*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ДЕТАЛИ:*\n"
-            f"┣ 🎯 #{prediction['source_game']}→#{prediction['target_game']}\n"
-            f"┣ 🃏 {prediction['original_suit']}\n"
-            f"┣ 🔄 #{prediction['check_games'][1]}\n"
-            f"┣ 🔄 #{prediction['check_games'][2]}\n"
+            f"┣ 🎯 Целевая игра: #{prediction['target_game']}\n"
+            f"┣ 🃏 Прогнозируемая масть: {prediction['original_suit']}\n"
+            f"┣ 🔄 Догон 1: #{prediction['check_games'][1]}\n"
+            f"┣ 🔄 Догон 2: #{prediction['check_games'][2]}\n"
             f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
         )
         message = await context.bot.send_message(
             OUTPUT_CHANNEL_ID, text, parse_mode='Markdown'
         )
         prediction['channel_message_id'] = message.message_id
-        logger.info(f"✅ ПРОГНОЗ #{prediction['id']} ОТПРАВЛЕН!")
     except Exception as e:
-        logger.error(f"❌ {e}")
+        logger.error(f"❌ Отправка: {e}")
+
+async def update_dogon_status(pred_id, context):
+    try:
+        prediction = storage.strategy2_predictions[pred_id]
+        if not prediction.get('channel_message_id'): return
+        
+        next_game = prediction['check_games'][prediction['attempt']]
+        text = (
+            f"🔄 *BOT1 - ДОГОН #{pred_id} ({prediction['attempt']}/2)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📊 *СТАТУС:*\n"
+            f"┣ 🎯 #{next_game}\n"
+            f"┣ 🃏 {prediction['original_suit']}\n"
+            f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
+        )
+        await context.bot.edit_message_text(
+            chat_id=OUTPUT_CHANNEL_ID,
+            message_id=prediction['channel_message_id'],
+            text=text,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"❌ Догон: {e}")
+
+async def update_prediction_result(pred_id, result, game_num, context):
+    try:
+        prediction = storage.strategy2_predictions[pred_id]
+        if not prediction.get('channel_message_id'): return
+        
+        stats = storage.strategy2_stats
+        if result == 'win':
+            text = (
+                f"✅ *BOT1 - ПРОГНОЗ #{pred_id} ЗАШЁЛ!*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🏆 *РЕЗУЛЬТАТ:*\n"
+                f"┣ 🎯 #{game_num}\n"
+                f"┣ 🃏 {prediction['original_suit']}\n"
+                f"┣ 📊 {stats['wins']}✅/{stats['losses']}❌\n"
+                f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
+            )
+        else:
+            text = (
+                f"❌ *BOT1 - ПРОГНОЗ #{pred_id} НЕ ЗАШЁЛ*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"💔 *РЕЗУЛЬТАТ:*\n"
+                f"┣ 🎯 #{game_num}\n"
+                f"┣ 🃏 {prediction['original_suit']}\n"
+                f"┣ 📊 {stats['wins']}✅/{stats['losses']}❌\n"
+                f"┗ ⏱ {datetime.now().strftime('%H:%M:%S')}"
+            )
+        
+        await context.bot.edit_message_text(
+            chat_id=OUTPUT_CHANNEL_ID,
+            message_id=prediction['channel_message_id'],
+            text=text,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"❌ Результат: {e}")
 
 async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """📥 Обработчик"""
     if update.effective_chat.id != INPUT_CHANNEL_ID: return
     
     text = update.channel_post.text or ""
@@ -226,10 +283,11 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     game_num = game_data['game_num']
     storage.game_history[game_num] = game_data
     
+    await check_predictions(game_num, game_data, context)
     await check_patterns(game_num, game_data, context)
     
-    if len(storage.game_history) > 100:
-        oldest = min(storage.game_history)
+    if len(storage.game_history) > 200:
+        oldest = min(storage.game_history.keys())
         del storage.game_history[oldest]
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -240,35 +298,33 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"❌ {context.error}")
 
 def main():
-    # 🔒 LOCK
     if not acquire_lock(): sys.exit(1)
     
-    # ✅ ТОКЕН
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/getMe"
-        import urllib.request
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = json.loads(resp.read().decode())
-            if data.get('ok'):
-                logger.info(f"✅ @{data['result']['username']}")
-            else:
-                logger.error("❌ Токен!")
-                release_lock()
-                sys.exit(1)
+            if not data.get('ok'):
+                raise Exception("Токен!")
+            logger.info(f"✅ @{data['result']['username']}")
     except:
         logger.error("❌ Токен!")
         release_lock()
         sys.exit(1)
     
     print("\n" + "="*60)
-    print("🤖 BOT1 КРАСНАЯ→КРАСНАЯ ✓")
-    print("🎯 Логика: 1189♥️→1192♥️→♦️ 1193")
-    print("✅ +3 вместо +2!")
+    print("🤖 BOT1 v20.x КРАСНАЯ→КРАСНАЯ")
+    print("🎯 Логика: 1189♥️→1192♥️→♦️(1193-1195)")
+    print("✅ +3 паттерн + ВСЕ 3 карты!")
     print("="*60)
     
-    app = Application.builder().token(TOKEN).build()
+    # ✅ ApplicationBuilder!
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_error_handler(error_handler)
-    app.add_handler(MessageHandler(filters.Chat(INPUT_CHANNEL_ID) & filters.TEXT, handle_new_game))
+    app.add_handler(MessageHandler(
+        filters.Chat(INPUT_CHANNEL_ID) & filters.TEXT, 
+        handle_new_game
+    ))
     
     try:
         app.run_polling(drop_pending_updates=True, allowed_updates=['channel_post'])
