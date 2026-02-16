@@ -34,7 +34,6 @@ RED_RED_RANGES = [
     (1110, 1119), (1130, 1139), (1140, 1140)
 ]
 
-# ✅ ПРАВИЛА: ♦️↔♥️ ♠️↔♣️
 SUIT_CHANGE_RULES = {
     '♦️': '♥️', '♥️': '♦️',
     '♠️': '♣️', '♣️': '♠️'
@@ -42,11 +41,9 @@ SUIT_CHANGE_RULES = {
 
 SUIT_MAP = {'♠': '♠️', '♣': '♣️', '♥': '♥️', '♦': '♦️'}
 
-# Логирование
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ====================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ======================
 storage = None
 application = None
 
@@ -63,10 +60,10 @@ async def acquire_lock():
     try:
         storage.lock_fd = open(LOCK_FILE, 'w')
         fcntl.flock(storage.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        logger.info("🔒 RedRed_v2 Lock OK")
+        logger.info("🔒 Lock OK")
         return True
     except:
-        logger.error("❌ RedRed_v2 уже запущен")
+        logger.error("❌ Уже запущен")
         return False
 
 def release_lock():
@@ -75,15 +72,14 @@ def release_lock():
             fcntl.flock(storage.lock_fd.fileno(), fcntl.LOCK_UN)
             storage.lock_fd.close()
             os.unlink(LOCK_FILE)
-            logger.info("🔓 Lock освобожден")
         except:
             pass
 
 # ====================== УТИЛИТЫ ======================
-def is_valid_redred_game(game_num: int) -> bool:
+def is_valid_redred_game(game_num):
     return any(start <= game_num <= end for start, end in RED_RED_RANGES)
 
-def parse_suits(text: str) -> List[str]:
+def parse_suits(text):
     suits = []
     suit_pattern = r'[A2-9TJQK][♠♣♥♦]'
     matches = re.findall(suit_pattern, text)
@@ -92,11 +88,11 @@ def parse_suits(text: str) -> List[str]:
         suits.append(SUIT_MAP.get(suit_char, suit_char))
     return suits
 
-def extract_game_number(text: str) -> Optional[int]:
+def extract_game_number(text):
     match = re.search(r'#N?(\d+)', text)
     return int(match.group(1)) if match else None
 
-def parse_game_data(text: str) -> Dict:
+def parse_game_data(text):
     game_num = extract_game_number(text)
     if not game_num or not is_valid_redred_game(game_num):
         return {}
@@ -118,8 +114,9 @@ def parse_game_data(text: str) -> Dict:
         'all_suits': all_suits
     }
 
-# ====================== ЛОГИКА ======================
+# ====================== ✅ ИСПРАВЛЕНО! СТРОКА 122 ======================
 async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAULT_TYPE):
+    """🔍 Проверка паттернов"""
     first_suit = game_data.get('first_suit')
     if not first_suit:
         return
@@ -136,7 +133,6 @@ async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAUL
         
         if suit_found:
             logger.info(f"✅ ПАТТЕРН #{pattern['source']}({pattern['suit']}) → #{game_num}")
-            
             predicted_suit = SUIT_CHANGE_RULES.get(pattern['suit'])
             if predicted_suit:
                 target_game = game_num + 1
@@ -168,6 +164,7 @@ async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAUL
         logger.info(f"📝 #{game_num}({first_suit}) → #{check_game}")
 
 async def check_predictions(game_num: int, game_ Dict, context: ContextTypes.DEFAULT_TYPE):
+    """🎯 Проверка прогнозов"""
     all_suits = game_data['all_suits']
     if not all_suits:
         return
@@ -181,14 +178,14 @@ async def check_predictions(game_num: int, game_ Dict, context: ContextTypes.DEF
             suit_found = predicted_suit in all_suits
             
             if suit_found:
-                logger.info(f"🎉 RedRed #{pred_id} ЗАШЁЛ #{game_num}!")
+                logger.info(f"🎉 #{pred_id} ЗАШЁЛ #{game_num}!")
                 prediction['status'] = 'win'
                 prediction['win_game'] = game_num
                 storage.stats['wins'] += 1
                 await send_redred_win(pred_id, prediction, game_num)
                 del storage.predictions[pred_id]
             elif game_num == prediction['check_games'][-1]:
-                logger.info(f"❌ RedRed #{pred_id} ПРОИГРАЛ")
+                logger.info(f"❌ #{pred_id} ПРОИГРАЛ")
                 storage.stats['losses'] += 1
                 del storage.predictions[pred_id]
 
@@ -198,32 +195,24 @@ async def send_redred_prediction(prediction: Dict, context: ContextTypes.DEFAULT
     message = (
         f"🆕 <b>КРАСНАЯ→КРАСНАЯ #{pred_id}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 ПАТТЕРН: #{prediction['source_game']} → #{prediction['pattern_game']}\n"
-        f"🔄 ПРОГНОЗ: <b>{prediction['suit']}</b> #{prediction['target_game']}\n"
+        f"📊 #{prediction['source_game']} → #{prediction['pattern_game']}\n"
+        f"🔄 <b>{prediction['suit']} #{prediction['target_game']}</b>\n"
         f"🔄 Догоны: #{prediction['check_games'][1]}, #{prediction['check_games'][2]}\n"
-        f"⚡ v2: ♦️♥️ ♠️♣️ +3"
+        f"⚡ ♦️♥️ ♠️♣️ +3"
     )
     
-    await context.bot.send_message(
-        chat_id=INPUT_CHANNEL_ID,
-        text=message,
-        parse_mode='HTML'
-    )
-    logger.info(f"🚀 Прогноз #{pred_id} отправлен!")
+    await context.bot.send_message(chat_id=INPUT_CHANNEL_ID, text=message, parse_mode='HTML')
+    logger.info(f"🚀 Прогноз #{pred_id}")
 
 async def send_redred_win(pred_id: int, prediction: Dict, win_game: int):
     message = (
-        f"🎉 <b>✅ КРАСНАЯ→КРАСНАЯ #{pred_id} ВЫИГРЫШ!</b>\n"
+        f"🎉 <b>✅ #{pred_id} ВЫИГРЫШ!</b>\n"
         f"📊 #{prediction['source_game']} → #{prediction['pattern_game']}\n"
         f"🎯 <b>{prediction['suit']} #{win_game} ✅</b>\n"
         f"📈 {storage.stats['wins']}✅/{storage.stats['losses']}❌"
     )
     
-    await application.bot.send_message(
-        chat_id=INPUT_CHANNEL_ID,
-        text=message,
-        parse_mode='HTML'
-    )
+    await application.bot.send_message(chat_id=INPUT_CHANNEL_ID, text=message, parse_mode='HTML')
 
 # ====================== ОБРАБОТЧИК ======================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -235,80 +224,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if game_
         game_num = game_data['game_num']
-        logger.info(f"📥 RedRed #{game_num}: {game_data['all_suits']}")
+        logger.info(f"📥 #{game_num}: {game_data['all_suits']}")
         
         await asyncio.gather(
             check_patterns(game_num, game_data, context),
             check_predictions(game_num, game_data, context)
         )
 
-# ====================== ✅ ПОЛНЫЙ MAIN С ЗАВЕРШЕНИЕМ ======================
+# ====================== MAIN ======================
 async def main():
     global storage, application
     
-    print("="*60)
-    print("🤖 КРАСНАЯ→КРАСНАЯ v2 ✅ ПОЛНЫЙ КОД")
-    print("📊 Диапазон: 10-19/30-39...1140")
-    print("🔄 Правила: ♦️→♥️ ♠️→♣️")
-    print("="*60)
+    print("="*50)
+    print("🤖 КРАСНАЯ→КРАСНАЯ v2")
+    print("📊 10-19/30-39...1140")
+    print("="*50)
     
-    # Инициализация
     storage = RedRedStorage()
     
-    # 🔒 Lock
     if not await acquire_lock():
-        print("❌ Бот уже запущен!")
-        sys.exit(1)
+        print("❌ Уже запущен!")
+        return
     
     try:
-        # Создание приложения
         application = Application.builder().token(TOKEN).build()
-        
-        # Обработчик
         application.add_handler(MessageHandler(
             filters.Chat(chat_id=INPUT_CHANNEL_ID) & filters.TEXT,
             handle_message
         ))
         
-        # Запуск
         await application.initialize()
         await application.start()
-        logger.info("🚀 RedRed_v2 запущен!")
+        logger.info("🚀 Запущен!")
         
-        # Polling БЕСКОНЕЧНЫЙ
         await application.updater.start_polling(drop_pending_updates=True)
-        await asyncio.Event().wait()  # ЖДЕТ СИГНАЛ ОСТАНОВКИ
+        await asyncio.Event().wait()
         
-    except KeyboardInterrupt:
-        logger.info("🛑 Остановлен пользователем (Ctrl+C)")
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
+        logger.error(f"❌ Ошибка: {e}")
     finally:
-        # ✅ ПОЛНОЕ ЗАВЕРШЕНИЕ
-        logger.info("🛑 Завершение бота...")
         if application:
             await application.stop()
-            await application.shutdown()
         release_lock()
-        logger.info("✅ Бот полностью остановлен")
 
-# ====================== СИГНАЛЫ ДЛЯ ГРАЦИОЗНОЙ ОСТАНОВКИ ======================
-def signal_handler(sig, frame):
-    logger.info(f"🛑 Получен сигнал SIG{sig}")
-    sys.exit(0)
-
-# ====================== ✅ ТОЧКА ВХОДА ======================
 if __name__ == "__main__":
-    # Обработка сигналов
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("🛑 Ctrl+C")
-    except Exception as e:
-        logger.error(f"❌ Фатальная ошибка: {e}")
-    finally:
-        release_lock()
-        print("👋 Бот завершил работу")
+        print("🛑 Остановлен")
