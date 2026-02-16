@@ -3,6 +3,8 @@ import logging
 import re
 import fcntl
 import os
+import signal
+import sys
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -14,9 +16,9 @@ TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 ADMIN_ID = 683219603
-LOCK_FILE = f'/tmp/redred_v2_{TOKEN[-10:]}.lock'
+LOCK_FILE = '/tmp/redred_v2.lock'
 
-# ✅ НОВЫЙ ДИАПАЗОН: 10-19,30-39,50-59...1140 (57 диапазонов)
+# ✅ НОВЫЙ ДИАПАЗОН 10-19/30-39...1140
 RED_RED_RANGES = [
     (10, 19), (30, 39), (50, 59), (70, 79), (90, 99),
     (110, 119), (130, 139), (150, 159), (170, 179), (190, 199),
@@ -32,61 +34,56 @@ RED_RED_RANGES = [
     (1110, 1119), (1130, 1139), (1140, 1140)
 ]
 
-# ✅ НОВЫЕ ПРАВИЛА: ♦️↔♥️ ♠️↔♣️
+# ✅ ПРАВИЛА: ♦️↔♥️ ♠️↔♣️
 SUIT_CHANGE_RULES = {
-    '♦️': '♥️',    # Бубна → Черва
-    '♥️': '♦️',    # Черва → Бубна  
-    '♠️': '♣️',    # Пики → Трефа
-    '♣️': '♠️'     # Трефа → Пики
+    '♦️': '♥️', '♥️': '♦️',
+    '♠️': '♣️', '♣️': '♠️'
 }
 
 SUIT_MAP = {'♠': '♠️', '♣': '♣️', '♥': '♥️', '♦': '♦️'}
 
 # Логирование
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ====================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ======================
+storage = None
+application = None
 
 class RedRedStorage:
     def __init__(self):
-        self.patterns: Dict[int, Dict] = {}
-        self.predictions: Dict[int, Dict] = {}
+        self.patterns = {}
+        self.predictions = {}
         self.stats = {'wins': 0, 'losses': 0}
         self.prediction_counter = 0
         self.lock_fd = None
 
-storage = RedRedStorage()
-
-# ====================== LOCK & UTILS ======================
+# ====================== LOCK ======================
 async def acquire_lock():
-    """🔒 Блокировка запуска"""
     try:
         storage.lock_fd = open(LOCK_FILE, 'w')
         fcntl.flock(storage.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        logger.info(f"🔒 RedRed_v2 Lock: {LOCK_FILE}")
+        logger.info("🔒 RedRed_v2 Lock OK")
         return True
-    except (IOError, OSError):
-        logger.error(f"❌ RedRed_v2 уже запущен!")
+    except:
+        logger.error("❌ RedRed_v2 уже запущен")
         return False
 
 def release_lock():
-    """🔓 Освобождение"""
-    if storage.lock_fd:
+    if storage and storage.lock_fd:
         try:
             fcntl.flock(storage.lock_fd.fileno(), fcntl.LOCK_UN)
             storage.lock_fd.close()
             os.unlink(LOCK_FILE)
             logger.info("🔓 Lock освобожден")
-        except: pass
+        except:
+            pass
 
+# ====================== УТИЛИТЫ ======================
 def is_valid_redred_game(game_num: int) -> bool:
-    """✅ Проверка диапазона 10-19/30-39...1140"""
     return any(start <= game_num <= end for start, end in RED_RED_RANGES)
 
 def parse_suits(text: str) -> List[str]:
-    """Извлечение ВСЕХ мастей"""
     suits = []
     suit_pattern = r'[A2-9TJQK][♠♣♥♦]'
     matches = re.findall(suit_pattern, text)
@@ -96,17 +93,14 @@ def parse_suits(text: str) -> List[str]:
     return suits
 
 def extract_game_number(text: str) -> Optional[int]:
-    """#N123 или #123"""
     match = re.search(r'#N?(\d+)', text)
     return int(match.group(1)) if match else None
 
 def parse_game_data(text: str) -> Dict:
-    """👈 Левая рука игрока 0(...)"""
     game_num = extract_game_number(text)
     if not game_num or not is_valid_redred_game(game_num):
         return {}
     
-    # Левая рука: 0(К♥️ 10♠️ ...)
     left_hand_pattern = r'0\\(([A2-9TJQK♠♣♥♦\s]+)\\)'
     left_match = re.search(left_hand_pattern, text)
     
@@ -118,37 +112,27 @@ def parse_game_data(text: str) -> Dict:
         all_suits = parse_suits(left_cards)
         first_suit = all_suits[0] if all_suits else None
     
-    logger.info(f"📥 RedRed #{game_num}: first={first_suit}, all={all_suits}")
     return {
         'game_num': game_num,
         'first_suit': first_suit,
-        'all_suits': all_suits,
-        'text': text
+        'all_suits': all_suits
     }
 
-# ====================== ПАТТЕРНЫ ======================
+# ====================== ЛОГИКА ======================
 async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAULT_TYPE):
-    """🔍 +3 паттерны Красная→Красная"""
     first_suit = game_data.get('first_suit')
     if not first_suit:
-        logger.info(f"⏭️ RedRed #{game_num}: нет масти")
         return
     
-    logger.info(f"\n🔍 RedRed #{game_num} ({first_suit})")
-    
-    # 1️⃣ ПРОВЕРКА паттерна (1-я ИЛИ 2-я карта)
+    # ПРОВЕРКА паттерна
     if game_num in storage.patterns:
         pattern = storage.patterns[game_num]
         all_suits = game_data['all_suits']
         
-        # ✅ 1-я ИЛИ 2-я карта!
         suit_found = (
             (len(all_suits) >= 1 and all_suits[0] == pattern['suit']) or
             (len(all_suits) >= 2 and all_suits[1] == pattern['suit'])
         )
-        
-        logger.info(f"   Проверяем паттерн #{pattern['source']}({pattern['suit']})")
-        logger.info(f"   Карты: {all_suits} | Найдено: {suit_found}")
         
         if suit_found:
             logger.info(f"✅ ПАТТЕРН #{pattern['source']}({pattern['suit']}) → #{game_num}")
@@ -171,122 +155,78 @@ async def check_patterns(game_num: int, game_ Dict, context: ContextTypes.DEFAUL
                 }
                 storage.predictions[pred_id] = prediction
                 await send_redred_prediction(prediction, context)
-            else:
-                logger.warning(f"⚠️ Нет правила смены для {pattern['suit']}")
         
         del storage.patterns[game_num]
     
-    # 2️⃣ ✅ СОЗДАНИЕ НОВОГО ПАТТЕРНА +3
+    # СОЗДАНИЕ паттерна +3
     check_game = game_num + 3
     if is_valid_redred_game(check_game):
         storage.patterns[check_game] = {
             'suit': first_suit,
             'source': game_num
         }
-        logger.info(f"📝 #{game_num}({first_suit}) → #{check_game} (+3)")
+        logger.info(f"📝 #{game_num}({first_suit}) → #{check_game}")
 
-# ====================== ПРОГНОЗЫ ======================
 async def check_predictions(game_num: int, game_ Dict, context: ContextTypes.DEFAULT_TYPE):
-    """🎯 Проверка ВСЕХ 3 догонов"""
     all_suits = game_data['all_suits']
     if not all_suits:
         return
     
-    predictions_to_check = []
-    for pred_id, prediction in storage.predictions.items():
-        if (prediction['status'] == 'pending' and 
-            game_num in prediction['check_games']):
-            predictions_to_check.append((pred_id, prediction))
-    
-    for pred_id, prediction in predictions_to_check:
-        predicted_suit = prediction['suit']
-        check_idx = prediction['check_games'].index(game_num)
+    for pred_id, prediction in list(storage.predictions.items()):
+        if prediction['status'] != 'pending':
+            continue
         
-        # ✅ ПРОВЕРКА ВСЕХ КАРТ ИГРОКА!
-        suit_found = predicted_suit in all_suits
-        
-        logger.info(f"   Прогноз #{pred_id}: {predicted_suit} | Карты: {all_suits} | Найдено: {suit_found}")
-        
-        if suit_found:
-            logger.info(f"🎉 ✅ RedRed #{pred_id} ЗАШЁЛ #{game_num}!")
-            prediction['status'] = 'win'
-            prediction['win_game'] = game_num
-            storage.stats['wins'] += 1
-            await send_redred_win(pred_id, prediction, game_data)
-            del storage.predictions[pred_id]
-        elif check_idx == 2:  # Последний догон
-            logger.info(f"❌ RedRed #{pred_id} ПРОИГРАЛ")
-            prediction['status'] = 'lose'
-            storage.stats['losses'] += 1
-            await send_redred_lose(pred_id, prediction)
-            del storage.predictions[pred_id]
+        if game_num in prediction['check_games']:
+            predicted_suit = prediction['suit']
+            suit_found = predicted_suit in all_suits
+            
+            if suit_found:
+                logger.info(f"🎉 RedRed #{pred_id} ЗАШЁЛ #{game_num}!")
+                prediction['status'] = 'win'
+                prediction['win_game'] = game_num
+                storage.stats['wins'] += 1
+                await send_redred_win(pred_id, prediction, game_num)
+                del storage.predictions[pred_id]
+            elif game_num == prediction['check_games'][-1]:
+                logger.info(f"❌ RedRed #{pred_id} ПРОИГРАЛ")
+                storage.stats['losses'] += 1
+                del storage.predictions[pred_id]
 
-# ====================== ОТПРАВКА СООБЩЕНИЙ ======================
+# ====================== ОТПРАВКА ======================
 async def send_redred_prediction(prediction: Dict, context: ContextTypes.DEFAULT_TYPE):
-    """🚀 Отправка прогноза"""
     pred_id = prediction['id']
-    suit = prediction['suit']
-    target = prediction['target_game']
-    
     message = (
-        f"\n🆕 <b>КРАСНАЯ→КРАСНАЯ #{pred_id}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📊 <b>ПАТТЕРН:</b>\n"
-        f"┣ #{prediction['source_game']}\n"
-        f"┣ → #{prediction['pattern_game']}\n\n"
-        f"🔄 <b>ПРОГНОЗ:</b> <b>{suit}</b> #{target}\n"
-        f"┣ 🔄 Догон1: #{prediction['check_games'][1]}\n"
-        f"┗ 🔄 Догон2: #{prediction['check_games'][2]}\n\n"
-        f"⚡ <b>v2: ♦️♥️ ♠️♣️ +3</b>\n"
-        f"⏱ {datetime.now().strftime('%H:%M:%S')}"
-    )
-    
-    try:
-        msg = await context.bot.send_message(
-            chat_id=INPUT_CHANNEL_ID,
-            text=message,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-        prediction['msg_id'] = msg.message_id
-        logger.info(f"🚀 RedRed #{pred_id} отправлен!")
-    except Exception as e:
-        logger.error(f"❌ Отправка прогноза #{pred_id}: {e}")
-
-async def send_redred_win(pred_id: int, prediction: Dict, game_ Dict):
-    """✅ Выигрыш"""
-    message = (
-        f"\n🎉 <b>✅ КРАСНАЯ→КРАСНАЯ #{pred_id} ВЫИГРЫШ!</b>\n"
+        f"🆕 <b>КРАСНАЯ→КРАСНАЯ #{pred_id}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 #{prediction['source_game']} → #{prediction['pattern_game']}\n"
-        f"🎯 <b>{prediction['suit']} #{prediction['win_game']} ✅</b>\n\n"
-        f"📈 СТАТИСТИКА: {storage.stats['wins']}✅ / {storage.stats['losses']}❌\n\n"
-        f"⚡ <b>v2 СИСТЕМА РАБОТАЕТ!</b>"
+        f"📊 ПАТТЕРН: #{prediction['source_game']} → #{prediction['pattern_game']}\n"
+        f"🔄 ПРОГНОЗ: <b>{prediction['suit']}</b> #{prediction['target_game']}\n"
+        f"🔄 Догоны: #{prediction['check_games'][1]}, #{prediction['check_games'][2]}\n"
+        f"⚡ v2: ♦️♥️ ♠️♣️ +3"
     )
+    
+    await context.bot.send_message(
+        chat_id=INPUT_CHANNEL_ID,
+        text=message,
+        parse_mode='HTML'
+    )
+    logger.info(f"🚀 Прогноз #{pred_id} отправлен!")
+
+async def send_redred_win(pred_id: int, prediction: Dict, win_game: int):
+    message = (
+        f"🎉 <b>✅ КРАСНАЯ→КРАСНАЯ #{pred_id} ВЫИГРЫШ!</b>\n"
+        f"📊 #{prediction['source_game']} → #{prediction['pattern_game']}\n"
+        f"🎯 <b>{prediction['suit']} #{win_game} ✅</b>\n"
+        f"📈 {storage.stats['wins']}✅/{storage.stats['losses']}❌"
+    )
+    
     await application.bot.send_message(
         chat_id=INPUT_CHANNEL_ID,
         text=message,
         parse_mode='HTML'
     )
 
-async def send_redred_lose(pred_id: int, prediction: Dict):
-    """❌ Проигрыш"""
-    message = (
-        f"\n❌ <b>КРАСНАЯ→КРАСНАЯ #{pred_id} ПРОИГРАЛ</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 #{prediction['source_game']} → #{prediction['pattern_game']}\n"
-        f"💥 <b>{prediction['suit']} не зашла</b>\n\n"
-        f"📈 {storage.stats['wins']}✅ / {storage.stats['losses']}❌"
-    )
-    await application.bot.send_message(
-        chat_id=INPUT_CHANNEL_ID,
-        text=message,
-        parse_mode='HTML'
-    )
-
-# ====================== ГЛАВНЫЙ ОБРАБОТЧИК ======================
+# ====================== ОБРАБОТЧИК ======================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """📥 Обработка сообщений канала"""
     if not update.channel_post or update.channel_post.chat.id != INPUT_CHANNEL_ID:
         return
     
@@ -295,55 +235,80 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if game_
         game_num = game_data['game_num']
+        logger.info(f"📥 RedRed #{game_num}: {game_data['all_suits']}")
         
-        # ✅ Параллельная проверка паттернов + прогнозов
         await asyncio.gather(
             check_patterns(game_num, game_data, context),
             check_predictions(game_num, game_data, context)
         )
 
-# ====================== MAIN ======================
+# ====================== ✅ ПОЛНЫЙ MAIN С ЗАВЕРШЕНИЕМ ======================
 async def main():
-    global application
+    global storage, application
     
-    print("="*70)
-    print("🤖 КРАСНАЯ→КРАСНАЯ v2 - ПОЛНЫЙ КОД")
-    print("📊 Диапазон: 10-19/30-39/50-59...1140")
-    print("🔄 Правила: ♦️→♥️ ♠️→♣️ ♣️→♠️ ♥️→♦️")
-    print("✅ +3 паттерны + ВСЕ 3 карты + 3 догона")
-    print("="*70)
+    print("="*60)
+    print("🤖 КРАСНАЯ→КРАСНАЯ v2 ✅ ПОЛНЫЙ КОД")
+    print("📊 Диапазон: 10-19/30-39...1140")
+    print("🔄 Правила: ♦️→♥️ ♠️→♣️")
+    print("="*60)
+    
+    # Инициализация
+    storage = RedRedStorage()
     
     # 🔒 Lock
     if not await acquire_lock():
         print("❌ Бот уже запущен!")
-        return
+        sys.exit(1)
     
-    # Создание приложения
-    application = Application.builder().token(TOKEN).build()
-    
-    # ✅ Обработчик ТОЛЬКО для твоего канала
-    application.add_handler(MessageHandler(
-        filters.Chat(chat_id=INPUT_CHANNEL_ID) & filters.TEXT,
-        handle_message
-    ))
-    
-    # ✅ Запуск
-    await application.bot.delete_webhook()
-    await application.initialize()
-    await application.start()
-    logger.info("🚀 КРАСНАЯ→КРАСНАЯ v2 ЗАПУЩЕН!")
-    
-    # Polling
-    await application.updater.start_polling(
-        drop_pending_updates=True,
-        allowed_updates=['channel_post']
-    )
-    await asyncio.Event().wait()  # Бесконечный цикл
+    try:
+        # Создание приложения
+        application = Application.builder().token(TOKEN).build()
+        
+        # Обработчик
+        application.add_handler(MessageHandler(
+            filters.Chat(chat_id=INPUT_CHANNEL_ID) & filters.TEXT,
+            handle_message
+        ))
+        
+        # Запуск
+        await application.initialize()
+        await application.start()
+        logger.info("🚀 RedRed_v2 запущен!")
+        
+        # Polling БЕСКОНЕЧНЫЙ
+        await application.updater.start_polling(drop_pending_updates=True)
+        await asyncio.Event().wait()  # ЖДЕТ СИГНАЛ ОСТАНОВКИ
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 Остановлен пользователем (Ctrl+C)")
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+    finally:
+        # ✅ ПОЛНОЕ ЗАВЕРШЕНИЕ
+        logger.info("🛑 Завершение бота...")
+        if application:
+            await application.stop()
+            await application.shutdown()
+        release_lock()
+        logger.info("✅ Бот полностью остановлен")
 
+# ====================== СИГНАЛЫ ДЛЯ ГРАЦИОЗНОЙ ОСТАНОВКИ ======================
+def signal_handler(sig, frame):
+    logger.info(f"🛑 Получен сигнал SIG{sig}")
+    sys.exit(0)
+
+# ====================== ✅ ТОЧКА ВХОДА ======================
 if __name__ == "__main__":
+    # Обработка сигналов
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("🛑 Остановлен пользователем")
+        logger.info("🛑 Ctrl+C")
+    except Exception as e:
+        logger.error(f"❌ Фатальная ошибка: {e}")
     finally:
         release_lock()
+        print("👋 Бот завершил работу")
