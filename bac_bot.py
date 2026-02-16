@@ -1,5 +1,6 @@
-import telebot
-from telebot import types
+import logging
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import sqlite3
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -8,12 +9,24 @@ import re
 from collections import defaultdict, Counter
 import json
 import math
+import os
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Конфигурация
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 ADMIN_ID = 683219603
+
+# Состояния для ConversationHandler
+ENTERING_GAME = 1
+ENTERING_PREDICTION = 2
 
 # Инициализация базы данных
 def init_db():
@@ -507,20 +520,23 @@ class GameAnalyzer:
         
         return "\n".join(result)
 
-# Инициализация бота
-bot = telebot.TeleBot(TOKEN)
+# Создаем клавиатуру
+def get_main_keyboard():
+    keyboard = [
+        [KeyboardButton("📊 Ввести игру"), KeyboardButton("📈 Моя статистика")],
+        [KeyboardButton("📊 Активные сигналы"), KeyboardButton("📊 Проверка алгоритма")],
+        [KeyboardButton("📋 История игр"), KeyboardButton("🔮 Прогноз на игру")],
+        [KeyboardButton("ℹ️ Помощь"), KeyboardButton("📝 Пример формата")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# Команды бота
-@bot.message_handler(commands=['start'])
-def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add('📊 Ввести игру', '📈 Моя статистика')
-    markup.add('📊 Активные сигналы', '📊 Проверка алгоритма')
-    markup.add('📋 История игр', '🔮 Прогноз на игру')
-    markup.add('ℹ️ Помощь', '📝 Пример формата')
-    
-    bot.send_message(
-        message.chat.id,
+def get_back_keyboard():
+    keyboard = [[KeyboardButton("◀️ Назад")]]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# Обработчики команд
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "👋 Добро пожаловать в бота-анализатор баккары!\n\n"
         "СИСТЕМА СИГНАЛОВ:\n"
         "• Первый сигнал: от игры N → на игру N+3\n"
@@ -528,13 +544,11 @@ def start(message):
         "• Пример: #803(пики) → сигнал на #806(бубны)\n"
         "• #806(бубны) подтверждение → повторный сигнал на #807(бубны)\n\n"
         "Выберите действие:",
-        reply_markup=markup
+        reply_markup=get_main_keyboard()
     )
 
-@bot.message_handler(func=lambda message: message.text == '📊 Ввести игру')
-def enter_game(message):
-    msg = bot.send_message(
-        message.chat.id,
+async def enter_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "📝 Введите данные игры в вашем формате:\n\n"
         "Пример 1: #N803. 0(2♠️ J♥️ A♥️) - ✅6(J♦️ 6♦️) #T9 🟩\n"
         "Пример 2: #N806. 8(5♠️ 3♦️) 🔰 8(3♠️ 5♦️) #T16 #X🟡 #R\n\n"
@@ -542,35 +556,34 @@ def enter_game(message):
         "#N803 - номер игры\n"
         "✅ или 🔰 - обозначение победителя\n"
         "#T9 - общее количество очков",
-        reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add('◀️ Назад')
+        reply_markup=get_back_keyboard()
     )
-    bot.register_next_step_handler(msg, process_game_input)
+    return ENTERING_GAME
 
-def process_game_input(message):
-    if message.text == '◀️ Назад':
-        start(message)
-        return
+async def process_game_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == '◀️ Назад':
+        await start(update, context)
+        return ConversationHandler.END
     
     analyzer = GameAnalyzer()
-    parsed, analysis = analyzer.process_game_data(message.text, message.from_user.id)
+    parsed, analysis = analyzer.process_game_data(update.message.text, update.message.from_user.id)
     
     if parsed:
-        bot.send_message(message.chat.id, analysis, parse_mode='HTML')
+        await update.message.reply_text(analysis)
     else:
-        bot.send_message(
-            message.chat.id,
+        await update.message.reply_text(
             "❌ Ошибка в формате. Попробуйте снова или нажмите '📝 Пример формата'"
         )
     
-    start(message)
+    await start(update, context)
+    return ConversationHandler.END
 
-@bot.message_handler(func=lambda message: message.text == '📊 Активные сигналы')
-def show_active_signals(message):
+async def show_active_signals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     algorithm = SignalAlgorithm()
-    signals = algorithm.get_active_signals(message.from_user.id)
+    signals = algorithm.get_active_signals(update.message.from_user.id)
     
     if not signals:
-        bot.send_message(message.chat.id, "📭 Нет активных сигналов")
+        await update.message.reply_text("📭 Нет активных сигналов")
         return
     
     result = ["📊 АКТИВНЫЕ СИГНАЛЫ", "=" * 40, ""]
@@ -583,37 +596,32 @@ def show_active_signals(message):
         result.append(f"   Создан: {created}")
         result.append("")
     
-    bot.send_message(message.chat.id, "\n".join(result))
+    await update.message.reply_text("\n".join(result))
 
-@bot.message_handler(func=lambda message: message.text == '🔮 Прогноз на игру')
-def predict_for_game(message):
-    msg = bot.send_message(
-        message.chat.id,
+async def predict_for_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "Введите номер игры для прогноза:",
-        reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True).add('◀️ Назад')
+        reply_markup=get_back_keyboard()
     )
-    bot.register_next_step_handler(msg, process_prediction_request)
+    return ENTERING_PREDICTION
 
-def process_prediction_request(message):
-    if message.text == '◀️ Назад':
-        start(message)
-        return
+async def process_prediction_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == '◀️ Назад':
+        await start(update, context)
+        return ConversationHandler.END
     
     try:
-        game_number = int(message.text)
+        game_number = int(update.message.text)
     except:
-        bot.send_message(message.chat.id, "❌ Введите корректный номер игры")
-        start(message)
-        return
+        await update.message.reply_text("❌ Введите корректный номер игры")
+        await start(update, context)
+        return ConversationHandler.END
     
     algorithm = SignalAlgorithm()
-    signals = algorithm.check_game_signals(message.from_user.id, game_number)
+    signals = algorithm.check_game_signals(update.message.from_user.id, game_number)
     
     if not signals:
-        bot.send_message(
-            message.chat.id,
-            f"📭 Нет активных сигналов на игру #{game_number}"
-        )
+        await update.message.reply_text(f"📭 Нет активных сигналов на игру #{game_number}")
     else:
         result = [f"🔮 ПРОГНОЗ НА ИГРУ #{game_number}", "=" * 40, ""]
         for from_game, suit in signals:
@@ -626,7 +634,7 @@ def process_prediction_request(message):
         c = conn.cursor()
         c.execute('''SELECT first_suit FROM games_analysis 
                      WHERE user_id = ? AND game_number = ?''', 
-                  (message.from_user.id, game_number))
+                  (update.message.from_user.id, game_number))
         game_data = c.fetchone()
         conn.close()
         
@@ -640,12 +648,12 @@ def process_prediction_request(message):
             else:
                 result.append("   ❌ ПРОГНОЗ НЕ ПОДТВЕРДИЛСЯ")
         
-        bot.send_message(message.chat.id, "\n".join(result))
+        await update.message.reply_text("\n".join(result))
     
-    start(message)
+    await start(update, context)
+    return ConversationHandler.END
 
-@bot.message_handler(func=lambda message: message.text == '📊 Проверка алгоритма')
-def check_algorithm(message):
+async def check_algorithm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверяет работу алгоритма на истории игр"""
     conn = sqlite3.connect('baccarat_stats.db')
     c = conn.cursor()
@@ -654,13 +662,13 @@ def check_algorithm(message):
     c.execute('''SELECT game_number, first_suit 
                  FROM games_analysis 
                  WHERE user_id = ? AND first_suit IS NOT NULL
-                 ORDER BY game_number''', (message.from_user.id,))
+                 ORDER BY game_number''', (update.message.from_user.id,))
     
     games = c.fetchall()
     conn.close()
     
     if len(games) < 3:
-        bot.send_message(message.chat.id, "Недостаточно данных для проверки. Нужно минимум 3 игры.")
+        await update.message.reply_text("Недостаточно данных для проверки. Нужно минимум 3 игры.")
         return
     
     algorithm = SignalAlgorithm()
@@ -715,7 +723,7 @@ def check_algorithm(message):
                     })
     
     if total_predictions == 0:
-        bot.send_message(message.chat.id, "Нет пар для проверки")
+        await update.message.reply_text("Нет пар для проверки")
         return
     
     report = ["📊 ПРОВЕРКА АЛГОРИТМА", "=" * 50, ""]
@@ -735,10 +743,9 @@ def check_algorithm(message):
     bar = '█' * int(accuracy / 5) + '░' * (20 - int(accuracy / 5))
     report.append(f"   [{bar}]")
     
-    bot.send_message(message.chat.id, "\n".join(report))
+    await update.message.reply_text("\n".join(report))
 
-@bot.message_handler(func=lambda message: message.text == '📈 Моя статистика')
-def show_stats(message):
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('baccarat_stats.db')
     c = conn.cursor()
     
@@ -747,18 +754,18 @@ def show_stats(message):
                         SUM(CASE WHEN winner = 'hand1' THEN 1 ELSE 0 END),
                         SUM(CASE WHEN winner = 'hand2' THEN 1 ELSE 0 END),
                         SUM(CASE WHEN winner = 'tie' THEN 1 ELSE 0 END)
-                 FROM games_analysis WHERE user_id = ?''', (message.from_user.id,))
+                 FROM games_analysis WHERE user_id = ?''', (update.message.from_user.id,))
     
     total, h1_wins, h2_wins, ties = c.fetchone()
     
     if not total:
-        bot.send_message(message.chat.id, "Нет данных")
+        await update.message.reply_text("Нет данных")
         conn.close()
         return
     
     # Статистика сигналов
     c.execute('''SELECT COUNT(*), SUM(is_confirmed) FROM signals WHERE user_id = ?''', 
-              (message.from_user.id,))
+              (update.message.from_user.id,))
     total_signals, confirmed = c.fetchone()
     
     stats = f"📊 ВАША СТАТИСТИКА\n"
@@ -775,11 +782,10 @@ def show_stats(message):
         if total_signals > 0:
             stats += f"Точность: {(confirmed or 0)/total_signals*100:.1f}%\n"
     
-    bot.send_message(message.chat.id, stats)
+    await update.message.reply_text(stats)
     conn.close()
 
-@bot.message_handler(func=lambda message: message.text == '📋 История игр')
-def show_history(message):
+async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('baccarat_stats.db')
     c = conn.cursor()
     
@@ -787,13 +793,13 @@ def show_history(message):
                  FROM games_analysis 
                  WHERE user_id = ? 
                  ORDER BY game_number DESC 
-                 LIMIT 20''', (message.from_user.id,))
+                 LIMIT 20''', (update.message.from_user.id,))
     
     games = c.fetchall()
     conn.close()
     
     if not games:
-        bot.send_message(message.chat.id, "Нет игр")
+        await update.message.reply_text("Нет игр")
         return
     
     history = ["📋 ИСТОРИЯ ИГР", "=" * 50, ""]
@@ -805,10 +811,9 @@ def show_history(message):
         history.append(f"   {raw[:60]}...")
         history.append("")
     
-    bot.send_message(message.chat.id, "\n".join(history))
+    await update.message.reply_text("\n".join(history))
 
-@bot.message_handler(func=lambda message: message.text == '📝 Пример формата')
-def show_example(message):
+async def show_example(update: Update, context: ContextTypes.DEFAULT_TYPE):
     example = """
 📝 ПРИМЕРЫ ФОРМАТА:
 
@@ -834,10 +839,9 @@ def show_example(message):
 Четные десятки: пики↔бубны, черви↔трефы
 Нечетные десятки: пики↔трефы, черви↔бубны
     """
-    bot.send_message(message.chat.id, example)
+    await update.message.reply_text(example)
 
-@bot.message_handler(func=lambda message: message.text == 'ℹ️ Помощь')
-def help_command(message):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 🤖 БОТ-АНАЛИЗАТОР БАККАРЫ
     С СИСТЕМОЙ СИГНАЛОВ
@@ -874,17 +878,89 @@ def help_command(message):
 #803(пики) → сигнал на #806(бубны)
 #806(бубны) подтверждение → сигнал на #807(бубны)
     """
-    bot.send_message(message.chat.id, help_text)
+    await update.message.reply_text(help_text)
 
-@bot.message_handler(func=lambda message: message.text == '◀️ Назад')
-def go_back(message):
-    start(message)
+async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
 
-# Запуск бота
-if __name__ == '__main__':
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
+    return ConversationHandler.END
+
+# Обработчик текстовых сообщений для главного меню
+async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    
+    if text == '📊 Ввести игру':
+        return await enter_game(update, context)
+    elif text == '📈 Моя статистика':
+        await show_stats(update, context)
+    elif text == '📊 Активные сигналы':
+        await show_active_signals(update, context)
+    elif text == '📊 Проверка алгоритма':
+        await check_algorithm(update, context)
+    elif text == '📋 История игр':
+        await show_history(update, context)
+    elif text == '🔮 Прогноз на игру':
+        return await predict_for_game(update, context)
+    elif text == 'ℹ️ Помощь':
+        await help_command(update, context)
+    elif text == '📝 Пример формата':
+        await show_example(update, context)
+    elif text == '◀️ Назад':
+        await start(update, context)
+    else:
+        await update.message.reply_text("Используйте кнопки меню")
+    
+    return ConversationHandler.END
+
+def main():
+    # Инициализация БД
     init_db()
-    print("🤖 Бот запущен с СИСТЕМОЙ СИГНАЛОВ...")
+    
+    # Создание приложения
+    application = Application.builder().token(TOKEN).build()
+    
+    # Создание ConversationHandler для ввода игры
+    game_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Text("📊 Ввести игру"), enter_game)],
+        states={
+            ENTERING_GAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_game_input)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel), MessageHandler(filters.Text("◀️ Назад"), cancel)]
+    )
+    
+    # Создание ConversationHandler для прогноза
+    prediction_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Text("🔮 Прогноз на игру"), predict_for_game)],
+        states={
+            ENTERING_PREDICTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_prediction_request)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel), MessageHandler(filters.Text("◀️ Назад"), cancel)]
+    )
+    
+    # Регистрация обработчиков
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(game_conv_handler)
+    application.add_handler(prediction_conv_handler)
+    application.add_handler(MessageHandler(filters.Text("📈 Моя статистика"), show_stats))
+    application.add_handler(MessageHandler(filters.Text("📊 Активные сигналы"), show_active_signals))
+    application.add_handler(MessageHandler(filters.Text("📊 Проверка алгоритма"), check_algorithm))
+    application.add_handler(MessageHandler(filters.Text("📋 История игр"), show_history))
+    application.add_handler(MessageHandler(filters.Text("ℹ️ Помощь"), help_command))
+    application.add_handler(MessageHandler(filters.Text("📝 Пример формата"), show_example))
+    application.add_handler(MessageHandler(filters.Text("◀️ Назад"), go_back))
+    
+    # Обработчик для всех остальных текстовых сообщений (главное меню)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main_menu))
+    
+    # Запуск бота
+    print("🤖 Бот запущен с СИСТЕМОЙ СИГНАЛОВ (python-telegram-bot)...")
     print("📊 Первичный сигнал: N → N+3")
     print("📊 Повторный сигнал: при подтверждении N+1")
     print("Пример: 803(пики) → 806(бубны) → 807(бубны)")
-    bot.polling(none_stop=True)
+    
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
