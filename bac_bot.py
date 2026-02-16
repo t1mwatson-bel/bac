@@ -75,7 +75,7 @@ SUIT_CHANGE_RULES = {
     '♣️': '♠️'   # Трефа (черная) -> Пики (черная)
 }
 
-# НОВЫЙ ДИАПАЗОН (10-9, 30-39, 50-59 и т.д.)
+# НОВЫЙ ДИАПАЗОН (10-19, 30-39, 50-59 и т.д.)
 VALID_RANGES = [
     (10, 19), (30, 39), (50, 59), (70, 79), (90, 99),
     (110, 119), (130, 139), (150, 159), (170, 179), (190, 199),
@@ -178,7 +178,7 @@ def extract_left_part(text):
     return text.strip()
 
 def parse_game_data(text):
-    """Парсит данные игры из текста - ТОЛЬКО ЛЕВАЯ РУКА (БЕЗ ПРОВЕРКИ ДИАПАЗОНОВ)"""
+    """Парсит данные игры из текста - ТОЛЬКО ЛЕВАЯ РУКА"""
     # Ищем номер игры
     match = re.search(r'#N(\d+)', text)
     if not match:
@@ -214,7 +214,7 @@ def parse_game_data(text):
         logger.warning(f"⚠️ В левой руке игры #{game_num} не найдено мастей")
         return None
     
-    # Определяем первую карту (бот1 смотрит только на первую)
+    # Определяем первую карту
     first_suit = suits[0] if len(suits) > 0 else None
     
     logger.info(f"📊 Левая рука игры #{game_num}: карты {suits}")
@@ -410,7 +410,7 @@ async def check_predictions(current_game_num, game_data, context):
             target_cards = target_game_data.get('all_suits', [])
             logger.info(f"🃏 Карты левой руки целевой игры #{target_game}: {target_cards}")
             
-            # BOT1 смотрит ТОЛЬКО на первую карту
+            # Проверяем ТОЛЬКО первую карту
             suit_found = False
             if target_cards and compare_suits(pred['original_suit'], target_cards[0]):
                 suit_found = True
@@ -450,6 +450,7 @@ async def check_predictions(current_game_num, game_data, context):
 async def check_patterns(game_num, game_data, context):
     """Проверяет ожидающие паттерны и создает прогнозы (ТОЛЬКО для нужных диапазонов)"""
     first_suit = game_data['first_suit']
+    all_suits = game_data['all_suits']  # Все масти в руке игрока
     
     if not first_suit:
         return
@@ -457,16 +458,26 @@ async def check_patterns(game_num, game_data, context):
     # Проверяем, четная или нечетная игра
     is_odd = game_num % 2 != 0
     
-    # Проверяем, есть ли паттерн для этой игры
+    # Проверяем, есть ли паттерн для этой игры (ждем подтверждения)
     if game_num in storage.patterns:
         pattern = storage.patterns[game_num]
         expected_suit = pattern['suit']
         
-        # Проверяем только первую карту (бот1 смотрит только на первую)
+        # Проверяем ПЕРВУЮ ИЛИ ВТОРУЮ карту (хотя бы одна из первых двух имеет нужную масть)
         suit_found = False
-        if compare_suits(expected_suit, first_suit):
-            suit_found = True
-            logger.info(f"✅ Нашли масть {expected_suit} в первой карте левой руки игры #{game_num}")
+        found_position = None
+        
+        if len(all_suits) >= 1:
+            if compare_suits(expected_suit, all_suits[0]):
+                suit_found = True
+                found_position = "первой"
+                logger.info(f"✅ Нашли масть {expected_suit} в ПЕРВОЙ карте левой руки игры #{game_num}")
+        
+        if not suit_found and len(all_suits) >= 2:
+            if compare_suits(expected_suit, all_suits[1]):
+                suit_found = True
+                found_position = "второй"
+                logger.info(f"✅ Нашли масть {expected_suit} в ВТОРОЙ карте левой руки игры #{game_num}")
         
         if suit_found:
             # Паттерн подтвердился! Создаем прогноз
@@ -505,27 +516,35 @@ async def check_patterns(game_num, game_data, context):
                 
                 logger.info(f"🎯 ПАТТЕРН ПОДТВЕРЖДЕН!")
                 logger.info(f"   Исходная игра #{pattern['source_game']}: масть {pattern['suit']}")
-                logger.info(f"   Проверочная игра #{game_num}: масть найдена в первой карте")
+                logger.info(f"   Проверочная игра #{game_num}: масть найдена в {found_position} карте")
                 logger.info(f"🤖 НОВЫЙ ПРОГНОЗ #{pred_id}: {predicted_suit} в игре #{target_game}")
                 
                 # Отправляем прогноз в канал
                 await send_prediction_to_channel(prediction, context)
         else:
-            logger.info(f"❌ Паттерн не подтвержден: в первой карте игры #{game_num} нет масти {expected_suit}")
+            logger.info(f"❌ Паттерн не подтвержден: в 1-й или 2-й карте игры #{game_num} нет масти {expected_suit}")
+            if len(all_suits) >= 2:
+                logger.info(f"   Карты в руке: {all_suits[0]}, {all_suits[1]}")
+            elif len(all_suits) >= 1:
+                logger.info(f"   Карта в руке: {all_suits[0]}")
+            else:
+                logger.info(f"   В руке нет карт")
         
         # Удаляем обработанный паттерн
         del storage.patterns[game_num]
     
     # Создаем новый паттерн ТОЛЬКО от НЕЧЕТНЫХ игр и ТОЛЬКО в нужных диапазонах
+    # ЧЕРЕЗ 2 ИГРЫ
     if is_odd and is_valid_game(game_num):
-        check_game = game_num + 3
+        check_game = game_num + 2  # Проверка через 2 игры
         storage.patterns[check_game] = {
             'suit': first_suit,
             'source_game': game_num,
             'created': datetime.now()
         }
         
-        logger.info(f"📝 Создан паттерн от НЕЧЕТНОЙ игры #{game_num}({first_suit}) -> проверка в #{check_game}")
+        logger.info(f"📝 Создан паттерн от НЕЧЕТНОЙ игры #{game_num}({first_suit}) -> проверка через 2 игры в #{check_game}")
+        logger.info(f"   Условие: в игре #{check_game} 1-я ИЛИ 2-я карта должна быть {first_suit}")
     elif is_odd and not is_valid_game(game_num):
         logger.info(f"⏭️ Игра #{game_num} НЕЧЕТНАЯ, но вне диапазона - паттерн не создаем")
     else:
@@ -653,7 +672,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"\n{'='*60}")
         logger.info(f"📥 Получено: {text[:150]}...")
         
-        # Парсим данные игры (БЕЗ ПРОВЕРКИ ДИАПАЗОНОВ)
+        # Парсим данные игры
         game_data = parse_game_data(text)
         if not game_data:
             return
@@ -662,6 +681,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_suit = game_data['first_suit']
         
         logger.info(f"📊 Игра #{game_num} ({'НЕЧЕТНАЯ' if game_num%2 else 'ЧЕТНАЯ'}): первая карта {first_suit}")
+        logger.info(f"📊 Все карты левой руки: {game_data['all_suits']}")
         logger.info(f"📊 Теги: #R={game_data.get('has_r_tag', False)}, #X={game_data.get('has_x_tag', False)}")
         
         # Сохраняем в историю (ВСЕГДА)
@@ -703,10 +723,11 @@ def main():
     print("\n" + "="*60)
     print("🤖 BOT1 (КРАСНАЯ->КРАСНАЯ, ЧЕРНАЯ->ЧЕРНАЯ) ЗАПУЩЕН")
     print("="*60)
-    print(f"✅ Диапазоны для создания паттернов: 1-9, 20-29, 40-49... до 1440")
+    print(f"✅ Диапазоны для создания паттернов: 10-19, 30-39, 50-59... до 1440")
     print(f"✅ Всего диапазонов: {len(VALID_RANGES)}")
     print("✅ ПРОВЕРЯЕТ ПРОГНОЗЫ ТОЛЬКО ПОСЛЕ ЗАВЕРШЕНИЯ ИГРЫ")
-    print("✅ Анализирует ТОЛЬКО ПЕРВУЮ карту левой руки")
+    print("✅ ПАТТЕРН: проверка через 2 игры (1-я ИЛИ 2-я карта)")
+    print("✅ ПРОГНОЗ: проверка только первой карты")
     print("✅ Новые правила смены мастей:")
     print("   - Черва (♥️) -> Бубна (♦️) (красная -> красная)")
     print("   - Бубна (♦️) -> Черва (♥️) (красная -> красная)")
