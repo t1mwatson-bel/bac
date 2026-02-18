@@ -50,9 +50,9 @@ logger = logging.getLogger(__name__)
 # ======== ХРАНИЛИЩЕ ========
 class GameStorage:
     def __init__(self):
-        self.games = {}           # все игры
-        self.pending = {}          # игры ожидающие проверки
-        self.predictions = {}       # активные прогнозы
+        self.games = {}
+        self.pending = {}
+        self.predictions = {}
         self.stats = {'wins': 0, 'losses': 0}
         self.prediction_counter = 0
 
@@ -115,14 +115,11 @@ def parse_game(text):
     
     game_num = int(match.group(1))
     
-    # Теги
     has_r = '#R' in text
     has_x = '#X' in text or '#X🟡' in text
     
-    # Левая рука (игрок)
     left_raw = extract_left_part(text)
     
-    # Масти в левой руке
     suits_left = []
     patterns = {'♥️': r'[♥❤♡]', '♠️': r'[♠♤]', '♣️': r'[♣♧]', '♦️': r'[♦♢]'}
     for suit, pat in patterns.items():
@@ -132,20 +129,16 @@ def parse_game(text):
     if not suits_left:
         return None
     
-    # Правая рука (банкир)
     right_raw = text.split('👈')[-1] if '👈' in text else ''
     
-    # Ищем в правой руке цифру и фигуру
-    digits = re.findall(r'\d+[♠♣♥♦]', right_raw)  # например 8♣️
-    figures = re.findall(r'[JQKA][♠♣♥♦]', right_raw)  # J♠️, Q♥️, K♦️, A♣️
+    digits = re.findall(r'\d+[♠♣♥♦]', right_raw)
+    figures = re.findall(r'[JQKA][♠♣♥♦]', right_raw)
     
     has_digit_figure = len(digits) >= 1 and len(figures) >= 1
     
-    # Масть от цифры (если есть)
     start_suit = None
     if digits:
-        start_suit = digits[0][-1]  # последний символ — масть
-        # нормализация
+        start_suit = digits[0][-1]
         if start_suit in '♥❤♡':
             start_suit = '♥️'
         elif start_suit in '♠♤':
@@ -191,18 +184,14 @@ async def check_predictions(current_game, context):
         
         target = pred['target']
         
-        # Проверяем, не началась ли игра, в которой нужно проверить прогноз
-        # Прогноз на игру X проверяем, когда пришла игра X+1
         if current_game['num'] == target + 1:
             logger.info(f"✅ Прогноз #{pred_id}: игра #{target} завершена, проверяем")
             
-            # Берём сохранённую игру
             game_data = storage.games.get(target)
             if not game_data:
                 logger.warning(f"⚠️ Данные игры #{target} не найдены")
                 continue
             
-            # Проверяем у игрока
             suit_found = any(compare_suits(pred['suit'], s) for s in game_data['left'])
             
             if suit_found:
@@ -224,9 +213,6 @@ async def check_predictions(current_game, context):
 
 # ======== СОЗДАНИЕ ПРОГНОЗА ========
 async def create_prediction(game_n, game_n1, context):
-    """game_n — игра с банкиром, game_n1 — игра с игроком"""
-    
-    # Определяем преимущество игрока
     red = sum(1 for s in game_n1['left'] if suit_color(s) == 'red')
     black = sum(1 for s in game_n1['left'] if suit_color(s) == 'black')
     
@@ -235,11 +221,10 @@ async def create_prediction(game_n, game_n1, context):
     elif black > red:
         adv = 'black'
     else:
-        adv = None  # равенство
+        adv = None
     
     start = game_n['start_suit']
     
-    # Если преимущества нет — масть не меняется
     if adv is None:
         new_suit = start
         logger.info(f"⚖️ Равенство цветов, масть не меняется: {start}")
@@ -346,17 +331,23 @@ async def send_result(pred, game_num, result, context):
 # ======== ОБРАБОТЧИК НОВЫХ СООБЩЕНИЙ ========
 async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not update.channel_post:
+        # УНИВЕРСАЛЬНЫЙ ПРИЁМ — ловим и channel_post, и message
+        message = None
+        if update.channel_post:
+            message = update.channel_post
+        elif update.message:
+            message = update.message
+        else:
+            logger.info("⏭️ Не сообщение из канала, пропускаем")
             return
-        
-        text = update.channel_post.text
+
+        text = message.text
         if not text:
             return
-        
+
         logger.info(f"\n{'='*60}")
         logger.info(f"📥 Получено: {text[:150]}...")
         
-        # Парсим
         game = parse_game(text)
         if not game:
             return
@@ -366,17 +357,12 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"   Банкир: цифры={game['right_digits']}, фигуры={game['right_figures']}")
         logger.info(f"   Теги: R={game['has_r']}, X={game['has_x']}")
         
-        # Сохраняем
         storage.games[game['num']] = game
         
-        # Проверяем прогнозы
         await check_predictions(game, context)
         
-        # Если это подходящая игра для начала цепочки
         if game['has_digit_figure'] and game['start_suit']:
             logger.info(f"✅ Подходит для старта: начальная масть {game['start_suit']}")
-            
-            # Ждём следующую игру
             next_game_num = game['num'] + 1
             storage.pending[next_game_num] = {
                 'start_game': game['num'],
@@ -385,7 +371,6 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
             logger.info(f"⏳ Ждём игру #{next_game_num} для определения преимущества")
         
-        # Проверяем, не ждали ли мы эту игру для преимущества
         if game['num'] in storage.pending:
             pending = storage.pending.pop(game['num'])
             start_game = pending['start_game']
@@ -393,12 +378,10 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             logger.info(f"🎯 Получена игра #{game['num']} для определения преимущества")
             
-            # Создаём прогноз
             start_data = storage.games.get(start_game)
             if start_data:
                 await create_prediction(start_data, game, context)
         
-        # Чистим старые pending (> 50 игр)
         for n in list(storage.pending.keys()):
             if n < game['num'] - 50:
                 del storage.pending[n]
@@ -442,7 +425,7 @@ def main():
     ))
     
     try:
-        app.run_polling(allowed_updates=['channel_post'], drop_pending_updates=True)
+        app.run_polling(allowed_updates=['channel_post', 'message'], drop_pending_updates=True)
     finally:
         release_lock()
 
