@@ -93,10 +93,10 @@ def check_bot_token():
         url = f"https://api.telegram.org/bot{TOKEN}/getMe"
         req = urllib.request.Request(url, method='GET')
         with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads resp.read().decode()
-            if data.get('ok'):
-                logger.info(f"✅ Бот @{data['result']['username']} авторизован")
-                return True
+    data = json.loads(resp.read().decode())
+    if data.get('ok'):
+        logger.info(f"✅ Бот @{data['result']['username']} авторизован")
+        return True
     except:
         pass
     logger.error("❌ Ошибка авторизации")
