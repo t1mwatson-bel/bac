@@ -5,9 +5,12 @@ import asyncio
 import os
 import sys
 import fcntl
+import sqlite3
 import urllib.request
 import urllib.error
 import json
+import matplotlib.pyplot as plt
+import io
 from datetime import datetime, time, timedelta
 from collections import defaultdict
 from telegram import Update
@@ -24,7 +27,8 @@ TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 
-LOCK_FILE = f'/tmp/bot3_{TOKEN[-10:]}.lock'
+LOCK_FILE = f'/tmp/bot3_ai_{TOKEN[-10:]}.lock'
+DB_FILE = 'bot3_stats.db'
 
 # ======== ПРАВИЛА СМЕНЫ МАСТЕЙ ========
 SUIT_CHANGE_RULES = {
@@ -40,6 +44,55 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ======== БАЗА ДАННЫХ ========
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS games
+                 (game_num INTEGER PRIMARY KEY,
+                  left_suits TEXT,
+                  right_suits TEXT,
+                  has_r INTEGER,
+                  has_x INTEGER,
+                  is_tie INTEGER,
+                  result TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS predictions
+                 (pred_id INTEGER PRIMARY KEY,
+                  source_game INTEGER,
+                  target_game INTEGER,
+                  suit TEXT,
+                  quality TEXT,
+                  result TEXT,
+                  attempt INTEGER)''')
+    conn.commit()
+    conn.close()
+
+def save_game(game_data):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''INSERT OR REPLACE INTO games 
+                 (game_num, left_suits, right_suits, has_r, has_x, is_tie)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+              (game_data['num'],
+               ','.join(game_data['left']),
+               ','.join(game_data['right']),
+               1 if game_data['has_r'] else 0,
+               1 if game_data['has_x'] else 0,
+               1 if game_data['is_tie'] else 0))
+    conn.commit()
+    conn.close()
+
+def save_prediction(pred, result=None):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''INSERT OR REPLACE INTO predictions
+                 (pred_id, source_game, target_game, suit, quality, result, attempt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+              (pred['id'], pred['source'], pred['target'], pred['suit'],
+               pred.get('quality', 'unknown'), result, pred['attempt']))
+    conn.commit()
+    conn.close()
 
 # ======== ВРЕМЯ МСК ========
 def msk_now():
@@ -114,6 +167,17 @@ def extract_suits(text):
             suits.append(norm)
     return suits
 
+def get_quality(figures):
+    """Определяет качество сигнала по фигурам"""
+    if not figures:
+        return '⚠️ СЛАБЫЙ'
+    fig = figures[0][0]  # первая фигура
+    if fig in ('A', 'K'):
+        return '🔥 СУПЕР'
+    elif fig in ('Q', 'J'):
+        return '📊 СРЕДНИЙ'
+    return '⚠️ СЛАБЫЙ'
+
 def parse_game(text):
     match = re.search(r'#N(\d+)', text)
     if not match:
@@ -152,6 +216,8 @@ def parse_game(text):
         suit_char = digits[0][-1]
         start_suit = normalize_suit(suit_char)
     
+    quality = get_quality(figures) if has_digit_figure else None
+    
     return {
         'num': game_num,
         'left': left_suits,
@@ -162,6 +228,7 @@ def parse_game(text):
         'is_tie': is_tie,
         'has_digit_figure': has_digit_figure,
         'start_suit': start_suit,
+        'quality': quality,
         'raw': text
     }
 
@@ -186,28 +253,33 @@ async def check_predictions(current_game, context):
             suit_found = any(compare_suits(pred['suit'], s) for s in current_game['left'])
             has_r = current_game['has_r']
             
-            if has_r:
+            # Умный перенос (только один раз)
+            if has_r and not pred.get('was_shifted', False):
                 if suit_found:
                     logger.info(f"✅ ПРОГНОЗ #{pred_id} ВЫИГРАЛ (несмотря на #R)")
                     pred['status'] = 'win'
                     storage.stats['wins'] += 1
+                    save_prediction(pred, 'win')
                     await send_result(pred, target, 'win', context, note="несмотря на #R")
                 else:
                     new_target = target + 2
                     logger.info(f"⏭️ #R без масти → перенос на #{new_target}")
                     pred['target'] = new_target
+                    pred['was_shifted'] = True
                     await send_shift_notice(pred, target, new_target, context)
             else:
                 if suit_found:
                     logger.info(f"✅ ПРОГНОЗ #{pred_id} ВЫИГРАЛ")
                     pred['status'] = 'win'
                     storage.stats['wins'] += 1
+                    save_prediction(pred, 'win')
                     await send_result(pred, target, 'win', context)
                 else:
                     logger.info(f"❌ Прогноз #{pred_id} не зашёл")
                     if pred['attempt'] >= 2:
                         pred['status'] = 'loss'
                         storage.stats['losses'] += 1
+                        save_prediction(pred, 'loss')
                         await send_result(pred, target, 'loss', context)
                     else:
                         pred['attempt'] += 1
@@ -258,6 +330,8 @@ async def create_prediction(start_game, repeat_game, player_game, context):
     
     doggens = [target_game, target_game + 1, target_game + 2]
     
+    quality = start_game.get('quality', '⚠️ СЛАБЫЙ')
+    
     pred = {
         'id': pred_id,
         'suit': new_suit,
@@ -269,12 +343,14 @@ async def create_prediction(start_game, repeat_game, player_game, context):
         'repeat': repeat_game['num'],
         'player_appearance': player_game['num'],
         'offset': offset,
+        'quality': quality,
         'created': datetime.now(),
         'msg_id': None
     }
     
     storage.predictions[pred_id] = pred
-    logger.info(f"🤖 НОВЫЙ ПРОГНОЗ #{pred_id}: {new_suit} в игре #{target_game}")
+    save_prediction(pred)
+    logger.info(f"🤖 НОВЫЙ ПРОГНОЗ #{pred_id}: {new_suit} в игре #{target_game} [{quality}]")
     
     await send_prediction(pred, context)
 
@@ -288,6 +364,7 @@ async def send_prediction(pred, context):
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
             f"🎯 *ПРОГНОЗ:* игра #{pred['target']} — масть {pred['suit']}\n"
+            f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
             f"🔄 *ДОГОН 1:* #{pred['doggens'][1]}\n"
             f"🔄 *ДОГОН 2:* #{pred['doggens'][2]}\n"
             f"⏱ {time_str} МСК"
@@ -299,8 +376,10 @@ async def send_prediction(pred, context):
             parse_mode='Markdown'
         )
         pred['msg_id'] = msg.message_id
+        logger.info(f"✅ Прогноз #{pred['id']} отправлен")
+        
     except Exception as e:
-        logger.error(f"Ошибка отправки: {e}")
+        logger.error(f"❌ Ошибка отправки прогноза #{pred['id']}: {e}")
 
 # ======== ОБНОВЛЕНИЕ СООБЩЕНИЯ О ДОГОНЕ ========
 async def update_prediction_message(pred, context):
@@ -316,6 +395,7 @@ async def update_prediction_message(pred, context):
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
             f"🎯 *ЦЕЛЬ:* #{pred['target']} — масть {pred['suit']}\n"
+            f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
             f"🔄 *СЛЕДУЮЩАЯ:* #{pred['target'] + 1}\n"
             f"⏱ {time_str} МСК"
         )
@@ -352,6 +432,7 @@ async def send_result(pred, game_num, result, context, note=""):
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
             f"🎯 *ЦЕЛЬ:* #{pred['target']}\n"
             f"🃏 *МАСТЬ:* {pred['suit']}\n"
+            f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
             f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
             f"🎮 *ПРОВЕРЕНО В ИГРЕ:* #{game_num}\n"
             f"{note_text}\n"
@@ -368,8 +449,61 @@ async def send_result(pred, game_num, result, context, note=""):
     except:
         pass
 
+# ======== ГЕНЕРАЦИЯ ГРАФИКА ========
+async def generate_stats_chart():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Получаем последние 30 прогнозов
+    c.execute('''SELECT result FROM predictions ORDER BY pred_id DESC LIMIT 30''')
+    results = [row[0] for row in c.fetchall()]
+    results.reverse()
+    
+    conn.close()
+    
+    if not results:
+        return None
+    
+    # Создаём график
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    
+    # Линия заходов/просадок
+    wins = [1 if r == 'win' else -1 for r in results]
+    cumulative = [sum(wins[:i+1]) for i in range(len(wins))]
+    
+    ax1.plot(range(1, len(cumulative)+1), cumulative, 'b-', linewidth=2)
+    ax1.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+    ax1.set_xlabel('Номер прогноза')
+    ax1.set_ylabel('Результат')
+    ax1.set_title('Динамика за последние 30 прогнозов')
+    ax1.grid(True, alpha=0.3)
+    
+    # Столбцы выигрышей/поражений
+    win_count = results.count('win')
+    loss_count = results.count('loss')
+    
+    ax2.bar(['Выигрыши', 'Поражения'], [win_count, loss_count], 
+            color=['green', 'red'], alpha=0.7)
+    ax2.set_ylabel('Количество')
+    ax2.set_title('Статистика за последние 30 прогнозов')
+    
+    # Добавляем подписи
+    for i, (count, label) in enumerate([(win_count, win_count), (loss_count, loss_count)]):
+        ax2.text(i, count + 0.1, str(label), ha='center', fontsize=12)
+    
+    plt.tight_layout()
+    
+    # Сохраняем в буфер
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close()
+    
+    return buf
+
 # ======== ЕЖЕДНЕВНАЯ СТАТИСТИКА ========
 async def daily_stats(context: ContextTypes.DEFAULT_TYPE):
+    # Текстовая статистика
     total = storage.stats['wins'] + storage.stats['losses']
     percent = (storage.stats['wins'] / total * 100) if total > 0 else 0
     
@@ -391,12 +525,21 @@ async def daily_stats(context: ContextTypes.DEFAULT_TYPE):
         text=text,
         parse_mode='Markdown'
     )
+    
+    # График
+    chart = await generate_stats_chart()
+    if chart:
+        await context.bot.send_photo(
+            chat_id=OUTPUT_CHANNEL_ID,
+            photo=chart,
+            caption=f"📈 График за последние 30 прогнозов"
+        )
 
 # ======== НАПОМИНАНИЕ ========
 async def remind_r_rule(context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "⚠️ *НАПОМИНАНИЕ:* если в игре есть #R — перенос на +2. "
-        "#X — обычная проверка."
+        "⚠️ *НАПОМИНАНИЕ:* если в игре есть #R — первый раз перенос на +2, "
+        "второй раз подряд — обычная проверка. #X — обычная проверка."
     )
     await context.bot.send_message(
         chat_id=OUTPUT_CHANNEL_ID,
@@ -435,9 +578,10 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"   Игрок: {game['left']}")
         logger.info(f"   Банкир: {game['right']}")
         logger.info(f"   Теги: R={game['has_r']}, X={game['has_x']}, 🔰={game['is_tie']}")
-        logger.info(f"   Старт: цифра+фигура={game['has_digit_figure']}, масть={game['start_suit']}")
+        logger.info(f"   Старт: цифра+фигура={game['has_digit_figure']}, масть={game['start_suit']}, качество={game['quality']}")
         
         storage.games[game['num']] = game
+        save_game(game)
         await check_predictions(game, context)
         
         if game['is_tie']:
@@ -445,10 +589,11 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if game['has_digit_figure'] and game['start_suit'] and not game['has_draw_arrow']:
-            logger.info(f"✅ Подходит для старта: масть {game['start_suit']}")
+            logger.info(f"✅ Подходит для старта: масть {game['start_suit']} [{game['quality']}]")
             storage.pending_starts[game['num'] + 1] = {
                 'start_num': game['num'],
                 'start_suit': game['start_suit'],
+                'quality': game['quality'],
                 'waiting_for': 'repeat'
             }
         
@@ -461,6 +606,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     storage.pending_starts[game['num'] + 1] = {
                         'start_num': pending['start_num'],
                         'start_suit': pending['start_suit'],
+                        'quality': pending['quality'],
                         'repeat_num': game['num'],
                         'waiting_for': 'player'
                     }
@@ -496,12 +642,15 @@ async def error_handler(update, context):
 
 def main():
     print("\n" + "="*60)
-    print("🤖 БОТ 3 — ИСПРАВЛЕННАЯ ВЕРСИЯ")
+    print("🤖 БОТ 3 — AI EDITION")
     print("="*60)
-    print("✅ #R → перенос на +2")
-    print("✅ #X → обычная проверка")
-    print("✅ Время МСК")
+    print("✅ Фильтр качества (🔥 СУПЕР / 📊 СРЕДНИЙ / ⚠️ СЛАБЫЙ)")
+    print("✅ Умный перенос (только один #R)")
+    print("✅ Графики статистики")
+    print("✅ База данных SQLite")
     print("="*60)
+    
+    init_db()
     
     if not acquire_lock():
         sys.exit(1)
