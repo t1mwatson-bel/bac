@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# bot3_ai.py — Бот 3 с AI-прогнозами
+
 import logging
 import re
 import asyncio
@@ -9,6 +11,8 @@ import sqlite3
 import urllib.request
 import urllib.error
 import json
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 from datetime import datetime, time, timedelta
@@ -21,6 +25,9 @@ from telegram.ext import (
     ContextTypes
 )
 from telegram.error import Conflict
+
+# Импортируем AI-модуль
+from ai_predict import get_ai_prediction
 
 # ======== НАСТРОЙКИ ========
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
@@ -63,6 +70,7 @@ def init_db():
                   target_game INTEGER,
                   suit TEXT,
                   quality TEXT,
+                  ai_confidence REAL,
                   result TEXT,
                   attempt INTEGER)''')
     conn.commit()
@@ -87,10 +95,11 @@ def save_prediction(pred, result=None):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO predictions
-                 (pred_id, source_game, target_game, suit, quality, result, attempt)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                 (pred_id, source_game, target_game, suit, quality, ai_confidence, result, attempt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
               (pred['id'], pred['source'], pred['target'], pred['suit'],
-               pred.get('quality', 'unknown'), result, pred['attempt']))
+               pred.get('quality', 'unknown'), pred.get('ai_confidence', 0.0),
+               result, pred['attempt']))
     conn.commit()
     conn.close()
 
@@ -171,7 +180,7 @@ def get_quality(figures):
     """Определяет качество сигнала по фигурам"""
     if not figures:
         return '⚠️ СЛАБЫЙ'
-    fig = figures[0][0]  # первая фигура
+    fig = figures[0][0]
     if fig in ('A', 'K'):
         return '🔥 СУПЕР'
     elif fig in ('Q', 'J'):
@@ -317,9 +326,9 @@ async def send_shift_notice(pred, old_target, new_target, context):
 # ======== СОЗДАНИЕ ПРОГНОЗА ========
 async def create_prediction(start_game, repeat_game, player_game, context):
     start_suit = start_game['start_suit']
-    new_suit = SUIT_CHANGE_RULES.get(start_suit)
+    classic_suit = SUIT_CHANGE_RULES.get(start_suit)
     
-    if not new_suit:
+    if not classic_suit:
         return
     
     offset = player_game['num'] - repeat_game['num']
@@ -329,12 +338,16 @@ async def create_prediction(start_game, repeat_game, player_game, context):
     pred_id = storage.prediction_counter
     
     doggens = [target_game, target_game + 1, target_game + 2]
-    
     quality = start_game.get('quality', '⚠️ СЛАБЫЙ')
+    
+    # Получаем AI-прогноз
+    ai_suit, ai_confidence, _ = get_ai_prediction(start_game['num'], classic_suit)
     
     pred = {
         'id': pred_id,
-        'suit': new_suit,
+        'suit': classic_suit,
+        'ai_suit': ai_suit,
+        'ai_confidence': ai_confidence,
         'target': target_game,
         'doggens': doggens,
         'attempt': 0,
@@ -350,7 +363,7 @@ async def create_prediction(start_game, repeat_game, player_game, context):
     
     storage.predictions[pred_id] = pred
     save_prediction(pred)
-    logger.info(f"🤖 НОВЫЙ ПРОГНОЗ #{pred_id}: {new_suit} в игре #{target_game} [{quality}]")
+    logger.info(f"🤖 НОВЫЙ ПРОГНОЗ #{pred_id}: классика={classic_suit}, AI={ai_suit} ({ai_confidence:.1%})")
     
     await send_prediction(pred, context)
 
@@ -359,16 +372,33 @@ async def send_prediction(pred, context):
     try:
         time_str = msk_now().strftime('%H:%M:%S')
         
-        text = (
-            f"🎯 *БОТ 3 — НОВЫЙ ПРОГНОЗ*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
-            f"🎯 *ПРОГНОЗ:* игра #{pred['target']} — масть {pred['suit']}\n"
-            f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
-            f"🔄 *ДОГОН 1:* #{pred['doggens'][1]}\n"
-            f"🔄 *ДОГОН 2:* #{pred['doggens'][2]}\n"
-            f"⏱ {time_str} МСК"
-        )
+        # Формируем текст в зависимости от наличия AI
+        if pred['ai_suit'] and pred['ai_confidence'] > 0:
+            confidence_pct = int(pred['ai_confidence'] * 100)
+            fire = " 🔥" if confidence_pct > 75 else ""
+            
+            text = (
+                f"🎯 *БОТ 3 — ПРОГНОЗ #{pred['id']}*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📊 *ИСТОЧНИК:* #{pred['source']}\n\n"
+                f"🤖 *AI-ПРОГНОЗ:* игра #{pred['target']} — масть {pred['ai_suit']} ({confidence_pct}%{fire})\n"
+                f"🎯 *КЛАССИКА:* игра #{pred['target']} — масть {pred['suit']}\n"
+                f"📈 *КАЧЕСТВО:* {pred['quality']}\n\n"
+                f"🔄 *ДОГОН 1:* #{pred['doggens'][1]}\n"
+                f"🔄 *ДОГОН 2:* #{pred['doggens'][2]}\n"
+                f"⏱ {time_str} МСК"
+            )
+        else:
+            text = (
+                f"🎯 *БОТ 3 — ПРОГНОЗ #{pred['id']}*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
+                f"🎯 *ПРОГНОЗ:* игра #{pred['target']} — масть {pred['suit']}\n"
+                f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
+                f"🔄 *ДОГОН 1:* #{pred['doggens'][1]}\n"
+                f"🔄 *ДОГОН 2:* #{pred['doggens'][2]}\n"
+                f"⏱ {time_str} МСК"
+            )
         
         msg = await context.bot.send_message(
             chat_id=OUTPUT_CHANNEL_ID,
@@ -454,7 +484,6 @@ async def generate_stats_chart():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Получаем последние 30 прогнозов
     c.execute('''SELECT result FROM predictions ORDER BY pred_id DESC LIMIT 30''')
     results = [row[0] for row in c.fetchall()]
     results.reverse()
@@ -464,10 +493,8 @@ async def generate_stats_chart():
     if not results:
         return None
     
-    # Создаём график
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
     
-    # Линия заходов/просадок
     wins = [1 if r == 'win' else -1 for r in results]
     cumulative = [sum(wins[:i+1]) for i in range(len(wins))]
     
@@ -478,7 +505,6 @@ async def generate_stats_chart():
     ax1.set_title('Динамика за последние 30 прогнозов')
     ax1.grid(True, alpha=0.3)
     
-    # Столбцы выигрышей/поражений
     win_count = results.count('win')
     loss_count = results.count('loss')
     
@@ -487,13 +513,11 @@ async def generate_stats_chart():
     ax2.set_ylabel('Количество')
     ax2.set_title('Статистика за последние 30 прогнозов')
     
-    # Добавляем подписи
     for i, (count, label) in enumerate([(win_count, win_count), (loss_count, loss_count)]):
         ax2.text(i, count + 0.1, str(label), ha='center', fontsize=12)
     
     plt.tight_layout()
     
-    # Сохраняем в буфер
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
     buf.seek(0)
@@ -503,7 +527,6 @@ async def generate_stats_chart():
 
 # ======== ЕЖЕДНЕВНАЯ СТАТИСТИКА ========
 async def daily_stats(context: ContextTypes.DEFAULT_TYPE):
-    # Текстовая статистика
     total = storage.stats['wins'] + storage.stats['losses']
     percent = (storage.stats['wins'] / total * 100) if total > 0 else 0
     
@@ -526,7 +549,6 @@ async def daily_stats(context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # График
     chart = await generate_stats_chart()
     if chart:
         await context.bot.send_photo(
@@ -644,7 +666,9 @@ def main():
     print("\n" + "="*60)
     print("🤖 БОТ 3 — AI EDITION")
     print("="*60)
-    print("✅ Фильтр качества (🔥 СУПЕР / 📊 СРЕДНИЙ / ⚠️ СЛАБЫЙ)")
+    print("✅ AI-прогнозы с уверенностью")
+    print("✅ Классика + AI в одном сообщении")
+    print("✅ Фильтр качества (🔥 СУПЕР / 📊 СРЕДНИЙ)")
     print("✅ Умный перенос (только один #R)")
     print("✅ Графики статистики")
     print("✅ База данных SQLite")
