@@ -31,7 +31,7 @@ from ai_predict import get_ai_prediction
 
 # ======== НАСТРОЙКИ ========
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
-INPUT_CHANNEL_ID = -1003469691743
+INPUT_CHANNEL_ID = -1003179573402
 OUTPUT_CHANNEL_ID = -1003842401391
 
 LOCK_FILE = f'/tmp/bot3_ai_{TOKEN[-10:]}.lock'
