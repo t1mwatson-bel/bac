@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bot3_ai.py — Бот 3 с AI-прогнозами и процентом уверенности
+# bot3_ai.py — Бот 3 с AI-прогнозами и дополнительным прогнозом при #R
 
 import logging
 import re
@@ -27,7 +27,12 @@ from telegram.ext import (
 from telegram.error import Conflict
 
 # Импортируем AI-модуль
-from ai_predict import get_ai_prediction
+try:
+    from ai_predict import get_ai_prediction
+except ImportError:
+    # Заглушка если модуля нет
+    def get_ai_prediction(game_num, classic_suit):
+        return None, 0.0, None
 
 # ======== НАСТРОЙКИ ========
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
@@ -43,6 +48,14 @@ SUIT_CHANGE_RULES = {
     '♣️': '♦️',
     '♥️': '♠️',
     '♠️': '♥️'
+}
+
+# ======== ПРАВИЛА ДЛЯ ДОПОЛНИТЕЛЬНОЙ МАСТИ (крест-накрест) ========
+EXTRA_SUIT_RULES = {
+    '♠️': '♦️',
+    '♣️': '♥️',
+    '♦️': '♠️',
+    '♥️': '♣️'
 }
 
 # ======== ЛОГГЕР ========
@@ -63,6 +76,7 @@ def init_db():
                   has_r INTEGER,
                   has_x INTEGER,
                   is_tie INTEGER,
+                  has_check INTEGER,
                   result TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (pred_id INTEGER PRIMARY KEY,
@@ -72,7 +86,8 @@ def init_db():
                   quality TEXT,
                   ai_confidence REAL,
                   result TEXT,
-                  attempt INTEGER)''')
+                  attempt INTEGER,
+                  is_extra INTEGER DEFAULT 0)''')
     conn.commit()
     conn.close()
 
@@ -80,14 +95,15 @@ def save_game(game_data):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO games 
-                 (game_num, left_suits, right_suits, has_r, has_x, is_tie)
-                 VALUES (?, ?, ?, ?, ?, ?)''',
+                 (game_num, left_suits, right_suits, has_r, has_x, is_tie, has_check)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
               (game_data['num'],
                ','.join(game_data['left']),
                ','.join(game_data['right']),
-               1 if game_data['has_r'] else 0,
-               1 if game_data['has_x'] else 0,
-               1 if game_data['is_tie'] else 0))
+               1 if game_data.get('has_r') else 0,
+               1 if game_data.get('has_x') else 0,
+               1 if game_data.get('is_tie') else 0,
+               1 if game_data.get('has_check') else 0))
     conn.commit()
     conn.close()
 
@@ -95,11 +111,11 @@ def save_prediction(pred, result=None):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO predictions
-                 (pred_id, source_game, target_game, suit, quality, ai_confidence, result, attempt)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                 (pred_id, source_game, target_game, suit, quality, ai_confidence, result, attempt, is_extra)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (pred['id'], pred['source'], pred['target'], pred['suit'],
                pred.get('quality', 'unknown'), pred.get('ai_confidence', 0.0),
-               result, pred['attempt']))
+               result, pred['attempt'], 1 if pred.get('is_extra') else 0))
     conn.commit()
     conn.close()
 
@@ -195,15 +211,18 @@ def parse_game(text):
     
     has_r = '#R' in text
     has_x = '#X' in text or '#X🟡' in text
+    has_check = '✅' in text
     has_draw_arrow = '👉' in text or '👈' in text
     is_tie = '🔰' in text
     
-    # 👉 Определяем, добирает ли игрок (стрелочка влево)
+    # 👉👈 Определяем, кто добирает
     player_draws = '👈' in text
+    banker_draws = '👉' in text
     
     left_part = None
     right_part = None
     
+    # Ищем разделители
     if '🔰' in text:
         parts = text.split('🔰', 1)
         left_part = parts[0]
@@ -236,9 +255,12 @@ def parse_game(text):
         'right': right_suits,
         'has_r': has_r,
         'has_x': has_x,
+        'has_check': has_check,
         'has_draw_arrow': has_draw_arrow,
-        'player_draws': player_draws,  # ✅ Новое поле
+        'player_draws': player_draws,
+        'banker_draws': banker_draws,
         'is_tie': is_tie,
+        'is_finished': has_check or is_tie,  # Игра завершена если есть ✅ или 🔰
         'has_digit_figure': has_digit_figure,
         'start_suit': start_suit,
         'quality': quality,
@@ -250,7 +272,7 @@ def compare_suits(s1, s2):
         return False
     return normalize_suit(s1) == normalize_suit(s2)
 
-# ======== РАСЧЁТ УВЕРЕННОСТИ (НОВЫЙ) ========
+# ======== РАСЧЁТ УВЕРЕННОСТИ ========
 def calculate_confidence(pred, current_game=None):
     """
     Рассчитывает процент уверенности прогноза
@@ -378,10 +400,18 @@ def get_confidence_emoji(confidence):
     else:
         return "⚠️"
 
-# ======== ПРОВЕРКА ПРОГНОЗОВ (ИСПРАВЛЕННАЯ) ========
+# ======== ПРОВЕРКА ПРОГНОЗОВ (С ДОПОЛНИТЕЛЬНЫМ ПРОГНОЗОМ) ========
 async def check_predictions(current_game, context):
     logger.info(f"\n🔍 ПРОВЕРКА ПРОГНОЗОВ (текущая игра #{current_game['num']})")
     
+    # Проверяем, завершена ли игра (есть ✅ или 🔰)
+    if not current_game.get('is_finished', False):
+        logger.info(f"⏳ Игра #{current_game['num']} не завершена (нет ✅/🔰), пропускаем проверку")
+        return
+    
+    logger.info(f"✅ Игра #{current_game['num']} завершена, проверяем прогнозы")
+    
+    # Список прогнозов для проверки (основные + дополнительные)
     for pred_id, pred in list(storage.predictions.items()):
         if pred['status'] != 'pending':
             continue
@@ -389,9 +419,9 @@ async def check_predictions(current_game, context):
         target = pred['target']
         
         if current_game['num'] == target:
-            logger.info(f"✅ Игра #{target} — проверяем")
+            logger.info(f"📊 Проверяем прогноз #{pred_id} на игру #{target} (масть {pred['suit']})")
             
-            # ===== ВАЖНО: СНАЧАЛА ПРОВЕРЯЕМ МАСТЬ =====
+            # Проверяем масть
             suit_found = any(compare_suits(pred['suit'], s) for s in current_game['left'])
             has_r = current_game['has_r']
             
@@ -406,13 +436,23 @@ async def check_predictions(current_game, context):
                 await send_result(pred, target, 'win', context, note=note)
                 
             # ЕСЛИ МАСТИ НЕТ - ТОЛЬКО ТОГДА СМОТРИМ НА #R
-            elif has_r and not pred.get('was_shifted', False):
-                # #R без масти - переносим
+            elif has_r and not pred.get('was_shifted', False) and not pred.get('is_extra', False):
+                # #R без масти для основного прогноза - переносим и создаем дополнительный
                 new_target = target + 2
-                logger.info(f"⏭️ #R без масти → перенос на #{new_target}")
+                logger.info(f"⏭️ #R без масти → перенос основного на #{new_target}")
+                
+                # Запоминаем старый target для логов
+                old_target = pred['target']
+                
+                # Переносим основной прогноз
                 pred['target'] = new_target
                 pred['was_shifted'] = True
-                await send_shift_notice(pred, target, new_target, context)
+                
+                # СОЗДАЕМ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ
+                await create_extra_prediction(pred, current_game, new_target, context)
+                
+                # Обновляем сообщение основного прогноза
+                await send_shift_notice(pred, old_target, new_target, context, has_extra=True)
                 
             # ЕСЛИ МАСТИ НЕТ И НЕТ #R (ИЛИ #R УЖЕ БЫЛ)
             else:
@@ -428,21 +468,75 @@ async def check_predictions(current_game, context):
                     logger.info(f"🔄 Догон {pred['attempt']}, новая цель #{pred['target']}")
                     await update_prediction_message(pred, context)
 
-async def send_shift_notice(pred, old_target, new_target, context):
+async def create_extra_prediction(main_pred, current_game, target_game, context):
+    """Создает дополнительный прогноз при #R"""
+    
+    # Определяем дополнительную масть по правилу крест-накрест
+    main_suit = main_pred['suit']
+    extra_suit = EXTRA_SUIT_RULES.get(main_suit)
+    
+    if not extra_suit:
+        logger.warning(f"⚠️ Нет правила для дополнительной масти из {main_suit}")
+        return
+    
+    logger.info(f"➕ СОЗДАЕМ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ: {extra_suit} на игру #{target_game}")
+    
+    storage.prediction_counter += 1
+    pred_id = storage.prediction_counter
+    
+    # Догоны как у основного
+    doggens = [target_game, target_game + 1, target_game + 2]
+    
+    extra_pred = {
+        'id': pred_id,
+        'suit': extra_suit,
+        'ai_suit': None,
+        'ai_confidence': 0.0,
+        'target': target_game,
+        'doggens': doggens,
+        'attempt': 0,
+        'status': 'pending',
+        'source': main_pred['source'],
+        'quality': '',  # Без качества
+        'created': datetime.now(),
+        'msg_id': None,
+        'confidence': 50,  # Базовый процент
+        'is_extra': True,
+        'was_shifted': False,
+        'main_pred_id': main_pred['id']
+    }
+    
+    # Рассчитываем уверенность
+    extra_pred['confidence'] = calculate_confidence(extra_pred)
+    
+    storage.predictions[pred_id] = extra_pred
+    save_prediction(extra_pred)
+    
+    # Отправляем дополнительный прогноз
+    await send_extra_prediction(extra_pred, main_pred, current_game, context)
+
+async def send_shift_notice(pred, old_target, new_target, context, has_extra=False):
+    """Обновляет сообщение при переносе из-за #R"""
     if not pred.get('msg_id'):
         return
     try:
         time_str = msk_now().strftime('%H:%M:%S')
         
+        attempt_names = ["ОСНОВНАЯ", "ДОГОН 1", "ДОГОН 2"]
+        
+        if has_extra:
+            extra_text = f"\n➕ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ: #{new_target} — {EXTRA_SUIT_RULES.get(pred['suit'])}"
+        else:
+            extra_text = ""
+        
         text = (
-            f"⏭️ *БОТ 3 — ПЕРЕНОС ПРОГНОЗА*\n"
+            f"🔄 *БОТ 3 — {attempt_names[pred['attempt']]} (ПЕРЕНОС #R)*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
-            f"🎯 *БЫЛО:* #{old_target} — масть {pred['suit']}\n"
-            f"⚠️ *В ИГРЕ #R — ПЕРЕНОС НА +2*\n"
-            f"🎯 *СТАЛО:* #{new_target}\n"
-            f"🔄 *ДОГОН 1:* #{new_target + 1}\n"
-            f"🔄 *ДОГОН 2:* #{new_target + 2}\n"
+            f"🎯 *ОСНОВНОЙ:* #{new_target} — {pred['suit']}{extra_text}\n"
+            f"📈 *КАЧЕСТВО:* {pred.get('quality', '⚠️ СЛАБЫЙ')}\n"
+            f"⚡️ *УВЕРЕННОСТЬ:* {pred.get('confidence', 50)}% {get_confidence_emoji(pred.get('confidence', 50))}\n"
+            f"🔄 *ДАЛЬШЕ:* #{new_target + 1}, #{new_target + 2}\n"
             f"⏱ {time_str} МСК"
         )
         
@@ -452,10 +546,41 @@ async def send_shift_notice(pred, old_target, new_target, context):
             text=text,
             parse_mode='Markdown'
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении сообщения о переносе: {e}")
 
-# ======== СОЗДАНИЕ ПРОГНОЗА ========
+async def send_extra_prediction(extra_pred, main_pred, current_game, context):
+    """Отправляет дополнительный прогноз"""
+    try:
+        time_str = msk_now().strftime('%H:%M:%S')
+        
+        confidence = extra_pred.get('confidence', 50)
+        confidence_emoji = get_confidence_emoji(confidence)
+        
+        text = (
+            f"➕ *БОТ 3 — ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ #{extra_pred['id']}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📊 *ИСТОЧНИК:* #{extra_pred['source']} (осн.#{main_pred['id']})\n"
+            f"🎯 *ЦЕЛЬ:* #{extra_pred['target']} — {extra_pred['suit']}\n"
+            f"🎮 *ИГРА С #R:* #{current_game['num']}\n"
+            f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n\n"
+            f"🔄 *ДОГОН 1:* #{extra_pred['doggens'][1]}\n"
+            f"🔄 *ДОГОН 2:* #{extra_pred['doggens'][2]}\n"
+            f"⏱ {time_str} МСК"
+        )
+        
+        msg = await context.bot.send_message(
+            chat_id=OUTPUT_CHANNEL_ID,
+            text=text,
+            parse_mode='Markdown'
+        )
+        extra_pred['msg_id'] = msg.message_id
+        logger.info(f"✅ Дополнительный прогноз #{extra_pred['id']} отправлен")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки дополнительного прогноза: {e}")
+
+# ======== СОЗДАНИЕ ОСНОВНОГО ПРОГНОЗА ========
 async def create_prediction(start_game, repeat_game, player_game, context):
     start_suit = start_game['start_suit']
     classic_suit = SUIT_CHANGE_RULES.get(start_suit)
@@ -491,7 +616,9 @@ async def create_prediction(start_game, repeat_game, player_game, context):
         'quality': quality,
         'created': datetime.now(),
         'msg_id': None,
-        'confidence': None  # Заполнится позже
+        'confidence': None,
+        'is_extra': False,
+        'was_shifted': False
     }
     
     # Сразу рассчитываем уверенность
@@ -503,7 +630,7 @@ async def create_prediction(start_game, repeat_game, player_game, context):
     
     await send_prediction(pred, context)
 
-# ======== ОТПРАВКА ПРОГНОЗА (ОБНОВЛЕННАЯ) ========
+# ======== ОТПРАВКА ОСНОВНОГО ПРОГНОЗА (ИСПРАВЛЕННАЯ) ========
 async def send_prediction(pred, context):
     try:
         time_str = msk_now().strftime('%H:%M:%S')
@@ -512,16 +639,16 @@ async def send_prediction(pred, context):
         confidence = pred.get('confidence', 50)
         confidence_emoji = get_confidence_emoji(confidence)
         
-        # Формируем текст в зависимости от наличия AI
+        # Формируем текст с ЦЕЛЬЮ и МАСТЬЮ
         if pred['ai_suit'] and pred['ai_confidence'] > 0:
             ai_pct = int(pred['ai_confidence'] * 100)
             
             text = (
                 f"🎯 *БОТ 3 — ПРОГНОЗ #{pred['id']}*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"📊 *ИСТОЧНИК:* #{pred['source']}\n\n"
-                f"🤖 *AI-ПРОГНОЗ:* {pred['ai_suit']} ({ai_pct}%)\n"
-                f"🎯 *КЛАССИКА:* {pred['suit']}\n"
+                f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
+                f"🎯 *ЦЕЛЬ:* #{pred['target']} — {pred['suit']}\n"
+                f"🤖 *AI:* {pred['ai_suit']} ({ai_pct}%)\n"
                 f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
                 f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n\n"
                 f"🔄 *ДОГОН 1:* #{pred['doggens'][1]}\n"
@@ -533,7 +660,7 @@ async def send_prediction(pred, context):
                 f"🎯 *БОТ 3 — ПРОГНОЗ #{pred['id']}*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
-                f"🎯 *ПРОГНОЗ:* {pred['suit']}\n"
+                f"🎯 *ЦЕЛЬ:* #{pred['target']} — {pred['suit']}\n"
                 f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
                 f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n\n"
                 f"🔄 *ДОГОН 1:* #{pred['doggens'][1]}\n"
@@ -547,12 +674,12 @@ async def send_prediction(pred, context):
             parse_mode='Markdown'
         )
         pred['msg_id'] = msg.message_id
-        logger.info(f"✅ Прогноз #{pred['id']} отправлен (уверенность {confidence}%)")
+        logger.info(f"✅ Прогноз #{pred['id']} отправлен (цель #{pred['target']}, масть {pred['suit']})")
         
     except Exception as e:
         logger.error(f"❌ Ошибка отправки прогноза #{pred['id']}: {e}")
 
-# ======== ОБНОВЛЕНИЕ СООБЩЕНИЯ О ДОГОНЕ (ОБНОВЛЕННАЯ) ========
+# ======== ОБНОВЛЕНИЕ СООБЩЕНИЯ О ДОГОНЕ (ИСПРАВЛЕННАЯ) ========
 async def update_prediction_message(pred, context):
     if not pred.get('msg_id'):
         return
@@ -586,7 +713,7 @@ async def update_prediction_message(pred, context):
     except:
         pass
 
-# ======== ОТПРАВКА РЕЗУЛЬТАТА (ОБНОВЛЕННАЯ) ========
+# ======== ОТПРАВКА РЕЗУЛЬТАТА ========
 async def send_result(pred, game_num, result, context, note=""):
     if not pred.get('msg_id'):
         return
@@ -601,19 +728,20 @@ async def send_result(pred, game_num, result, context, note=""):
             status = "НЕ ЗАШЁЛ"
         
         attempt_names = ["основная", "догон 1", "догон 2"]
-        note_text = f"\n✅ {note}" if note else ""
+        note_text = f"\n{note}" if note else ""
         
         # Берём уверенность из прогноза
         confidence = pred.get('confidence', 50)
         confidence_emoji = get_confidence_emoji(confidence)
         
+        extra_tag = "➕ ДОП." if pred.get('is_extra') else ""
+        
         text = (
-            f"{emoji} *БОТ 3 — ПРОГНОЗ #{pred['id']} {status}!*\n"
+            f"{emoji} *БОТ 3 — ПРОГНОЗ #{pred['id']} {extra_tag} {status}!*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
-            f"🎯 *ЦЕЛЬ:* #{pred['target']}\n"
-            f"🃏 *МАСТЬ:* {pred['suit']}\n"
-            f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
+            f"🎯 *ЦЕЛЬ:* #{pred['target']} — {pred['suit']}\n"
+            f"📈 *КАЧЕСТВО:* {pred.get('quality', '—')}\n"
             f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n"
             f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
             f"🎮 *ПРОВЕРЕНО В ИГРЕ:* #{game_num}\n"
@@ -721,7 +849,7 @@ async def remind_r_rule(context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# ======== ОБРАБОТЧИК СООБЩЕНИЙ (ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ) ========
+# ======== ОБРАБОТЧИК СООБЩЕНИЙ ========
 async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = None
@@ -754,40 +882,21 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"📊 Игра #{game['num']}")
         logger.info(f"   Игрок: {game['left']} ({len(game['left'])} карт)")
         logger.info(f"   Банкир: {game['right']} ({len(game['right'])} карт)")
-        logger.info(f"   Теги: R={game['has_r']}, X={game['has_x']}, 🔰={game['is_tie']}")
-        logger.info(f"   Стрелочки: 👈={game.get('player_draws', False)}")
+        logger.info(f"   Теги: R={game['has_r']}, X={game['has_x']}, ✅={game['has_check']}, 🔰={game['is_tie']}")
+        logger.info(f"   Стрелки: 👈={game.get('player_draws', False)}, 👉={game.get('banker_draws', False)}")
+        logger.info(f"   Завершена: {game.get('is_finished', False)}")
         logger.info(f"   Это редактирование: {is_edit}")
         
         # Сохраняем игру в хранилище
         storage.games[game['num']] = game
         save_game(game)
         
-        # ========== ЛОГИКА ПРОВЕРКИ ПОЛНОТЫ ИГРЫ ==========
-        
-        # Игра считается ПОЛНОЙ, если:
-        # 1. Нет стрелочки 👈 (игрок не добирает) И
-        # 2. Либо у игрока 3 карты, либо 2 карты (натурал или игрок не брал)
-        
-        is_complete = False
-        
-        if not game.get('player_draws', False):  # Нет стрелочки 👈
-            if len(game['left']) >= 3:  # 3 карты - точно добрал
-                is_complete = True
-                logger.info(f"✅ Игра #{game['num']} полная: 3 карты у игрока")
-            elif len(game['left']) == 2:  # 2 карты и не добирал
-                is_complete = True
-                logger.info(f"✅ Игра #{game['num']} полная: 2 карты, игрок не добирал")
-        
-        # Отдельно обрабатываем редактирования - они всегда полные
-        if is_edit and not is_complete:
-            # Если это редактирование, но мы почему-то решили что игра неполная -
-            # всё равно проверяем, потому что редактирование приходит только когда всё готово
-            logger.info(f"✏️ Редактирование игры #{game['num']} - проверяем в любом случае")
-            is_complete = True
-        
-        # Если игра НЕ ПОЛНАЯ - ждём
-        if not is_complete:
-            logger.info(f"⏳ Игра #{game['num']} НЕ ПОЛНАЯ (👈 или мало карт) - ждём финальную версию")
+        # ========== ЕСЛИ ИГРА ЗАВЕРШЕНА - ПРОВЕРЯЕМ ПРОГНОЗЫ ==========
+        if game.get('is_finished', False):
+            logger.info(f"🔍 Игра #{game['num']} ЗАВЕРШЕНА — проверяем прогнозы")
+            await check_predictions(game, context)
+        else:
+            logger.info(f"⏳ Игра #{game['num']} НЕ ЗАВЕРШЕНА — ждём финальную версию")
             
             # Сохраняем в очередь ожидания
             context.bot_data.setdefault('pending_games', {})
@@ -797,14 +906,10 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'first_seen': text[:100]
             }
             
-            # НЕ проверяем прогнозы на неполной игре!
+            # НЕ проверяем прогнозы на незавершенной игре!
             return
         
-        # ========== ЕСЛИ ИГРА ПОЛНАЯ - ПРОВЕРЯЕМ ПРОГНОЗЫ ==========
-        logger.info(f"🔍 Игра #{game['num']} ПОЛНАЯ — проверяем прогнозы")
-        await check_predictions(game, context)
-        
-        # ========== ЛОГИКА СТАРТОВ И ПОВТОРОВ (ОСТАЁТСЯ БЕЗ ИЗМЕНЕНИЙ) ==========
+        # ========== ЛОГИКА СТАРТОВ И ПОВТОРОВ ==========
         if game['is_tie']:
             logger.info("⏭️ Ничья — не стартуем")
             return
@@ -864,14 +969,15 @@ async def error_handler(update, context):
 
 def main():
     print("\n" + "="*60)
-    print("🤖 БОТ 3 — AI EDITION (ФИНАЛЬНАЯ ВЕРСИЯ)")
+    print("🤖 БОТ 3 — AI EDITION (С ДОПОЛНИТЕЛЬНЫМ ПРОГНОЗОМ ПРИ #R)")
     print("="*60)
     print("✅ AI-прогнозы с уверенностью")
     print("✅ Классика + AI в одном сообщении")
     print("✅ Фильтр качества (🔥 СУПЕР / 📊 СРЕДНИЙ)")
     print("✅ Умный перенос (только один #R)")
-    print("✅ Ожидание третьей карты (👈)")
-    print("✅ Приоритет выигрыша над #R")
+    print("✅ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ при #R")
+    print("✅ Правило смены: ♠️→♦️, ♣️→♥️, ♦️→♠️, ♥️→♣️")
+    print("✅ Проверка только по ✅ или 🔰")
     print("✅ Процент уверенности с эмодзи 🚀🔥💪📊🤔⚠️")
     print("✅ Статистика горячих/холодных мастей")
     print("✅ Графики статистики")
@@ -908,4 +1014,14 @@ def main():
         release_lock()
 
 if __name__ == "__main__":
+    # Добавляем обработчик сигналов
+    import signal
+    def signal_handler(sig, frame):
+        logger.info("👋 Бот останавливается...")
+        release_lock()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     main()
