@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bot3_ai.py — Бот 3 с AI-прогнозами и дополнительным прогнозом при #R
+# bot3_ai.py — Бот 3 с AI-прогнозами, дополнительным прогнозом и пропуском аномалий #R
 
 import logging
 import re
@@ -87,7 +87,9 @@ def init_db():
                   ai_confidence REAL,
                   result TEXT,
                   attempt INTEGER,
-                  is_extra INTEGER DEFAULT 0)''')
+                  is_extra INTEGER DEFAULT 0,
+                  on_hold INTEGER DEFAULT 0,
+                  hold_until INTEGER DEFAULT 0)''')
     conn.commit()
     conn.close()
 
@@ -111,11 +113,12 @@ def save_prediction(pred, result=None):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO predictions
-                 (pred_id, source_game, target_game, suit, quality, ai_confidence, result, attempt, is_extra)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                 (pred_id, source_game, target_game, suit, quality, ai_confidence, result, attempt, is_extra, on_hold, hold_until)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (pred['id'], pred['source'], pred['target'], pred['suit'],
                pred.get('quality', 'unknown'), pred.get('ai_confidence', 0.0),
-               result, pred['attempt'], 1 if pred.get('is_extra') else 0))
+               result, pred['attempt'], 1 if pred.get('is_extra') else 0,
+               1 if pred.get('on_hold') else 0, pred.get('hold_until', 0)))
     conn.commit()
     conn.close()
 
@@ -400,7 +403,7 @@ def get_confidence_emoji(confidence):
     else:
         return "⚠️"
 
-# ======== ПРОВЕРКА ПРОГНОЗОВ (С ДОПОЛНИТЕЛЬНЫМ ПРОГНОЗОМ) ========
+# ======== ПРОВЕРКА ПРОГНОЗОВ (С АНОМАЛИЯМИ #R) ========
 async def check_predictions(current_game, context):
     logger.info(f"\n🔍 ПРОВЕРКА ПРОГНОЗОВ (текущая игра #{current_game['num']})")
     
@@ -411,12 +414,49 @@ async def check_predictions(current_game, context):
     
     logger.info(f"✅ Игра #{current_game['num']} завершена, проверяем прогнозы")
     
-    # Список прогнозов для проверки (основные + дополнительные)
+    # ===== ОТСЛЕЖИВАЕМ СЕРИИ #R =====
+    if 'r_streak' not in context.bot_data:
+        context.bot_data['r_streak'] = 0
+    
+    if current_game.get('has_r'):
+        context.bot_data['r_streak'] += 1
+        logger.info(f"📊 Серия #R: {context.bot_data['r_streak']} подряд")
+    else:
+        if context.bot_data['r_streak'] >= 3:
+            logger.info(f"✅ Аномалия #R завершилась после {context.bot_data['r_streak']} игр")
+            # Аномалия кончилась - размораживаем прогнозы со следующей игры
+            for pred_id, pred in storage.predictions.items():
+                if pred.get('on_hold') and pred['status'] == 'pending':
+                    pred['hold_until'] = current_game['num'] + 2  # Проверим через игру
+                    logger.info(f"📌 Прогноз #{pred_id} разморозится в #{pred['hold_until']}")
+        context.bot_data['r_streak'] = 0
+    
+    # Определяем, находимся ли мы в аномалии
+    in_anomaly = context.bot_data['r_streak'] >= 3
+    
+    # Список прогнозов для проверки
     for pred_id, pred in list(storage.predictions.items()):
         if pred['status'] != 'pending':
             continue
         
         target = pred['target']
+        
+        # Проверяем, не заморожен ли прогноз из-за аномалии
+        if pred.get('on_hold'):
+            if current_game['num'] == pred.get('hold_until', 0):
+                # Пришло время проверить замороженный прогноз
+                logger.info(f"📌 Проверяем замороженный прогноз #{pred_id} в игре #{current_game['num']}")
+                pred['on_hold'] = False
+                pred['hold_until'] = 0
+            else:
+                continue  # Еще не время проверять
+        
+        # Если мы в аномалии и прогноз должен проверяться сейчас - замораживаем
+        if in_anomaly and current_game['num'] >= target and not pred.get('on_hold'):
+            logger.info(f"⏸️ Прогноз #{pred_id} заморожен из-за аномалии #R (цель #{target})")
+            pred['on_hold'] = True
+            pred['hold_until'] = 0  # Будет установлено после окончания аномалии
+            continue
         
         if current_game['num'] == target:
             logger.info(f"📊 Проверяем прогноз #{pred_id} на игру #{target} (масть {pred['suit']})")
@@ -448,8 +488,10 @@ async def check_predictions(current_game, context):
                 pred['target'] = new_target
                 pred['was_shifted'] = True
                 
-                # СОЗДАЕМ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ
-                await create_extra_prediction(pred, current_game, new_target, context)
+                # СОЗДАЕМ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ (в том же сообщении)
+                extra_suit = EXTRA_SUIT_RULES.get(pred['suit'])
+                if extra_suit:
+                    await add_extra_to_prediction(pred, extra_suit, new_target, current_game, context)
                 
                 # Обновляем сообщение основного прогноза
                 await send_shift_notice(pred, old_target, new_target, context, has_extra=True)
@@ -468,18 +510,10 @@ async def check_predictions(current_game, context):
                     logger.info(f"🔄 Догон {pred['attempt']}, новая цель #{pred['target']}")
                     await update_prediction_message(pred, context)
 
-async def create_extra_prediction(main_pred, current_game, target_game, context):
-    """Создает дополнительный прогноз при #R"""
+async def add_extra_to_prediction(main_pred, extra_suit, target_game, current_game, context):
+    """Добавляет дополнительный прогноз в существующее сообщение"""
     
-    # Определяем дополнительную масть по правилу крест-накрест
-    main_suit = main_pred['suit']
-    extra_suit = EXTRA_SUIT_RULES.get(main_suit)
-    
-    if not extra_suit:
-        logger.warning(f"⚠️ Нет правила для дополнительной масти из {main_suit}")
-        return
-    
-    logger.info(f"➕ СОЗДАЕМ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ: {extra_suit} на игру #{target_game}")
+    logger.info(f"➕ ДОБАВЛЯЕМ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ: {extra_suit} на игру #{target_game}")
     
     storage.prediction_counter += 1
     pred_id = storage.prediction_counter
@@ -499,11 +533,13 @@ async def create_extra_prediction(main_pred, current_game, target_game, context)
         'source': main_pred['source'],
         'quality': '',  # Без качества
         'created': datetime.now(),
-        'msg_id': None,
+        'msg_id': main_pred['msg_id'],  # Используем то же сообщение
         'confidence': 50,  # Базовый процент
         'is_extra': True,
         'was_shifted': False,
-        'main_pred_id': main_pred['id']
+        'main_pred_id': main_pred['id'],
+        'on_hold': False,
+        'hold_until': 0
     }
     
     # Рассчитываем уверенность
@@ -512,8 +548,10 @@ async def create_extra_prediction(main_pred, current_game, target_game, context)
     storage.predictions[pred_id] = extra_pred
     save_prediction(extra_pred)
     
-    # Отправляем дополнительный прогноз
-    await send_extra_prediction(extra_pred, main_pred, current_game, context)
+    # Сохраняем ID дополнительного прогноза в основном
+    if 'extra_ids' not in main_pred:
+        main_pred['extra_ids'] = []
+    main_pred['extra_ids'].append(pred_id)
 
 async def send_shift_notice(pred, old_target, new_target, context, has_extra=False):
     """Обновляет сообщение при переносе из-за #R"""
@@ -524,10 +562,13 @@ async def send_shift_notice(pred, old_target, new_target, context, has_extra=Fal
         
         attempt_names = ["ОСНОВНАЯ", "ДОГОН 1", "ДОГОН 2"]
         
-        if has_extra:
-            extra_text = f"\n➕ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ: #{new_target} — {EXTRA_SUIT_RULES.get(pred['suit'])}"
-        else:
-            extra_text = ""
+        # Собираем все дополнительные прогнозы
+        extra_text = ""
+        if has_extra and 'extra_ids' in pred:
+            for extra_id in pred['extra_ids']:
+                extra = storage.predictions.get(extra_id)
+                if extra:
+                    extra_text += f"\n➕ ДОПОЛНИТЕЛЬНЫЙ #{extra_id}: #{new_target} — {extra['suit']}"
         
         text = (
             f"🔄 *БОТ 3 — {attempt_names[pred['attempt']]} (ПЕРЕНОС #R)*\n"
@@ -548,37 +589,6 @@ async def send_shift_notice(pred, old_target, new_target, context, has_extra=Fal
         )
     except Exception as e:
         logger.error(f"Ошибка при обновлении сообщения о переносе: {e}")
-
-async def send_extra_prediction(extra_pred, main_pred, current_game, context):
-    """Отправляет дополнительный прогноз"""
-    try:
-        time_str = msk_now().strftime('%H:%M:%S')
-        
-        confidence = extra_pred.get('confidence', 50)
-        confidence_emoji = get_confidence_emoji(confidence)
-        
-        text = (
-            f"➕ *БОТ 3 — ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ #{extra_pred['id']}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📊 *ИСТОЧНИК:* #{extra_pred['source']} (осн.#{main_pred['id']})\n"
-            f"🎯 *ЦЕЛЬ:* #{extra_pred['target']} — {extra_pred['suit']}\n"
-            f"🎮 *ИГРА С #R:* #{current_game['num']}\n"
-            f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n\n"
-            f"🔄 *ДОГОН 1:* #{extra_pred['doggens'][1]}\n"
-            f"🔄 *ДОГОН 2:* #{extra_pred['doggens'][2]}\n"
-            f"⏱ {time_str} МСК"
-        )
-        
-        msg = await context.bot.send_message(
-            chat_id=OUTPUT_CHANNEL_ID,
-            text=text,
-            parse_mode='Markdown'
-        )
-        extra_pred['msg_id'] = msg.message_id
-        logger.info(f"✅ Дополнительный прогноз #{extra_pred['id']} отправлен")
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки дополнительного прогноза: {e}")
 
 # ======== СОЗДАНИЕ ОСНОВНОГО ПРОГНОЗА ========
 async def create_prediction(start_game, repeat_game, player_game, context):
@@ -618,7 +628,10 @@ async def create_prediction(start_game, repeat_game, player_game, context):
         'msg_id': None,
         'confidence': None,
         'is_extra': False,
-        'was_shifted': False
+        'was_shifted': False,
+        'on_hold': False,
+        'hold_until': 0,
+        'extra_ids': []
     }
     
     # Сразу рассчитываем уверенность
@@ -630,7 +643,7 @@ async def create_prediction(start_game, repeat_game, player_game, context):
     
     await send_prediction(pred, context)
 
-# ======== ОТПРАВКА ОСНОВНОГО ПРОГНОЗА (ИСПРАВЛЕННАЯ) ========
+# ======== ОТПРАВКА ОСНОВНОГО ПРОГНОЗА ========
 async def send_prediction(pred, context):
     try:
         time_str = msk_now().strftime('%H:%M:%S')
@@ -679,25 +692,33 @@ async def send_prediction(pred, context):
     except Exception as e:
         logger.error(f"❌ Ошибка отправки прогноза #{pred['id']}: {e}")
 
-# ======== ОБНОВЛЕНИЕ СООБЩЕНИЯ О ДОГОНЕ (ИСПРАВЛЕННАЯ) ========
+# ======== ОБНОВЛЕНИЕ СООБЩЕНИЯ О ДОГОНЕ ========
 async def update_prediction_message(pred, context):
     if not pred.get('msg_id'):
         return
     try:
         time_str = msk_now().strftime('%H:%M:%S')
         
-        # Пересчитываем уверенность (может измениться со временем)
+        # Пересчитываем уверенность
         confidence = calculate_confidence(pred)
         pred['confidence'] = confidence
         confidence_emoji = get_confidence_emoji(confidence)
         
         attempt_names = ["ОСНОВНАЯ", "ДОГОН 1", "ДОГОН 2"]
         
+        # Собираем дополнительные прогнозы
+        extra_text = ""
+        if 'extra_ids' in pred:
+            for extra_id in pred['extra_ids']:
+                extra = storage.predictions.get(extra_id)
+                if extra and extra['status'] == 'pending':
+                    extra_text += f"\n➕ ДОП. #{extra_id}: #{extra['target']} — {extra['suit']}"
+        
         text = (
             f"🔄 *БОТ 3 — {attempt_names[pred['attempt']]}*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
-            f"🎯 *ЦЕЛЬ:* #{pred['target']} — {pred['suit']}\n"
+            f"🎯 *ОСНОВНОЙ:* #{pred['target']} — {pred['suit']}{extra_text}\n"
             f"📈 *КАЧЕСТВО:* {pred['quality']}\n"
             f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n"
             f"🔄 *СЛЕДУЮЩАЯ:* #{pred['target'] + 1}\n"
@@ -710,8 +731,8 @@ async def update_prediction_message(pred, context):
             text=text,
             parse_mode='Markdown'
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка обновления сообщения: {e}")
 
 # ======== ОТПРАВКА РЕЗУЛЬТАТА ========
 async def send_result(pred, game_num, result, context, note=""):
@@ -730,17 +751,26 @@ async def send_result(pred, game_num, result, context, note=""):
         attempt_names = ["основная", "догон 1", "догон 2"]
         note_text = f"\n{note}" if note else ""
         
-        # Берём уверенность из прогноза
+        # Берём уверенность
         confidence = pred.get('confidence', 50)
         confidence_emoji = get_confidence_emoji(confidence)
         
         extra_tag = "➕ ДОП." if pred.get('is_extra') else ""
         
+        # Собираем результаты дополнительных прогнозов
+        extra_results = ""
+        if 'extra_ids' in pred:
+            for extra_id in pred['extra_ids']:
+                extra = storage.predictions.get(extra_id)
+                if extra:
+                    extra_status = "✅" if extra.get('status') == 'win' else "❌" if extra.get('status') == 'loss' else "⏳"
+                    extra_results += f"\n   {extra_status} ДОП.#{extra_id}: {extra['suit']}"
+        
         text = (
             f"{emoji} *БОТ 3 — ПРОГНОЗ #{pred['id']} {extra_tag} {status}!*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{pred['source']}\n"
-            f"🎯 *ЦЕЛЬ:* #{pred['target']} — {pred['suit']}\n"
+            f"🎯 *ЦЕЛЬ:* #{pred['target']} — {pred['suit']}{extra_results}\n"
             f"📈 *КАЧЕСТВО:* {pred.get('quality', '—')}\n"
             f"⚡️ *УВЕРЕННОСТЬ:* {confidence}% {confidence_emoji}\n"
             f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
@@ -756,8 +786,8 @@ async def send_result(pred, game_num, result, context, note=""):
             text=text,
             parse_mode='Markdown'
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка отправки результата: {e}")
 
 # ======== ГЕНЕРАЦИЯ ГРАФИКА ========
 async def generate_stats_chart():
@@ -951,9 +981,9 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.info(f"❌ Новой масти нет")
         
         # Очистка старых ожидающих стартов
-        for n in list(storage.pending_starts.keys()):
+        for n in list(pending_games.keys()):
             if n < game['num'] - 50:
-                del storage.pending_starts[n]
+                del pending_games[n]
         
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
@@ -969,13 +999,15 @@ async def error_handler(update, context):
 
 def main():
     print("\n" + "="*60)
-    print("🤖 БОТ 3 — AI EDITION (С ДОПОЛНИТЕЛЬНЫМ ПРОГНОЗОМ ПРИ #R)")
+    print("🤖 БОТ 3 — AI EDITION (С ПРОПУСКОМ АНОМАЛИЙ #R)")
     print("="*60)
     print("✅ AI-прогнозы с уверенностью")
     print("✅ Классика + AI в одном сообщении")
     print("✅ Фильтр качества (🔥 СУПЕР / 📊 СРЕДНИЙ)")
     print("✅ Умный перенос (только один #R)")
-    print("✅ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ при #R")
+    print("✅ ДОПОЛНИТЕЛЬНЫЙ ПРОГНОЗ при #R (в том же сообщении)")
+    print("✅ ПРОПУСК АНОМАЛИЙ: 3+ #R подряд")
+    print("✅ Проверка через 1 игру после аномалии")
     print("✅ Правило смены: ♠️→♦️, ♣️→♥️, ♦️→♠️, ♥️→♣️")
     print("✅ Проверка только по ✅ или 🔰")
     print("✅ Процент уверенности с эмодзи 🚀🔥💪📊🤔⚠️")
