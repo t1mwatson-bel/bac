@@ -77,6 +77,7 @@ def init_db():
                   has_x INTEGER,
                   is_tie INTEGER,
                   has_check INTEGER,
+                  has_green INTEGER,
                   result TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (pred_id INTEGER PRIMARY KEY,
@@ -97,15 +98,16 @@ def save_game(game_data):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO games 
-                 (game_num, left_suits, right_suits, has_r, has_x, is_tie, has_check)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                 (game_num, left_suits, right_suits, has_r, has_x, is_tie, has_check, has_green)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
               (game_data['num'],
                ','.join(game_data['left']),
                ','.join(game_data['right']),
                1 if game_data.get('has_r') else 0,
                1 if game_data.get('has_x') else 0,
                1 if game_data.get('is_tie') else 0,
-               1 if game_data.get('has_check') else 0))
+               1 if game_data.get('has_check') else 0,
+               1 if game_data.get('has_green') else 0))
     conn.commit()
     conn.close()
 
@@ -215,6 +217,7 @@ def parse_game(text):
     has_r = '#R' in text
     has_x = '#X' in text or '#X🟡' in text
     has_check = '✅' in text
+    has_green = '🟩' in text
     has_draw_arrow = '👉' in text or '👈' in text
     is_tie = '🔰' in text
     
@@ -259,11 +262,12 @@ def parse_game(text):
         'has_r': has_r,
         'has_x': has_x,
         'has_check': has_check,
+        'has_green': has_green,
         'has_draw_arrow': has_draw_arrow,
         'player_draws': player_draws,
         'banker_draws': banker_draws,
         'is_tie': is_tie,
-        'is_finished': has_check or is_tie,  # Игра завершена если есть ✅ или 🔰
+        'is_finished': has_check or is_tie or has_green,  # ✅ ИСПРАВЛЕНО: добавлен 🟩
         'has_digit_figure': has_digit_figure,
         'start_suit': start_suit,
         'quality': quality,
@@ -407,9 +411,9 @@ def get_confidence_emoji(confidence):
 async def check_predictions(current_game, context):
     logger.info(f"\n🔍 ПРОВЕРКА ПРОГНОЗОВ (текущая игра #{current_game['num']})")
     
-    # Проверяем, завершена ли игра (есть ✅ или 🔰)
+    # Проверяем, завершена ли игра (есть ✅, 🔰 или 🟩)
     if not current_game.get('is_finished', False):
-        logger.info(f"⏳ Игра #{current_game['num']} не завершена (нет ✅/🔰), пропускаем проверку")
+        logger.info(f"⏳ Игра #{current_game['num']} не завершена (нет ✅/🔰/🟩), пропускаем проверку")
         return
     
     logger.info(f"✅ Игра #{current_game['num']} завершена, проверяем прогнозы")
@@ -912,7 +916,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"📊 Игра #{game['num']}")
         logger.info(f"   Игрок: {game['left']} ({len(game['left'])} карт)")
         logger.info(f"   Банкир: {game['right']} ({len(game['right'])} карт)")
-        logger.info(f"   Теги: R={game['has_r']}, X={game['has_x']}, ✅={game['has_check']}, 🔰={game['is_tie']}")
+        logger.info(f"   Теги: R={game['has_r']}, X={game['has_x']}, ✅={game['has_check']}, 🔰={game['is_tie']}, 🟩={game['has_green']}")
         logger.info(f"   Стрелки: 👈={game.get('player_draws', False)}, 👉={game.get('banker_draws', False)}")
         logger.info(f"   Завершена: {game.get('is_finished', False)}")
         logger.info(f"   Это редактирование: {is_edit}")
@@ -981,9 +985,9 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.info(f"❌ Новой масти нет")
         
         # Очистка старых ожидающих стартов
-        for n in list(pending_games.keys()):
+        for n in list(storage.pending_starts.keys()):
             if n < game['num'] - 50:
-                del pending_games[n]
+                del storage.pending_starts[n]
         
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
@@ -999,7 +1003,7 @@ async def error_handler(update, context):
 
 def main():
     print("\n" + "="*60)
-    print("🤖 БОТ 3 — AI EDITION (С ПРОПУСКОМ АНОМАЛИЙ #R)")
+    print("🤖 БОТ 3 — AI EDITION (С ПРОПУСКОМ АНОМАЛИЙ #R И 🟩)")
     print("="*60)
     print("✅ AI-прогнозы с уверенностью")
     print("✅ Классика + AI в одном сообщении")
@@ -1009,7 +1013,7 @@ def main():
     print("✅ ПРОПУСК АНОМАЛИЙ: 3+ #R подряд")
     print("✅ Проверка через 1 игру после аномалии")
     print("✅ Правило смены: ♠️→♦️, ♣️→♥️, ♦️→♠️, ♥️→♣️")
-    print("✅ Проверка только по ✅ или 🔰")
+    print("✅ Проверка по ✅, 🔰 или 🟩")
     print("✅ Процент уверенности с эмодзи 🚀🔥💪📊🤔⚠️")
     print("✅ Статистика горячих/холодных мастей")
     print("✅ Графики статистики")
