@@ -19,6 +19,12 @@ from telegram.ext import (
 from telegram.error import Conflict
 import random
 import pytz
+import numpy as np
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier
+)
+import joblib
 
 # ======== НАСТРОЙКА ЛОГИРОВАНИЯ ========
 class JsonFormatter(logging.Formatter):
@@ -40,23 +46,15 @@ handler.setFormatter(JsonFormatter())
 logger.addHandler(handler)
 logging.getLogger().handlers.clear()
 
-# ======== ML ИМПОРТЫ ========
-import numpy as np
-from sklearn.ensemble import (
-    RandomForestClassifier,
-    GradientBoostingClassifier
-)
-import joblib
-
 # ======== НАСТРОЙКИ ========
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 
-LOCK_FILE = f'/tmp/ml_bot_{TOKEN[-10:]}.lock'
+LOCK_FILE = f'/tmp/intel_bot_{TOKEN[-10:]}.lock'
 
-# ======== ML ПРЕДИКТОР (ТОЛЬКО МАСТИ) ========
-class MLPredictor:
+# ======== ИНТЕЛЛЕКТУАЛЬНЫЙ ML ПРЕДИКТОР ========
+class IntelMLPredictor:
     def __init__(self, history_size=1000):
         self.history = deque(maxlen=history_size)
         self.history_2cards = deque(maxlen=history_size)
@@ -70,11 +68,29 @@ class MLPredictor:
             'banker3': self._create_ensemble()
         }
         
+        # ИНТЕЛЛЕКТУАЛЬНЫЕ НАСТРОЙКИ
         self.confidence_threshold = 0.3
         self.dynamic_threshold = True
-        self.min_games_for_training = 50
+        self.min_games_for_training = 30  # Уменьшил для быстрого старта
         
-        # Статистика
+        # Статистика догонов
+        self.dogon_stats = {
+            'same_suit': {'attempts': 0, 'success': 0, 'failures': []},
+            'changed_suit': {'attempts': 0, 'success': 0, 'failures': []},
+            'skip_1': {'attempts': 0, 'success': 0},
+            'skip_2': {'attempts': 0, 'success': 0},
+            'skip_3': {'attempts': 0, 'success': 0},
+            'skip_4': {'attempts': 0, 'success': 0}
+        }
+        
+        # Статистика мастей
+        self.suit_stats = {
+            '♥️': {'total': 0, 'frequency': 0, 'dogon_success': 0, 'best_skip': 2},
+            '♦️': {'total': 0, 'frequency': 0, 'dogon_success': 0, 'best_skip': 2},
+            '♠️': {'total': 0, 'frequency': 0, 'dogon_success': 0, 'best_skip': 2},
+            '♣️': {'total': 0, 'frequency': 0, 'dogon_success': 0, 'best_skip': 2}
+        }
+        
         self.predictions_stats = {
             'total': 0,
             'success': 0,
@@ -84,7 +100,7 @@ class MLPredictor:
         
         self.active_predictions = []
         self.prediction_counter = 0
-        self.recent_suits = deque(maxlen=10)
+        self.recent_suits = deque(maxlen=20)
         
         self.anomalies_detected = []
         self.last_anomaly_time = None
@@ -96,6 +112,7 @@ class MLPredictor:
         
         self.load_models()
         self.load_history()
+        self.load_dogon_stats()
         
     def _create_ensemble(self):
         return {
@@ -134,30 +151,45 @@ class MLPredictor:
     def _get_funny_comment(self, comment_type, **kwargs):
         jokes = {
             'high_confidence': [
-                "🤓 Я прям чувствую!", 
-                "⚡ Должно быть!", 
-                "👨 Батя бы одобрил!"
+                "🧠 Я прям чувствую!", 
+                "🎯 Точняк будет!", 
+                "👨‍🏫 Профессор сказал!"
             ],
             'low_confidence': [
-                "🐱 50/50...", 
-                "🤷 Или будет, или нет", 
-                "☕ На кофейной гуще..."
+                "🤔 Ща подумаю...", 
+                "📊 Анализирую...", 
+                "🔄 Мозги кипят!"
             ],
             'suit': {
-                '♥️': ["♥️ Сердечки манят!", "♥️ Любовь на горизонте!"],
-                '♦️': ["♦️ Бабки, бабки!", "♦️ К деньгам!"],
-                '♠️': ["♠️ Пика - не спика!", "♠️ Черная масть!"],
-                '♣️': ["♣️ Клевер к удаче!", "♣️ Трилистник!"]
+                '♥️': ["❤️ Сердечко екнуло!", "💕 Любовь зла!"],
+                '♦️': ["💎 Бриллиант!", "💰 К бабкам!"],
+                '♠️': ["⚫ Пика!", "🌙 Ночная масть!"],
+                '♣️': ["🍀 Клевер!", "🌿 К удаче!"]
             },
+            'dogon_same': [
+                "🔄 Продолжаем преследование!",
+                "🎯 Не сдаемся!",
+                "💪 Еще попытка!"
+            ],
+            'dogon_change': [
+                "🔄 Меняем стратегию!",
+                "🎯 Новая цель!",
+                "🧠 Интеллект в деле!"
+            ],
+            'dogon_skip': [
+                "⏸ Пауза на анализ...",
+                "🧘 Наблюдаем...",
+                "📈 Изучаем ситуацию..."
+            ],
             'win': [
-                "🎉 Угадал!", 
-                "😎 Красавчик!", 
-                "🏆 Я гений!"
+                "🏆 ГЕНИАЛЬНО!", 
+                "⭐ В яблочко!", 
+                "🎉 Я красавчик!"
             ],
             'loss': [
-                "👶 Ну бывает...", 
-                "💸 Казино выигрывает", 
-                "😢 Облажался..."
+                "😢 Просчет...", 
+                "📉 Анализирую ошибку...", 
+                "🧠 Умный учится на ошибках!"
             ]
         }
         
@@ -175,6 +207,188 @@ class MLPredictor:
         elif comment_type == 'loss':
             return random.choice(jokes['loss'])
         return ""
+    
+    # ======== ИНТЕЛЛЕКТУАЛЬНЫЕ МЕТОДЫ ========
+    
+    def _get_suit_frequency(self, suit, games=50):
+        """Анализирует частоту выпадения масти"""
+        recent = list(self.history)[-games:]
+        if not recent:
+            return 0.25
+        
+        count = 0
+        for game in recent:
+            if suit in game.get('player_suits', []):
+                count += 1
+        
+        frequency = count / len(recent)
+        self.suit_stats[suit]['frequency'] = frequency
+        return frequency
+    
+    def _analyze_dogon_strategy(self, suit):
+        """Анализирует какая стратегия лучше для данной масти"""
+        stats = self.dogon_stats
+        suit_data = self.suit_stats[suit]
+        
+        # Сравниваем эффективность разных стратегий
+        same_suit_rate = 0
+        if stats['same_suit']['attempts'] > 0:
+            same_suit_rate = stats['same_suit']['success'] / stats['same_suit']['attempts']
+        
+        changed_suit_rate = 0
+        if stats['changed_suit']['attempts'] > 0:
+            changed_suit_rate = stats['changed_suit']['success'] / stats['changed_suit']['attempts']
+        
+        # Определяем лучший пропуск
+        skip_rates = {}
+        for skip in [1,2,3,4]:
+            key = f'skip_{skip}'
+            if stats[key]['attempts'] > 0:
+                skip_rates[skip] = stats[key]['success'] / stats[key]['attempts']
+        
+        best_skip = 2
+        if skip_rates:
+            best_skip = max(skip_rates, key=skip_rates.get)
+        
+        suit_data['best_skip'] = best_skip
+        
+        return {
+            'same_suit_rate': same_suit_rate,
+            'changed_suit_rate': changed_suit_rate,
+            'best_skip': best_skip
+        }
+    
+    def _should_change_suit(self, original_suit, attempt):
+        """Решает, менять ли масть при догоне"""
+        frequency = self._get_suit_frequency(original_suit)
+        strategy = self._analyze_dogon_strategy(original_suit)
+        
+        # Если масть редкая - меняем
+        if frequency < 0.15:
+            return True, "🎯 Редкая масть, меняем стратегию"
+        
+        # Если догоны той же мастью не работают
+        if strategy['same_suit_rate'] < 0.3 and strategy['same_suit_rate'] > 0:
+            return True, "🔄 Та же масть не эффективна"
+        
+        # Если смена масти работает лучше
+        if strategy['changed_suit_rate'] > strategy['same_suit_rate'] + 0.2:
+            return True, "📊 Смена масти эффективнее"
+        
+        return False, "💪 Продолжаем преследование"
+    
+    def _calculate_skip_games(self, suit, attempt):
+        """Интеллектуальный расчет пропуска игр"""
+        frequency = self._get_suit_frequency(suit)
+        strategy = self._analyze_dogon_strategy(suit)
+        
+        base_skip = strategy['best_skip']
+        
+        # Адаптация под ситуацию
+        if attempt == 1:
+            if frequency > 0.3:  # Частая масть
+                return max(1, base_skip - 1)
+            else:
+                return base_skip
+        elif attempt == 2:
+            if frequency < 0.2:  # Редкая масть
+                return base_skip + 2
+            else:
+                return base_skip + 1
+        
+        return base_skip + 2
+    
+    def _predict_best_suit(self, context):
+        """Предсказывает самую вероятную масть"""
+        scores = {'♥️': 0, '♦️': 0, '♠️': 0, '♣️': 0}
+        
+        # Фактор 1: Историческая частота
+        total_games = len(self.history)
+        if total_games > 0:
+            for suit in scores:
+                count = 0
+                for game in self.history:
+                    if suit in game.get('player_suits', []):
+                        count += 1
+                scores[suit] += (count / total_games) * 0.4
+        
+        # Фактор 2: Последние 10 игр
+        recent = list(self.history)[-10:]
+        if recent:
+            for suit in scores:
+                count = 0
+                for game in recent:
+                    if suit in game.get('player_suits', []):
+                        count += 1
+                scores[suit] += (count / len(recent)) * 0.3
+        
+        # Фактор 3: Текущий контекст
+        if context and context.get('player_draws'):
+            # При доборе свои закономерности
+            for suit in scores:
+                scores[suit] += 0.1
+        
+        # Фактор 4: Успешность догонов
+        for suit in scores:
+            if self.suit_stats[suit]['dogon_success'] > 0:
+                scores[suit] += self.suit_stats[suit]['dogon_success'] * 0.2
+        
+        return max(scores, key=scores.get)
+    
+    def _get_intelligent_dogon_plan(self, original_pred, attempt, context):
+        """Создает интеллектуальный план догона"""
+        
+        original_suit_num = original_pred['value']
+        suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
+        original_suit = suit_map_rev.get(original_suit_num, '♥️')
+        
+        # Анализируем ситуацию
+        should_change, change_reason = self._should_change_suit(original_suit, attempt)
+        skip_games = self._calculate_skip_games(original_suit, attempt)
+        
+        if should_change:
+            # Предсказываем новую масть
+            new_suit = self._predict_best_suit(context)
+            new_suit_num = {'♥️':0, '♦️':1, '♠️':2, '♣️':3}[new_suit]
+            
+            reason = change_reason
+            action = 'change'
+            comment = self._get_funny_comment('dogon_change')
+            
+            return {
+                'action': 'change',
+                'new_value': new_suit_num,
+                'skip': skip_games,
+                'reason': reason,
+                'comment': comment
+            }
+        elif skip_games > 3:
+            # Если нужно много пропустить - лучше подождать
+            reason = f"⏳ Оптимальный пропуск {skip_games} игр"
+            action = 'skip'
+            comment = self._get_funny_comment('dogon_skip')
+            
+            return {
+                'action': 'skip',
+                'skip': skip_games,
+                'reason': reason,
+                'comment': comment
+            }
+        else:
+            # Продолжаем с той же мастью
+            reason = f"🔄 Догон {attempt + 1}, пропуск {skip_games} игр"
+            action = 'same'
+            comment = self._get_funny_comment('dogon_same')
+            
+            return {
+                'action': 'same',
+                'new_value': original_suit_num,
+                'skip': skip_games,
+                'reason': reason,
+                'comment': comment
+            }
+    
+    # ======== СТАНДАРТНЫЕ МЕТОДЫ ========
     
     def save_history(self):
         try:
@@ -212,6 +426,22 @@ class MLPredictor:
                 logger.info(f"ML: загружено {len(self.history)} игр из файла")
         except Exception as e:
             logger.error(f"ML: ошибка загрузки истории: {e}")
+    
+    def load_dogon_stats(self):
+        try:
+            if os.path.exists('dogon_stats.json'):
+                with open('dogon_stats.json', 'r', encoding='utf-8') as f:
+                    self.dogon_stats.update(json.load(f))
+                logger.info(f"ML: загружена статистика догонов")
+        except Exception as e:
+            logger.error(f"ML: ошибка загрузки статистики догонов: {e}")
+    
+    def save_dogon_stats(self):
+        try:
+            with open('dogon_stats.json', 'w', encoding='utf-8') as f:
+                json.dump(self.dogon_stats, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"ML: ошибка сохранения статистики догонов: {e}")
     
     def _classify_game_by_type(self, game_data):
         player_count = game_data.get('player_cards_count', 0)
@@ -277,22 +507,6 @@ class MLPredictor:
             features['weekday'] = 0
         
         return features
-    
-    def card_to_number(self, card):
-        mapping = {
-            'A': 1, '2': 2, '3': 3, '4': 4, '5': 5,
-            '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
-            'J': 11, 'Q': 12, 'K': 13
-        }
-        return mapping.get(card, 0)
-    
-    def number_to_card(self, num):
-        mapping = {
-            1: 'A', 2: '2', 3: '3', 4: '4', 5: '5',
-            6: '6', 7: '7', 8: '8', 9: '9', 10: '10',
-            11: 'J', 12: 'Q', 13: 'K'
-        }
-        return mapping.get(num, '?')
     
     def extract_features_for_training(self, index):
         if index >= len(self.history) - 1:
@@ -397,11 +611,9 @@ class MLPredictor:
                 return True
         return False
     
-    def _check_duplicate_prediction(self, target_game, value):
+    def _check_duplicate_prediction(self, target_game):
         for pred in self.active_predictions:
-            if pred['status'] != 'pending':
-                continue
-            if pred['target_game'] == target_game and pred['value'] == value:
+            if pred['status'] == 'pending' and pred['target_game'] == target_game:
                 return True
         return False
     
@@ -411,9 +623,6 @@ class MLPredictor:
         
         last_game = list(self.history)[-1]
         current_game_num = last_game['game_num']
-        
-        # ДИАПАЗОН 5-10 ИГР
-        next_game_num = current_game_num + random.randint(5, 10)
         
         # Определяем тип игры
         if last_game.get('player_draws'):
@@ -468,11 +677,6 @@ class MLPredictor:
             pred, confidence = self._ensemble_predict(self.models[game_type], X)
             
             if pred is not None:
-                # Проверка на дубликаты прогнозов
-                if self._check_duplicate_prediction(next_game_num, pred):
-                    logger.info(f"ML: прогноз на игру #{next_game_num} уже существует, пропускаем")
-                    return None, None
-                
                 suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
                 predicted_suit = suit_map_rev.get(pred, '?')
                 
@@ -491,11 +695,16 @@ class MLPredictor:
                         threshold = 0.5
                 
                 if confidence >= threshold:
+                    # ДИАПАЗОН ТЕПЕРЬ ТОЖЕ ИНТЕЛЛЕКТУАЛЬНЫЙ
+                    skip = self._calculate_skip_games(predicted_suit, 0)
+                    next_game_num = current_game_num + skip
+                    
                     predictions = {
                         'suit': {
                             'value': pred,
                             'confidence': float(confidence),
-                            'game_type': game_type
+                            'game_type': game_type,
+                            'suit': predicted_suit
                         }
                     }
                     return predictions, next_game_num
@@ -538,12 +747,29 @@ class MLPredictor:
         
         return anomalies
     
-    def register_prediction_result(self, game_num, succeeded, situation, attempt=0):
+    def register_prediction_result(self, game_num, succeeded, situation, attempt=0, strategy='same_suit', skip=2):
         self.predictions_stats['total'] += 1
         self.predictions_stats['by_type'][f"attempt_{attempt}"] += 1
         
         if succeeded:
             self.predictions_stats['success'] += 1
+            
+            # Обновляем статистику догонов
+            if strategy in self.dogon_stats:
+                self.dogon_stats[strategy]['attempts'] += 1
+                self.dogon_stats[strategy]['success'] += 1
+            
+            skip_key = f'skip_{skip}'
+            if skip_key in self.dogon_stats:
+                self.dogon_stats[skip_key]['attempts'] += 1
+                self.dogon_stats[skip_key]['success'] += 1
+            
+            # Обновляем статистику масти
+            if 'suit' in situation:
+                suit = situation.get('suit')
+                if suit in self.suit_stats:
+                    self.suit_stats[suit]['dogon_success'] += 1
+            
         else:
             self.predictions_stats['failures'].append({
                 'game': game_num,
@@ -552,8 +778,17 @@ class MLPredictor:
                 'timestamp': datetime.now(pytz.timezone('Europe/Moscow'))
             })
             
+            if strategy in self.dogon_stats:
+                self.dogon_stats[strategy]['attempts'] += 1
+            
+            skip_key = f'skip_{skip}'
+            if skip_key in self.dogon_stats:
+                self.dogon_stats[skip_key]['attempts'] += 1
+            
             if len(self.predictions_stats['failures']) > 200:
                 self.predictions_stats['failures'].pop(0)
+        
+        self.save_dogon_stats()
     
     def save_models(self):
         os.makedirs('ml_models', exist_ok=True)
@@ -591,7 +826,7 @@ class MLPredictor:
             try:
                 predictions, next_game_num = self.predict_next_game()
                 if predictions:
-                    logger.info(f"🔥 ПРОГНОЗ на игру #{next_game_num} (всего игр: {len(self.history)})")
+                    logger.info(f"🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ прогноз на игру #{next_game_num}")
             except Exception as e:
                 logger.error(f"❌ Ошибка прогноза: {e}")
         
@@ -624,23 +859,22 @@ class MLPredictor:
                 doggens = [next_game_num, next_game_num + 1, next_game_num + 2]
                 
                 confidence_joke = self._get_funny_comment('confidence', confidence=pred['confidence'])
-                
-                suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
-                suit = suit_map_rev.get(int(pred['value']), '?')
+                suit = pred.get('suit', '♥️')
                 suit_joke = self._get_funny_comment('suit', suit=suit)
                 
                 message = (
-                    f"🎯 *ML ПРОГНОЗ #{pred_id}*\n"
+                    f"🎯 *ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ #{pred_id}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                     f"📊 *ИСТОЧНИК:* #{game_data['game_num']} ({current_time} МСК)\n"
                     f"🎯 *ЦЕЛЬ:* #{next_game_num} ({next_time} МСК)\n"
                     f"🃏 *МАСТЬ:* {suit} (у игрока)\n"
                     f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
                     f"🎲 *ТИП ИГРЫ:* {pred.get('game_type', 'unknown')}\n\n"
+                    f"🧠 *АНАЛИЗ:* {self._analyze_dogon_strategy(suit)}\n"
                     f"🗣 *КОММЕНТАРИЙ:* {confidence_joke} {suit_joke}\n\n"
-                    f"🔄 *ДОГОНЫ:*\n"
-                    f"• 1: #{doggens[1]}\n"
-                    f"• 2: #{doggens[2]}\n\n"
+                    f"🔄 *ПЛАНОВЫЕ ДОГОНЫ:*\n"
+                    f"• 1: #{next_game_num + self._calculate_skip_games(suit, 0)}\n"
+                    f"• 2: #{next_game_num + self._calculate_skip_games(suit, 1)}\n\n"
                     f"📊 *СТАТИСТИКА:*\n"
                     f"• Всего: {self.predictions_stats['total']}\n"
                     f"• Успешно: {self.predictions_stats['success']}\n"
@@ -664,7 +898,9 @@ class MLPredictor:
                         'msg_id': msg.message_id,
                         'status': 'pending',
                         'attempt': 0,
-                        'doggens': doggens
+                        'original_suit': suit,
+                        'strategy': 'same_suit',
+                        'skip': self._calculate_skip_games(suit, 0)
                     })
                     
                 except Exception as e:
@@ -703,21 +939,36 @@ class MLPredictor:
             if succeeded:
                 pred['status'] = 'win'
                 pred['actual_game'] = actual_game
-                self.register_prediction_result(actual_game, True, game_data, pred['attempt'])
+                self.register_prediction_result(actual_game, True, game_data, pred['attempt'], 
+                                              pred.get('strategy', 'same_suit'), pred.get('skip', 2))
                 await self._update_prediction_message(pred, game_data, True, context)
             else:
                 if pred['attempt'] < 2:
+                    # ИНТЕЛЛЕКТУАЛЬНЫЙ ДОГОН
+                    plan = self._get_intelligent_dogon_plan(pred, pred['attempt'], game_data)
+                    
                     pred['attempt'] += 1
-                    pred['target_game'] = pred['doggens'][pred['attempt']]
+                    pred['strategy'] = plan['action']
+                    
+                    if plan['action'] == 'change':
+                        pred['value'] = plan['new_value']
+                        pred['strategy'] = 'changed_suit'
+                        suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
+                        pred['original_suit'] = suit_map_rev.get(plan['new_value'], '♥️')
+                    
+                    pred['skip'] = plan['skip']
+                    pred['target_game'] = current_game_num + plan['skip']
                     pred['status'] = 'pending'
-                    logger.info(f"ML: прогноз #{pred['id']} догон {pred['attempt']}, новая цель #{pred['target_game']}")
-                    await self._update_prediction_dogon(pred, context)
+                    
+                    logger.info(f"🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ догон #{pred['id']}: {plan['reason']}")
+                    await self._update_prediction_dogon(pred, context, plan)
                 else:
                     pred['status'] = 'loss'
-                    self.register_prediction_result(current_game_num, False, game_data, pred['attempt'])
+                    self.register_prediction_result(current_game_num, False, game_data, pred['attempt'],
+                                                  pred.get('strategy', 'same_suit'), pred.get('skip', 2))
                     await self._update_prediction_message(pred, game_data, False, context)
     
-    async def _update_prediction_dogon(self, pred, context):
+    async def _update_prediction_dogon(self, pred, context, plan):
         if not pred.get('msg_id'):
             return
         
@@ -729,14 +980,17 @@ class MLPredictor:
             suit = suit_map_rev.get(int(pred['value']), '?')
             
             text = (
-                f"🔄 *ML ПРОГНОЗ #{pred['id']} — ДОГОН {pred['attempt']}*\n"
+                f"🧠 *ИНТЕЛЛЕКТУАЛЬНЫЙ ДОГОН #{pred['id']} — ПОПЫТКА {pred['attempt']}*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📊 *ИСТОЧНИК:* #{pred['source_game']}\n"
                 f"🎯 *ЦЕЛЬ:* #{pred['target_game']}\n"
                 f"🃏 *МАСТЬ:* {suit}\n"
                 f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n\n"
-                f"🗣 *КОММЕНТАРИЙ:* Попытка {pred['attempt'] + 1}! 💪\n\n"
-                f"🔄 *СЛЕДУЮЩИЙ ДОГОН:* #{pred['target_game'] + 1}\n"
+                f"🧠 *СТРАТЕГИЯ:* {plan['reason']}\n"
+                f"🗣 *КОММЕНТАРИЙ:* {plan['comment']}\n\n"
+                f"📊 *СТАТИСТИКА ДОГОНОВ:*\n"
+                f"• Та же масть: {self.dogon_stats['same_suit']['success']}/{self.dogon_stats['same_suit']['attempts']}\n"
+                f"• Смена масти: {self.dogon_stats['changed_suit']['success']}/{self.dogon_stats['changed_suit']['attempts']}\n"
                 f"⏱ {time_str} МСК"
             )
             
@@ -779,7 +1033,7 @@ class MLPredictor:
             attempt_names = ["основная", "догон 1", "догон 2"]
             
             text = (
-                f"{emoji} *ML ПРОГНОЗ #{pred['id']} {status}!*\n"
+                f"{emoji} *ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ #{pred['id']} {status}!*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📊 *ИСТОЧНИК:* #{pred['source_game']}\n"
                 f"🎯 *ЦЕЛЬ:* #{pred['target_game']}\n"
@@ -792,6 +1046,9 @@ class MLPredictor:
                 f"• Всего: {total}\n"
                 f"• Успешно: {success}\n"
                 f"• Процент: {percent}%\n\n"
+                f"📊 *ЭФФЕКТИВНОСТЬ ДОГОНОВ:*\n"
+                f"• Та же масть: {self.dogon_stats['same_suit']['success']}/{self.dogon_stats['same_suit']['attempts']}\n"
+                f"• Смена масти: {self.dogon_stats['changed_suit']['success']}/{self.dogon_stats['changed_suit']['attempts']}\n"
                 f"⏱ {time_str} МСК"
             )
             
@@ -813,7 +1070,7 @@ class MLPredictor:
                     return
             
             text = (
-                f"🚨 *АНОМАЛИЯ*\n"
+                f"🚨 *ИНТЕЛЛЕКТУАЛЬНАЯ АНОМАЛИЯ*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📊 *ИГРА:* #{game_data['game_num']}\n"
             )
@@ -840,26 +1097,35 @@ class MLPredictor:
             moscow_tz = pytz.timezone('Europe/Moscow')
             current_time = datetime.now(moscow_tz).strftime('%H:%M')
             
-            stats_text = f"📊 *СТАТИСТИКА МАСТЕЙ НА {current_time} МСК*\n"
+            stats_text = f"🧠 *ИНТЕЛЛЕКТУАЛЬНАЯ СТАТИСТИКА НА {current_time}*\n"
             stats_text += "━━━━━━━━━━━━━━━━━━━━━━\n\n"
             
             total = self.predictions_stats['total']
             success = self.predictions_stats['success']
             percent = int(success / max(1, total) * 100) if total > 0 else 0
             
+            stats_text += f"*ОБЩАЯ СТАТИСТИКА:*\n"
             stats_text += f"✅ Успешно: {success}\n"
             stats_text += f"❌ Неудачно: {total - success}\n"
             stats_text += f"📈 Процент: {percent}%\n\n"
             
-            if self.predictions_stats['by_type']:
-                stats_text += f"*По попыткам:*\n"
-                stats_text += f"• Основная: {self.predictions_stats['by_type'].get('attempt_0', 0)}\n"
-                stats_text += f"• Догон 1: {self.predictions_stats['by_type'].get('attempt_1', 0)}\n"
-                stats_text += f"• Догон 2: {self.predictions_stats['by_type'].get('attempt_2', 0)}\n\n"
+            stats_text += f"*ЭФФЕКТИВНОСТЬ ДОГОНОВ:*\n"
+            stats_text += f"🔄 Та же масть: {self.dogon_stats['same_suit']['success']}/{self.dogon_stats['same_suit']['attempts']}\n"
+            stats_text += f"🎯 Смена масти: {self.dogon_stats['changed_suit']['success']}/{self.dogon_stats['changed_suit']['attempts']}\n\n"
             
-            stats_text += f"📊 *ОБЩЕЕ:*\n"
-            stats_text += f"• Всего игр в истории: {len(self.history)}\n"
-            stats_text += f"• Типы раздач: 2к({len(self.history_2cards)}) Игрок3({len(self.history_player3)}) Банкир3({len(self.history_banker3)})\n"
+            stats_text += f"*ПРОПУСКИ ИГР:*\n"
+            stats_text += f"⏸ 1 игра: {self.dogon_stats['skip_1']['success']}/{self.dogon_stats['skip_1']['attempts']}\n"
+            stats_text += f"⏸ 2 игры: {self.dogon_stats['skip_2']['success']}/{self.dogon_stats['skip_2']['attempts']}\n"
+            stats_text += f"⏸ 3 игры: {self.dogon_stats['skip_3']['success']}/{self.dogon_stats['skip_3']['attempts']}\n"
+            stats_text += f"⏸ 4 игры: {self.dogon_stats['skip_4']['success']}/{self.dogon_stats['skip_4']['attempts']}\n\n"
+            
+            stats_text += f"*ЧАСТОТА МАСТЕЙ:*\n"
+            for suit, data in self.suit_stats.items():
+                stats_text += f"{suit}: {data['frequency']*100:.1f}% (лучший пропуск: {data['best_skip']})\n"
+            
+            stats_text += f"\n📊 *ОБЩЕЕ:*\n"
+            stats_text += f"• Всего игр: {len(self.history)}\n"
+            stats_text += f"• Типы: 2к({len(self.history_2cards)}) Игрок3({len(self.history_player3)}) Банкир3({len(self.history_banker3)})\n"
             stats_text += f"• Активных прогнозов: {len([p for p in self.active_predictions if p['status'] == 'pending'])}"
             
             await context.bot.send_message(
@@ -875,7 +1141,7 @@ class MLPredictor:
 class GameStorage:
     def __init__(self):
         self.games = {}
-        self.ml_predictor = MLPredictor(history_size=1000)
+        self.ml_predictor = IntelMLPredictor(history_size=1000)
 
 storage = GameStorage()
 lock_fd = None
@@ -1185,14 +1451,14 @@ async def three_hour_stats(context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     print("\n" + "="*60)
-    print("🤖 ML БОТ - ТОЛЬКО МАСТИ")
+    print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ")
     print("="*60)
-    print("✅ Прогнозы только на масти")
-    print("✅ Проверка только у игрока")
-    print("✅ Диапазон прогнозов 5-10 игр")
-    print("✅ Защита от дублей мастей")
-    print("✅ Обучение с 50 игр")
-    print("✅ Статистика каждые 3 часа")
+    print("✅ Анализ частоты мастей")
+    print("✅ Интеллектуальные догоны")
+    print("✅ Смена стратегии при необходимости")
+    print("✅ Адаптивный пропуск игр")
+    print("✅ Статистика эффективности")
+    print("✅ Обучение с 30 игр")
     print("✅ Ржачные комментарии")
     print("="*60)
     
@@ -1211,11 +1477,13 @@ def main():
         handle_new_game
     ))
     
-    # Планировщик для статистики каждые 3 часа
-    job_queue = app.job_queue
-    if job_queue:
-        job_queue.run_repeating(three_hour_stats, interval=10800, first=10)
-        job_queue.run_repeating(check_stuck_games, interval=30, first=10)
+    # Планировщик для статистики
+    if app.job_queue:
+        app.job_queue.run_repeating(three_hour_stats, interval=10800, first=10)
+        app.job_queue.run_repeating(check_stuck_games, interval=30, first=10)
+        logger.info("✅ Планировщик запущен")
+    else:
+        logger.error("❌ JobQueue не доступен")
     
     try:
         app.run_polling(
