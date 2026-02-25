@@ -73,6 +73,11 @@ class IntelMLPredictor:
         self.dynamic_threshold = False
         self.min_games_for_training = 20
         
+        # ТАЙМЕР между прогнозами (2-7 минут)
+        self.last_prediction_time = None
+        self.min_time_between = 120  # 2 минуты
+        self.max_time_between = 420  # 7 минут
+        
         # Статистика догонов
         self.dogon_stats = {
             'same_suit': {'attempts': 0, 'success': 0, 'failures': []},
@@ -317,6 +322,25 @@ class IntelMLPredictor:
         
         return max(scores, key=scores.get)
     
+    def _find_alternative_suit(self, exclude_suit=None):
+        """Находит альтернативную масть"""
+        scores = {'♥️': 0, '♦️': 0, '♠️': 0, '♣️': 0}
+        
+        recent = list(self.history)[-10:]
+        if recent:
+            for suit in scores:
+                if suit == exclude_suit:
+                    continue
+                count = 0
+                for game in recent:
+                    if suit in game.get('player_suits', []):
+                        count += 1
+                scores[suit] = count
+        
+        if max(scores.values()) > 0:
+            return max(scores, key=scores.get)
+        return '♠️'
+    
     def _get_intelligent_dogon_plan(self, original_pred, attempt, context):
         original_suit_num = original_pred['value']
         suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
@@ -327,13 +351,17 @@ class IntelMLPredictor:
         
         if should_change:
             new_suit = self._predict_best_suit(context)
+            
+            if self._check_suit_duplicate(new_suit, last_games=2):
+                new_suit = self._find_alternative_suit(exclude_suit=original_suit)
+            
             new_suit_num = {'♥️':0, '♦️':1, '♠️':2, '♣️':3}[new_suit]
             
             return {
                 'action': 'change',
                 'new_value': new_suit_num,
                 'skip': skip_games,
-                'reason': change_reason,
+                'reason': f"{change_reason} → выбираю {new_suit}",
                 'comment': self._get_funny_comment('dogon_change')
             }
         elif skip_games > 3:
@@ -579,6 +607,14 @@ class IntelMLPredictor:
                 return True
         return False
     
+    def _get_max_predicted_game(self):
+        """Возвращает максимальный номер игры среди активных прогнозов"""
+        max_game = 0
+        for pred in self.active_predictions:
+            if pred['status'] == 'pending' and pred['target_game'] > max_game:
+                max_game = pred['target_game']
+        return max_game
+    
     def predict_next_game(self):
         logger.info("📢 ВХОД В predict_next_game")
         logger.info(f"len(history)={len(self.history)}")
@@ -590,6 +626,13 @@ class IntelMLPredictor:
         last_game = list(self.history)[-1]
         current_game_num = last_game['game_num']
         
+        # Находим максимальный номер среди активных прогнозов
+        max_predicted = self._get_max_predicted_game()
+        
+        # Определяем минимальный допустимый номер для нового прогноза
+        min_next = max(max_predicted + 1, current_game_num + 2)
+        
+        # Определяем тип игры
         if last_game.get('player_draws'):
             game_type = 'player3'
         elif last_game.get('banker_draws'):
@@ -651,8 +694,9 @@ class IntelMLPredictor:
                 if confidence >= self.confidence_threshold:
                     logger.info(f"✅ Прошел порог {self.confidence_threshold}")
                     
-                    skip = self._calculate_skip_games(predicted_suit, 0)
-                    next_game_num = current_game_num + skip
+                    # Диапазон 2-7 игр
+                    base_skip = random.randint(2, 7)
+                    next_game_num = max(min_next, current_game_num + base_skip)
                     
                     predictions = {
                         'suit': {
@@ -782,21 +826,47 @@ class IntelMLPredictor:
         predictions = None
         next_game_num = None
         
-        if len(self.history) >= 5:
-            logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
-            try:
-                predictions, next_game_num = self.predict_next_game()
-                if predictions:
-                    logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
-                else:
-                    logger.info("❌ predictions is None")
-            except Exception as e:
-                logger.error(f"❌ Ошибка прогноза: {e}")
-        else:
-            logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
+        # ПРОВЕРКА ТАЙМЕРА
+        current_time = datetime.now(pytz.timezone('Europe/Moscow'))
         
+        if self.last_prediction_time:
+            time_diff = (current_time - self.last_prediction_time).seconds
+            if time_diff < self.min_time_between:
+                logger.info(f"⏳ С момента последнего прогноза прошло {time_diff}с, нужно минимум {self.min_time_between}с")
+                # Не делаем новый прогноз
+            else:
+                # Делаем прогноз
+                if len(self.history) >= 5:
+                    logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
+                    try:
+                        predictions, next_game_num = self.predict_next_game()
+                        if predictions:
+                            logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
+                        else:
+                            logger.info("❌ predictions is None")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка прогноза: {e}")
+                else:
+                    logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
+        else:
+            # Первый прогноз
+            if len(self.history) >= 5:
+                logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
+                try:
+                    predictions, next_game_num = self.predict_next_game()
+                    if predictions:
+                        logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
+                    else:
+                        logger.info("❌ predictions is None")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка прогноза: {e}")
+            else:
+                logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
+        
+        # ПОТОМ СОХРАНЯЕМ ИГРУ
         anomalies = self.add_game(game_data)
         
+        # ОБУЧАЕМСЯ
         if len(self.history) >= self.min_games_for_training:
             try:
                 self.train_models()
@@ -805,41 +875,51 @@ class IntelMLPredictor:
         else:
             logger.info(f"📚 До обучения осталось: {self.min_games_for_training - len(self.history)} игр")
         
+        # АНОМАЛИИ
         if anomalies:
             await self._send_anomaly_alert(anomalies, game_data, context)
         
+        # ОТПРАВЛЯЕМ ПРОГНОЗ
         if predictions and next_game_num:
+            self.last_prediction_time = current_time
+            
             moscow_tz = pytz.timezone('Europe/Moscow')
-            current_time = datetime.now(moscow_tz).strftime('%H:%M')
+            current_time_str = datetime.now(moscow_tz).strftime('%H:%M')
             next_time = (datetime.now(moscow_tz) + timedelta(minutes=1)).strftime('%H:%M')
             
             for target_type, pred in predictions.items():
                 self.prediction_counter += 1
                 pred_id = self.prediction_counter
                 
-                doggens = [next_game_num, next_game_num + 1, next_game_num + 2]
+                suit = pred.get('suit', '♥️')
+                
+                # Правильная последовательность догонов
+                skip1 = self._calculate_skip_games(suit, 0)
+                skip2 = self._calculate_skip_games(suit, 1)
+                
+                dogon1 = next_game_num + skip1
+                dogon2 = dogon1 + skip2
                 
                 confidence_joke = self._get_funny_comment('confidence', confidence=pred['confidence'])
-                suit = pred.get('suit', '♥️')
                 suit_joke = self._get_funny_comment('suit', suit=suit)
                 
                 message = (
                     f"🎯 *ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ #{pred_id}*\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"📊 *ИСТОЧНИК:* #{game_data['game_num']} ({current_time} МСК)\n"
+                    f"📊 *ИСТОЧНИК:* #{game_data['game_num']} ({current_time_str} МСК)\n"
                     f"🎯 *ЦЕЛЬ:* #{next_game_num} ({next_time} МСК)\n"
                     f"🃏 *МАСТЬ:* {suit} (у игрока)\n"
                     f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
                     f"🎲 *ТИП ИГРЫ:* {pred.get('game_type', 'unknown')}\n\n"
                     f"🗣 *КОММЕНТАРИЙ:* {confidence_joke} {suit_joke}\n\n"
                     f"🔄 *ДОГОНЫ:*\n"
-                    f"• 1: #{next_game_num + self._calculate_skip_games(suit, 0)}\n"
-                    f"• 2: #{next_game_num + self._calculate_skip_games(suit, 1)}\n\n"
+                    f"• 1: #{dogon1}\n"
+                    f"• 2: #{dogon2}\n\n"
                     f"📊 *СТАТИСТИКА:*\n"
                     f"• Всего: {self.predictions_stats['total']}\n"
                     f"• Успешно: {self.predictions_stats['success']}\n"
                     f"• Процент: {int(self.predictions_stats['success']/max(1,self.predictions_stats['total'])*100)}%\n\n"
-                    f"⏱ {current_time} МСК"
+                    f"⏱ {current_time_str} МСК"
                 )
                 
                 try:
@@ -860,7 +940,7 @@ class IntelMLPredictor:
                         'attempt': 0,
                         'original_suit': suit,
                         'strategy': 'same_suit',
-                        'skip': self._calculate_skip_games(suit, 0)
+                        'skip': skip1
                     })
                     
                 except Exception as e:
@@ -1415,11 +1495,13 @@ async def three_hour_stats(context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     print("\n" + "="*60)
-    print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ (ПОРОГ 15%)")
+    print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ - ФИНАЛЬНАЯ ВЕРСИЯ")
     print("="*60)
-    print("✅ Полностью исправленная версия")
-    print("✅ Правильные отступы")
-    print("✅ Защита от Markdown ошибок")
+    print("✅ Таймер 2-7 минут между прогнозами")
+    print("✅ Догоны строго по порядку (цель → догон1 → догон2)")
+    print("✅ Прогнозы только на увеличение")
+    print("✅ Диапазон игр 2-7")
+    print("✅ Масть только у игрока")
     print("="*60)
     
     if not acquire_lock():
