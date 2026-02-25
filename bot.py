@@ -69,9 +69,9 @@ class IntelMLPredictor:
         }
         
         # ИНТЕЛЛЕКТУАЛЬНЫЕ НАСТРОЙКИ
-        self.confidence_threshold = 0.15  # ПОНИЗИЛ ПОРОГ ДО 15%
-        self.dynamic_threshold = False    # ОТКЛЮЧИЛ ДИНАМИКУ
-        self.min_games_for_training = 20  # УМЕНЬШИЛ ДЛЯ БЫСТРОГО СТАРТА
+        self.confidence_threshold = 0.15
+        self.dynamic_threshold = False
+        self.min_games_for_training = 20
         
         # Статистика догонов
         self.dogon_stats = {
@@ -208,10 +208,7 @@ class IntelMLPredictor:
             return random.choice(jokes['loss'])
         return ""
     
-    # ======== ИНТЕЛЛЕКТУАЛЬНЫЕ МЕТОДЫ ========
-    
     def _get_suit_frequency(self, suit, games=50):
-        """Анализирует частоту выпадения масти"""
         recent = list(self.history)[-games:]
         if not recent:
             return 0.25
@@ -226,11 +223,9 @@ class IntelMLPredictor:
         return frequency
     
     def _analyze_dogon_strategy(self, suit):
-        """Анализирует какая стратегия лучше для данной масти"""
         stats = self.dogon_stats
         suit_data = self.suit_stats[suit]
         
-        # Сравниваем эффективность разных стратегий
         same_suit_rate = 0
         if stats['same_suit']['attempts'] > 0:
             same_suit_rate = stats['same_suit']['success'] / stats['same_suit']['attempts']
@@ -239,7 +234,6 @@ class IntelMLPredictor:
         if stats['changed_suit']['attempts'] > 0:
             changed_suit_rate = stats['changed_suit']['success'] / stats['changed_suit']['attempts']
         
-        # Определяем лучший пропуск
         skip_rates = {}
         for skip in [1,2,3,4]:
             key = f'skip_{skip}'
@@ -259,39 +253,33 @@ class IntelMLPredictor:
         }
     
     def _should_change_suit(self, original_suit, attempt):
-        """Решает, менять ли масть при догоне"""
         frequency = self._get_suit_frequency(original_suit)
         strategy = self._analyze_dogon_strategy(original_suit)
         
-        # Если масть редкая - меняем
         if frequency < 0.15:
             return True, "🎯 Редкая масть, меняем стратегию"
         
-        # Если догоны той же мастью не работают
         if strategy['same_suit_rate'] < 0.3 and strategy['same_suit_rate'] > 0:
             return True, "🔄 Та же масть не эффективна"
         
-        # Если смена масти работает лучше
         if strategy['changed_suit_rate'] > strategy['same_suit_rate'] + 0.2:
             return True, "📊 Смена масти эффективнее"
         
         return False, "💪 Продолжаем преследование"
     
     def _calculate_skip_games(self, suit, attempt):
-        """Интеллектуальный расчет пропуска игр"""
         frequency = self._get_suit_frequency(suit)
         strategy = self._analyze_dogon_strategy(suit)
         
         base_skip = strategy['best_skip']
         
-        # Адаптация под ситуацию
         if attempt == 1:
-            if frequency > 0.3:  # Частая масть
+            if frequency > 0.3:
                 return max(1, base_skip - 1)
             else:
                 return base_skip
         elif attempt == 2:
-            if frequency < 0.2:  # Редкая масть
+            if frequency < 0.2:
                 return base_skip + 2
             else:
                 return base_skip + 1
@@ -299,10 +287,8 @@ class IntelMLPredictor:
         return base_skip + 2
     
     def _predict_best_suit(self, context):
-        """Предсказывает самую вероятную масть"""
         scores = {'♥️': 0, '♦️': 0, '♠️': 0, '♣️': 0}
         
-        # Фактор 1: Историческая частота
         total_games = len(self.history)
         if total_games > 0:
             for suit in scores:
@@ -312,7 +298,6 @@ class IntelMLPredictor:
                         count += 1
                 scores[suit] += (count / total_games) * 0.4
         
-        # Фактор 2: Последние 10 игр
         recent = list(self.history)[-10:]
         if recent:
             for suit in scores:
@@ -322,13 +307,10 @@ class IntelMLPredictor:
                         count += 1
                 scores[suit] += (count / len(recent)) * 0.3
         
-        # Фактор 3: Текущий контекст
         if context and context.get('player_draws'):
-            # При доборе свои закономерности
             for suit in scores:
                 scores[suit] += 0.1
         
-        # Фактор 4: Успешность догонов
         for suit in scores:
             if self.suit_stats[suit]['dogon_success'] > 0:
                 scores[suit] += self.suit_stats[suit]['dogon_success'] * 0.2
@@ -336,59 +318,39 @@ class IntelMLPredictor:
         return max(scores, key=scores.get)
     
     def _get_intelligent_dogon_plan(self, original_pred, attempt, context):
-        """Создает интеллектуальный план догона"""
-        
         original_suit_num = original_pred['value']
         suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
         original_suit = suit_map_rev.get(original_suit_num, '♥️')
         
-        # Анализируем ситуацию
         should_change, change_reason = self._should_change_suit(original_suit, attempt)
         skip_games = self._calculate_skip_games(original_suit, attempt)
         
         if should_change:
-            # Предсказываем новую масть
             new_suit = self._predict_best_suit(context)
             new_suit_num = {'♥️':0, '♦️':1, '♠️':2, '♣️':3}[new_suit]
-            
-            reason = change_reason
-            action = 'change'
-            comment = self._get_funny_comment('dogon_change')
             
             return {
                 'action': 'change',
                 'new_value': new_suit_num,
                 'skip': skip_games,
-                'reason': reason,
-                'comment': comment
+                'reason': change_reason,
+                'comment': self._get_funny_comment('dogon_change')
             }
         elif skip_games > 3:
-            # Если нужно много пропустить - лучше подождать
-            reason = f"⏳ Оптимальный пропуск {skip_games} игр"
-            action = 'skip'
-            comment = self._get_funny_comment('dogon_skip')
-            
             return {
                 'action': 'skip',
                 'skip': skip_games,
-                'reason': reason,
-                'comment': comment
+                'reason': f"⏳ Оптимальный пропуск {skip_games} игр",
+                'comment': self._get_funny_comment('dogon_skip')
             }
         else:
-            # Продолжаем с той же мастью
-            reason = f"🔄 Догон {attempt + 1}, пропуск {skip_games} игр"
-            action = 'same'
-            comment = self._get_funny_comment('dogon_same')
-            
             return {
                 'action': 'same',
                 'new_value': original_suit_num,
                 'skip': skip_games,
-                'reason': reason,
-                'comment': comment
+                'reason': f"🔄 Догон {attempt + 1}, пропуск {skip_games} игр",
+                'comment': self._get_funny_comment('dogon_same')
             }
-    
-    # ======== СТАНДАРТНЫЕ МЕТОДЫ ========
     
     def save_history(self):
         try:
@@ -621,14 +583,13 @@ class IntelMLPredictor:
         logger.info("📢 ВХОД В predict_next_game")
         logger.info(f"len(history)={len(self.history)}")
         
-        if len(self.history) < 5:  # УМЕНЬШИЛ ДО 5 ДЛЯ ТЕСТА
+        if len(self.history) < 5:
             logger.info("❌ Мало истории (<5)")
             return None, None
         
         last_game = list(self.history)[-1]
         current_game_num = last_game['game_num']
         
-        # Определяем тип игры
         if last_game.get('player_draws'):
             game_type = 'player3'
         elif last_game.get('banker_draws'):
@@ -687,16 +648,9 @@ class IntelMLPredictor:
                 
                 logger.info(f"📈 Предсказание: {predicted_suit} с уверенностью {confidence:.2f}")
                 
-                # Проверка на дубликаты мастей - ВРЕМЕННО ОТКЛЮЧИЛ
-                # if self._check_suit_duplicate(predicted_suit, last_games=3):
-                #     logger.info(f"ML: масть {predicted_suit} была в последних 3 играх, пропускаем")
-                #     return None, None
-                
-                # ПРОВЕРКА ПОРОГА
                 if confidence >= self.confidence_threshold:
                     logger.info(f"✅ Прошел порог {self.confidence_threshold}")
                     
-                    # ДИАПАЗОН ТЕПЕРЬ ТОЖЕ ИНТЕЛЛЕКТУАЛЬНЫЙ
                     skip = self._calculate_skip_games(predicted_suit, 0)
                     next_game_num = current_game_num + skip
                     
@@ -763,7 +717,6 @@ class IntelMLPredictor:
         if succeeded:
             self.predictions_stats['success'] += 1
             
-            # Обновляем статистику догонов
             if strategy in self.dogon_stats:
                 self.dogon_stats[strategy]['attempts'] += 1
                 self.dogon_stats[strategy]['success'] += 1
@@ -773,7 +726,6 @@ class IntelMLPredictor:
                 self.dogon_stats[skip_key]['attempts'] += 1
                 self.dogon_stats[skip_key]['success'] += 1
             
-            # Обновляем статистику масти
             if 'suit' in situation:
                 suit = situation.get('suit')
                 if suit in self.suit_stats:
@@ -827,11 +779,10 @@ class IntelMLPredictor:
                         logger.error(f"Ошибка загрузки {game_type}/{name}: {e}")
     
     async def analyze_and_predict(self, game_data, context):
-        # СНАЧАЛА ПРОГНОЗ
         predictions = None
         next_game_num = None
         
-        if len(self.history) >= 5:  # УМЕНЬШИЛ ДО 5
+        if len(self.history) >= 5:
             logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
             try:
                 predictions, next_game_num = self.predict_next_game()
@@ -844,10 +795,8 @@ class IntelMLPredictor:
         else:
             logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
         
-        # ПОТОМ СОХРАНЯЕМ ИГРУ
         anomalies = self.add_game(game_data)
         
-        # ОБУЧАЕМСЯ
         if len(self.history) >= self.min_games_for_training:
             try:
                 self.train_models()
@@ -856,11 +805,9 @@ class IntelMLPredictor:
         else:
             logger.info(f"📚 До обучения осталось: {self.min_games_for_training - len(self.history)} игр")
         
-        # АНОМАЛИИ
         if anomalies:
             await self._send_anomaly_alert(anomalies, game_data, context)
         
-        # ОТПРАВЛЯЕМ ПРОГНОЗ
         if predictions and next_game_num:
             moscow_tz = pytz.timezone('Europe/Moscow')
             current_time = datetime.now(moscow_tz).strftime('%H:%M')
@@ -884,9 +831,8 @@ class IntelMLPredictor:
                     f"🃏 *МАСТЬ:* {suit} (у игрока)\n"
                     f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
                     f"🎲 *ТИП ИГРЫ:* {pred.get('game_type', 'unknown')}\n\n"
-                    f"🧠 *АНАЛИЗ:* {self._analyze_dogon_strategy(suit)}\n"
                     f"🗣 *КОММЕНТАРИЙ:* {confidence_joke} {suit_joke}\n\n"
-                    f"🔄 *ПЛАНОВЫЕ ДОГОНЫ:*\n"
+                    f"🔄 *ДОГОНЫ:*\n"
                     f"• 1: #{next_game_num + self._calculate_skip_games(suit, 0)}\n"
                     f"• 2: #{next_game_num + self._calculate_skip_games(suit, 1)}\n\n"
                     f"📊 *СТАТИСТИКА:*\n"
@@ -938,7 +884,6 @@ class IntelMLPredictor:
                 if not game:
                     continue
                 
-                # ТОЛЬКО КАРТЫ ИГРОКА
                 player_suits = [c['suit'] for c in game.get('player_cards', [])]
                 
                 suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
@@ -958,7 +903,6 @@ class IntelMLPredictor:
                 await self._update_prediction_message(pred, game_data, True, context)
             else:
                 if pred['attempt'] < 2:
-                    # ИНТЕЛЛЕКТУАЛЬНЫЙ ДОГОН
                     plan = self._get_intelligent_dogon_plan(pred, pred['attempt'], game_data)
                     
                     pred['attempt'] += 1
@@ -1020,68 +964,66 @@ class IntelMLPredictor:
     
     async def _update_prediction_message(self, pred, game_data, succeeded, context):
         if not pred.get('msg_id'):
-        return
-    
-    try:
-        moscow_tz = pytz.timezone('Europe/Moscow')
-        time_str = datetime.now(moscow_tz).strftime('%H:%M')
+            return
         
-        if succeeded:
-            emoji = "✅"
-            status = "ЗАШЁЛ"
-            joke = self._get_funny_comment('win')
-            result_info = f"\n🎯 НАЙДЕНО В ИГРЕ: #{pred.get('actual_game', '?')}"
-        else:
-            emoji = "❌"
-            status = "НЕ ЗАШЁЛ"
-            joke = self._get_funny_comment('loss')
-            result_info = ""
-        
-        suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
-        suit = suit_map_rev.get(int(pred['value']), '?')
-        
-        total = self.predictions_stats['total']
-        success = self.predictions_stats['success']
-        percent = int(success / max(1, total) * 100) if total > 0 else 0
-        
-        attempt_names = ["основная", "догон 1", "догон 2"]
-        
-        text = (
-            f"{emoji} *ML ПРОГНОЗ #{pred['id']} {status}!*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📊 *ИСТОЧНИК:* #{pred['source_game']}\n"
-            f"🎯 *ЦЕЛЬ:* #{pred['target_game']}\n"
-            f"🃏 *МАСТЬ:* {suit}\n"
-            f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
-            f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
-            f"{result_info}\n\n"
-            f"🗣 *КОММЕНТАРИЙ:* {joke}\n\n"
-            f"📊 *СТАТИСТИКА:*\n"
-            f"• Всего: {total}\n"
-            f"• Успешно: {success}\n"
-            f"• Процент: {percent}%"
-        )
-        
-        # Пробуем отправить с Markdown
         try:
-            await context.bot.edit_message_text(
-                chat_id=OUTPUT_CHANNEL_ID,
-                message_id=pred['msg_id'],
-                text=text,
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            logger.error(f"❌ Ошибка Markdown, отправляю без форматирования: {e}")
-            # Если ошибка - отправляем без Markdown
-            await context.bot.edit_message_text(
-                chat_id=OUTPUT_CHANNEL_ID,
-                message_id=pred['msg_id'],
-                text=text.replace('*', '').replace('_', ''),
-                parse_mode=None
+            moscow_tz = pytz.timezone('Europe/Moscow')
+            time_str = datetime.now(moscow_tz).strftime('%H:%M')
+            
+            if succeeded:
+                emoji = "✅"
+                status = "ЗАШЁЛ"
+                joke = self._get_funny_comment('win')
+                result_info = f"\n🎯 НАЙДЕНО В ИГРЕ: #{pred.get('actual_game', '?')}"
+            else:
+                emoji = "❌"
+                status = "НЕ ЗАШЁЛ"
+                joke = self._get_funny_comment('loss')
+                result_info = ""
+            
+            suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
+            suit = suit_map_rev.get(int(pred['value']), '?')
+            
+            total = self.predictions_stats['total']
+            success = self.predictions_stats['success']
+            percent = int(success / max(1, total) * 100) if total > 0 else 0
+            
+            attempt_names = ["основная", "догон 1", "догон 2"]
+            
+            text = (
+                f"{emoji} *ML ПРОГНОЗ #{pred['id']} {status}!*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📊 *ИСТОЧНИК:* #{pred['source_game']}\n"
+                f"🎯 *ЦЕЛЬ:* #{pred['target_game']}\n"
+                f"🃏 *МАСТЬ:* {suit}\n"
+                f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
+                f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
+                f"{result_info}\n\n"
+                f"🗣 *КОММЕНТАРИЙ:* {joke}\n\n"
+                f"📊 *СТАТИСТИКА:*\n"
+                f"• Всего: {total}\n"
+                f"• Успешно: {success}\n"
+                f"• Процент: {percent}%"
             )
             
-    except Exception as e:
-        logger.error(f"ML: ошибка обновления сообщения: {e}")
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=OUTPUT_CHANNEL_ID,
+                    message_id=pred['msg_id'],
+                    text=text,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(f"❌ Ошибка Markdown, отправляю без форматирования: {e}")
+                await context.bot.edit_message_text(
+                    chat_id=OUTPUT_CHANNEL_ID,
+                    message_id=pred['msg_id'],
+                    text=text.replace('*', '').replace('_', ''),
+                    parse_mode=None
+                )
+                
+        except Exception as e:
+            logger.error(f"ML: ошибка обновления сообщения: {e}")
     
     async def _send_anomaly_alert(self, anomalies, game_data, context):
         try:
@@ -1113,7 +1055,6 @@ class IntelMLPredictor:
             logger.error(f"ML: ошибка отправки аномалии: {e}")
     
     async def send_detailed_stats(self, context):
-        """Отправляет подробную статистику каждые 3 часа"""
         try:
             moscow_tz = pytz.timezone('Europe/Moscow')
             current_time = datetime.now(moscow_tz).strftime('%H:%M')
@@ -1246,7 +1187,6 @@ def extract_left_part(text):
     return text.strip()
 
 def parse_game_data(text):
-    # Очищаем от дубликатов мастей
     text = re.sub(r'([♥️♦️♠️♣️])\1+', r'\1', text)
     
     logger.info(f"🔥 СЫРОЙ ТЕКСТ: {repr(text)}")
@@ -1263,7 +1203,6 @@ def parse_game_data(text):
     has_green_square = '🟩' in text
     is_tie = '🔰' in text
     
-    # Игра завершена если есть ✅ или 🟩 или 🔰
     is_complete = has_check or has_green_square or is_tie
     
     player_draws = '👈' in text
@@ -1438,7 +1377,6 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await storage.ml_predictor.analyze_and_predict(game_data, context)
         
-        # Очистка старых данных
         current_time = datetime.now()
         for pending_num in list(pending_games.keys()):
             if pending_num < game_num - 20:
@@ -1473,18 +1411,15 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
             del pending_games[game_num]
 
 async def three_hour_stats(context: ContextTypes.DEFAULT_TYPE):
-    """Отправка статистики каждые 3 часа"""
     await storage.ml_predictor.send_detailed_stats(context)
 
 def main():
     print("\n" + "="*60)
     print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ (ПОРОГ 15%)")
     print("="*60)
-    print("✅ Порог уверенности снижен до 15%")
-    print("✅ Отключена проверка дублей мастей")
-    print("✅ Обучение с 20 игр")
-    print("✅ Прогнозы с 5 игр")
-    print("✅ Подробная диагностика в логах")
+    print("✅ Полностью исправленная версия")
+    print("✅ Правильные отступы")
+    print("✅ Защита от Markdown ошибок")
     print("="*60)
     
     if not acquire_lock():
@@ -1502,7 +1437,6 @@ def main():
         handle_new_game
     ))
     
-    # Планировщик для статистики
     if app.job_queue:
         app.job_queue.run_repeating(three_hour_stats, interval=10800, first=10)
         app.job_queue.run_repeating(check_stuck_games, interval=30, first=10)
