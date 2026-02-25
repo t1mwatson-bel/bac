@@ -615,6 +615,28 @@ class IntelMLPredictor:
                 max_game = pred['target_game']
         return max_game
     
+    def _check_stuck_predictions(self):
+        """Проверяет не зависли ли прогнозы"""
+        current_time = datetime.now(pytz.timezone('Europe/Moscow'))
+        stuck_count = 0
+        
+        for pred in self.active_predictions:
+            if pred['status'] != 'pending':
+                continue
+            
+            # Если прогноз висит больше 30 минут - считаем его зависшим
+            if 'timestamp' in pred:
+                delta = (current_time - pred['timestamp']).seconds
+                if delta > 1800:  # 30 минут
+                    logger.warning(f"⚠️ Зависший прогноз #{pred['id']} на игру #{pred['target_game']} (висит {delta}с)")
+                    pred['status'] = 'stuck'
+                    stuck_count += 1
+        
+        if stuck_count > 0:
+            logger.info(f"🧹 Очищено {stuck_count} зависших прогнозов")
+        
+        return stuck_count
+    
     def predict_next_game(self):
         logger.info("📢 ВХОД В predict_next_game")
         logger.info(f"len(history)={len(self.history)}")
@@ -826,6 +848,20 @@ class IntelMLPredictor:
         predictions = None
         next_game_num = None
         
+        # ПРОВЕРКА ЗАВИСШИХ ПРОГНОЗОВ
+        self._check_stuck_predictions()
+        
+        # ПРОВЕРКА АКТИВНЫХ ПРОГНОЗОВ - если есть активные, новый не даем
+        active = [p for p in self.active_predictions if p['status'] == 'pending']
+        if active:
+            logger.info(f"⏳ Есть активные прогнозы ({len(active)}), новый не даем")
+            # Не делаем новый прогноз, но сохраняем игру и проверяем старые
+            anomalies = self.add_game(game_data)
+            if anomalies:
+                await self._send_anomaly_alert(anomalies, game_data, context)
+            await self.check_predictions(game_data['game_num'], game_data, context)
+            return
+        
         # ПРОВЕРКА ТАЙМЕРА
         current_time = datetime.now(pytz.timezone('Europe/Moscow'))
         
@@ -833,35 +869,26 @@ class IntelMLPredictor:
             time_diff = (current_time - self.last_prediction_time).seconds
             if time_diff < self.min_time_between:
                 logger.info(f"⏳ С момента последнего прогноза прошло {time_diff}с, нужно минимум {self.min_time_between}с")
-                # Не делаем новый прогноз
-            else:
-                # Делаем прогноз
-                if len(self.history) >= 5:
-                    logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
-                    try:
-                        predictions, next_game_num = self.predict_next_game()
-                        if predictions:
-                            logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
-                        else:
-                            logger.info("❌ predictions is None")
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка прогноза: {e}")
+                # Не делаем новый прогноз, но сохраняем игру и проверяем старые
+                anomalies = self.add_game(game_data)
+                if anomalies:
+                    await self._send_anomaly_alert(anomalies, game_data, context)
+                await self.check_predictions(game_data['game_num'], game_data, context)
+                return
+        
+        # ДЕЛАЕМ ПРОГНОЗ
+        if len(self.history) >= 5:
+            logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
+            try:
+                predictions, next_game_num = self.predict_next_game()
+                if predictions:
+                    logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
                 else:
-                    logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
+                    logger.info("❌ predictions is None")
+            except Exception as e:
+                logger.error(f"❌ Ошибка прогноза: {e}")
         else:
-            # Первый прогноз
-            if len(self.history) >= 5:
-                logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
-                try:
-                    predictions, next_game_num = self.predict_next_game()
-                    if predictions:
-                        logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
-                    else:
-                        logger.info("❌ predictions is None")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка прогноза: {e}")
-            else:
-                logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
+            logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
         
         # ПОТОМ СОХРАНЯЕМ ИГРУ
         anomalies = self.add_game(game_data)
@@ -879,7 +906,10 @@ class IntelMLPredictor:
         if anomalies:
             await self._send_anomaly_alert(anomalies, game_data, context)
         
-        # ОТПРАВЛЯЕМ ПРОГНОЗ
+        # ПРОВЕРЯЕМ ПРОГНОЗЫ
+        await self.check_predictions(game_data['game_num'], game_data, context)
+        
+        # ОТПРАВЛЯЕМ НОВЫЙ ПРОГНОЗ (если есть)
         if predictions and next_game_num:
             self.last_prediction_time = current_time
             
@@ -940,7 +970,8 @@ class IntelMLPredictor:
                         'attempt': 0,
                         'original_suit': suit,
                         'strategy': 'same_suit',
-                        'skip': skip1
+                        'skip': skip1,
+                        'timestamp': current_time
                     })
                     
                 except Exception as e:
@@ -1235,18 +1266,22 @@ def normalize_suit(s):
     if not s:
         return None
     s = str(s).strip()
-    logger.info(f"🔥 normalize_suit получил: '{s}' (код: {ord(s) if s else 'None'})")
     
-    if s in ('♥', '❤', '♡', '♥️'):
+    # Удаляем variation selectors (коды 65038-65039)
+    clean_s = ''.join(c for c in s if ord(c) not in [65038, 65039])
+    
+    logger.info(f"🔥 normalize_suit получил: '{s}', после очистки: '{clean_s}'")
+    
+    if clean_s in ('♥', '❤', '♡'):
         return '♥️'
-    if s in ('♠', '♤', '♠️'):
+    if clean_s in ('♠', '♤'):
         return '♠️'
-    if s in ('♣', '♧', '♣️'):
+    if clean_s in ('♣', '♧'):
         return '♣️'
-    if s in ('♦', '♢', '♦️'):
+    if clean_s in ('♦', '♢'):
         return '♦️'
     
-    logger.warning(f"⚠️ Неизвестный символ масти: '{s}'")
+    logger.warning(f"⚠️ Неизвестный символ масти: '{s}' (очищенный: '{clean_s}')")
     return None
 
 def extract_suits(text):
@@ -1497,10 +1532,11 @@ def main():
     print("\n" + "="*60)
     print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ - ФИНАЛЬНАЯ ВЕРСИЯ")
     print("="*60)
+    print("✅ ОДИН АКТИВНЫЙ ПРОГНОЗ")
+    print("✅ ЗАЩИТА ОТ ЗАВИСШИХ (30 мин)")
     print("✅ Таймер 2-7 минут между прогнозами")
-    print("✅ Догоны строго по порядку (цель → догон1 → догон2)")
+    print("✅ Догоны строго по порядку")
     print("✅ Прогнозы только на увеличение")
-    print("✅ Диапазон игр 2-7")
     print("✅ Масть только у игрока")
     print("="*60)
     
