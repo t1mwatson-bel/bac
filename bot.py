@@ -1019,7 +1019,7 @@ class IntelMLPredictor:
             logger.error(f"ML: ошибка обновления сообщения: {e}")
     
     async def _update_prediction_message(self, pred, game_data, succeeded, context):
-    if not pred.get('msg_id'):
+        if not pred.get('msg_id'):
         return
     
     try:
