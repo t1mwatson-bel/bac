@@ -69,9 +69,9 @@ class IntelMLPredictor:
         }
         
         # ИНТЕЛЛЕКТУАЛЬНЫЕ НАСТРОЙКИ
-        self.confidence_threshold = 0.3
-        self.dynamic_threshold = True
-        self.min_games_for_training = 30  # Уменьшил для быстрого старта
+        self.confidence_threshold = 0.15  # ПОНИЗИЛ ПОРОГ ДО 15%
+        self.dynamic_threshold = False    # ОТКЛЮЧИЛ ДИНАМИКУ
+        self.min_games_for_training = 20  # УМЕНЬШИЛ ДЛЯ БЫСТРОГО СТАРТА
         
         # Статистика догонов
         self.dogon_stats = {
@@ -618,7 +618,11 @@ class IntelMLPredictor:
         return False
     
     def predict_next_game(self):
-        if len(self.history) < 10:
+        logger.info("📢 ВХОД В predict_next_game")
+        logger.info(f"len(history)={len(self.history)}")
+        
+        if len(self.history) < 5:  # УМЕНЬШИЛ ДО 5 ДЛЯ ТЕСТА
+            logger.info("❌ Мало истории (<5)")
             return None, None
         
         last_game = list(self.history)[-1]
@@ -674,27 +678,24 @@ class IntelMLPredictor:
         X = np.array(features).reshape(1, -1)
         
         if game_type in self.models:
+            logger.info(f"📊 Пробуем предсказать для типа {game_type}")
             pred, confidence = self._ensemble_predict(self.models[game_type], X)
             
             if pred is not None:
                 suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
                 predicted_suit = suit_map_rev.get(pred, '?')
                 
-                # Проверка на дубликаты мастей
-                if self._check_suit_duplicate(predicted_suit, last_games=3):
-                    logger.info(f"ML: масть {predicted_suit} была в последних 3 играх, пропускаем")
-                    return None, None
+                logger.info(f"📈 Предсказание: {predicted_suit} с уверенностью {confidence:.2f}")
                 
-                # Динамический порог
-                threshold = self.confidence_threshold
-                if self.dynamic_threshold and self.predictions_stats['total'] > 10:
-                    success_rate = self.predictions_stats['success'] / self.predictions_stats['total']
-                    if success_rate > 0.7:
-                        threshold = 0.4
-                    elif success_rate < 0.3:
-                        threshold = 0.5
+                # Проверка на дубликаты мастей - ВРЕМЕННО ОТКЛЮЧИЛ
+                # if self._check_suit_duplicate(predicted_suit, last_games=3):
+                #     logger.info(f"ML: масть {predicted_suit} была в последних 3 играх, пропускаем")
+                #     return None, None
                 
-                if confidence >= threshold:
+                # ПРОВЕРКА ПОРОГА
+                if confidence >= self.confidence_threshold:
+                    logger.info(f"✅ Прошел порог {self.confidence_threshold}")
+                    
                     # ДИАПАЗОН ТЕПЕРЬ ТОЖЕ ИНТЕЛЛЕКТУАЛЬНЫЙ
                     skip = self._calculate_skip_games(predicted_suit, 0)
                     next_game_num = current_game_num + skip
@@ -707,8 +708,16 @@ class IntelMLPredictor:
                             'suit': predicted_suit
                         }
                     }
+                    logger.info(f"🔥 ИТОГОВЫЙ ПРОГНОЗ на игру #{next_game_num}")
                     return predictions, next_game_num
+                else:
+                    logger.info(f"❌ Не прошел порог {self.confidence_threshold} (уверенность {confidence:.2f})")
+            else:
+                logger.info("❌ pred is None")
+        else:
+            logger.info(f"❌ game_type {game_type} не в моделях")
         
+        logger.info("❌ Прогноз не создан")
         return None, None
     
     def _check_anomalies(self, game_data):
@@ -822,13 +831,18 @@ class IntelMLPredictor:
         predictions = None
         next_game_num = None
         
-        if len(self.history) >= 10:
+        if len(self.history) >= 5:  # УМЕНЬШИЛ ДО 5
+            logger.info(f"📊 Пытаемся сделать прогноз (история: {len(self.history)} игр)")
             try:
                 predictions, next_game_num = self.predict_next_game()
                 if predictions:
-                    logger.info(f"🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ прогноз на игру #{next_game_num}")
+                    logger.info(f"🔥 ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ на игру #{next_game_num}")
+                else:
+                    logger.info("❌ predictions is None")
             except Exception as e:
                 logger.error(f"❌ Ошибка прогноза: {e}")
+        else:
+            logger.info(f"📚 Мало истории для прогноза: {len(self.history)}/5")
         
         # ПОТОМ СОХРАНЯЕМ ИГРУ
         anomalies = self.add_game(game_data)
@@ -1193,6 +1207,8 @@ def normalize_suit(s):
     if not s:
         return None
     s = str(s).strip()
+    logger.info(f"🔥 normalize_suit получил: '{s}' (код: {ord(s) if s else 'None'})")
+    
     if s in ('♥', '❤', '♡', '♥️'):
         return '♥️'
     if s in ('♠', '♤', '♠️'):
@@ -1201,6 +1217,8 @@ def normalize_suit(s):
         return '♣️'
     if s in ('♦', '♢', '♦️'):
         return '♦️'
+    
+    logger.warning(f"⚠️ Неизвестный символ масти: '{s}'")
     return None
 
 def extract_suits(text):
@@ -1223,6 +1241,8 @@ def extract_left_part(text):
 def parse_game_data(text):
     # Очищаем от дубликатов мастей
     text = re.sub(r'([♥️♦️♠️♣️])\1+', r'\1', text)
+    
+    logger.info(f"🔥 СЫРОЙ ТЕКСТ: {repr(text)}")
     
     match = re.search(r'#N(\d+)', text)
     if not match:
@@ -1451,15 +1471,13 @@ async def three_hour_stats(context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     print("\n" + "="*60)
-    print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ")
+    print("🧠 ИНТЕЛЛЕКТУАЛЬНЫЙ ML БОТ (ПОРОГ 15%)")
     print("="*60)
-    print("✅ Анализ частоты мастей")
-    print("✅ Интеллектуальные догоны")
-    print("✅ Смена стратегии при необходимости")
-    print("✅ Адаптивный пропуск игр")
-    print("✅ Статистика эффективности")
-    print("✅ Обучение с 30 игр")
-    print("✅ Ржачные комментарии")
+    print("✅ Порог уверенности снижен до 15%")
+    print("✅ Отключена проверка дублей мастей")
+    print("✅ Обучение с 20 игр")
+    print("✅ Прогнозы с 5 игр")
+    print("✅ Подробная диагностика в логах")
     print("="*60)
     
     if not acquire_lock():
