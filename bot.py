@@ -1019,62 +1019,69 @@ class IntelMLPredictor:
             logger.error(f"ML: ошибка обновления сообщения: {e}")
     
     async def _update_prediction_message(self, pred, game_data, succeeded, context):
-        if not pred.get('msg_id'):
-            return
+    if not pred.get('msg_id'):
+        return
+    
+    try:
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        time_str = datetime.now(moscow_tz).strftime('%H:%M')
         
+        if succeeded:
+            emoji = "✅"
+            status = "ЗАШЁЛ"
+            joke = self._get_funny_comment('win')
+            result_info = f"\n🎯 НАЙДЕНО В ИГРЕ: #{pred.get('actual_game', '?')}"
+        else:
+            emoji = "❌"
+            status = "НЕ ЗАШЁЛ"
+            joke = self._get_funny_comment('loss')
+            result_info = ""
+        
+        suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
+        suit = suit_map_rev.get(int(pred['value']), '?')
+        
+        total = self.predictions_stats['total']
+        success = self.predictions_stats['success']
+        percent = int(success / max(1, total) * 100) if total > 0 else 0
+        
+        attempt_names = ["основная", "догон 1", "догон 2"]
+        
+        text = (
+            f"{emoji} *ML ПРОГНОЗ #{pred['id']} {status}!*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📊 *ИСТОЧНИК:* #{pred['source_game']}\n"
+            f"🎯 *ЦЕЛЬ:* #{pred['target_game']}\n"
+            f"🃏 *МАСТЬ:* {suit}\n"
+            f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
+            f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
+            f"{result_info}\n\n"
+            f"🗣 *КОММЕНТАРИЙ:* {joke}\n\n"
+            f"📊 *СТАТИСТИКА:*\n"
+            f"• Всего: {total}\n"
+            f"• Успешно: {success}\n"
+            f"• Процент: {percent}%"
+        )
+        
+        # Пробуем отправить с Markdown
         try:
-            moscow_tz = pytz.timezone('Europe/Moscow')
-            time_str = datetime.now(moscow_tz).strftime('%H:%M')
-            
-            if succeeded:
-                emoji = "✅"
-                status = "ЗАШЁЛ"
-                joke = self._get_funny_comment('win')
-                result_info = f"\n🎯 НАЙДЕНО В ИГРЕ: #{pred.get('actual_game', '?')}"
-            else:
-                emoji = "❌"
-                status = "НЕ ЗАШЁЛ"
-                joke = self._get_funny_comment('loss')
-                result_info = ""
-            
-            suit_map_rev = {0: '♥️', 1: '♦️', 2: '♠️', 3: '♣️'}
-            suit = suit_map_rev.get(int(pred['value']), '?')
-            
-            total = self.predictions_stats['total']
-            success = self.predictions_stats['success']
-            percent = int(success / max(1, total) * 100) if total > 0 else 0
-            
-            attempt_names = ["основная", "догон 1", "догон 2"]
-            
-            text = (
-                f"{emoji} *ИНТЕЛЛЕКТУАЛЬНЫЙ ПРОГНОЗ #{pred['id']} {status}!*\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"📊 *ИСТОЧНИК:* #{pred['source_game']}\n"
-                f"🎯 *ЦЕЛЬ:* #{pred['target_game']}\n"
-                f"🃏 *МАСТЬ:* {suit}\n"
-                f"📈 *УВЕРЕННОСТЬ:* {int(pred['confidence']*100)}%\n"
-                f"🔄 *ПОПЫТКА:* {attempt_names[pred['attempt']]}\n"
-                f"{result_info}\n\n"
-                f"🗣 *КОММЕНТАРИЙ:* {joke}\n\n"
-                f"📊 *СТАТИСТИКА:*\n"
-                f"• Всего: {total}\n"
-                f"• Успешно: {success}\n"
-                f"• Процент: {percent}%\n\n"
-                f"📊 *ЭФФЕКТИВНОСТЬ ДОГОНОВ:*\n"
-                f"• Та же масть: {self.dogon_stats['same_suit']['success']}/{self.dogon_stats['same_suit']['attempts']}\n"
-                f"• Смена масти: {self.dogon_stats['changed_suit']['success']}/{self.dogon_stats['changed_suit']['attempts']}\n"
-                f"⏱ {time_str} МСК"
-            )
-            
             await context.bot.edit_message_text(
                 chat_id=OUTPUT_CHANNEL_ID,
                 message_id=pred['msg_id'],
                 text=text,
                 parse_mode='Markdown'
             )
-            
         except Exception as e:
-            logger.error(f"ML: ошибка обновления сообщения: {e}")
+            logger.error(f"❌ Ошибка Markdown, отправляю без форматирования: {e}")
+            # Если ошибка - отправляем без Markdown
+            await context.bot.edit_message_text(
+                chat_id=OUTPUT_CHANNEL_ID,
+                message_id=pred['msg_id'],
+                text=text.replace('*', '').replace('_', ''),
+                parse_mode=None
+            )
+            
+    except Exception as e:
+        logger.error(f"ML: ошибка обновления сообщения: {e}")
     
     async def _send_anomaly_alert(self, anomalies, game_data, context):
         try:
