@@ -560,6 +560,7 @@ def parse_game_data(text):
     has_green_square = '🟩' in text
     is_tie = '🔰' in text
     
+    # Игра завершена если есть ✅ или 🟩 или 🔰 (НИЧЬЯ)
     is_complete = has_check or has_green_square or is_tie
     
     player_draws = '👈' in text
@@ -652,6 +653,10 @@ def parse_game_data(text):
         'timestamp': datetime.now(pytz.timezone('Europe/Moscow'))
     }
 
+async def check_ml_predictions(current_game_num, game_data, context):
+    """Проверяет прогнозы для завершенной игры"""
+    await storage.hybrid.analyze_and_predict(game_data, context)
+
 async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = None
@@ -698,7 +703,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_edit:
             logger.info(f"✏️ Редактирование игры #{game_num}")
             storage.games[game_num] = game_data
-            await storage.hybrid.analyze_and_predict(game_data, context)
+            await check_ml_predictions(game_num, game_data, context)
             
             if game_num in pending_games:
                 del pending_games[game_num]
@@ -721,11 +726,16 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             storage.games[game_num] = game_data
             
+            # ВАЖНО: Проверяем прогнозы ТОЛЬКО если игра завершена
             if game_data['is_complete']:
                 logger.info(f"🔍 Игра #{game_num} завершена, проверяем прогнозы")
-            
-            await storage.hybrid.analyze_and_predict(game_data, context)
+                await check_ml_predictions(game_num, game_data, context)
+            else:
+                logger.info(f"⏳ Игра #{game_num} ещё не завершена, прогнозы не проверяем")
+                # Просто анализируем игру без проверки
+                await storage.hybrid.analyze_and_predict(game_data, context)
         
+        # Очистка старых данных
         current_time = datetime.now()
         for pending_num in list(pending_games.keys()):
             if pending_num < game_num - 20:
@@ -755,7 +765,7 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"⏰ Игра #{game_num} зависла в ожидании >2 мин, проверяем")
             
             if game_num in storage.games:
-                await storage.hybrid.analyze_and_predict(storage.games[game_num], context)
+                await check_ml_predictions(game_num, storage.games[game_num], context)
             
             del pending_games[game_num]
 
@@ -765,7 +775,10 @@ def main():
     print("="*60)
     print("⚜️ MASTER-СТРАТЕГИЯ: картинка+цифра, догоны по цвету")
     print("🧠 ML АНАЛИЗ: оптимизация на основе истории")
-    print("✅ ПРОВЕРКА РЕЗУЛЬТАТОВ: после каждой игры")
+    print("✅ ПРОВЕРКА РЕЗУЛЬТАТОВ: во всех завершенных играх")
+    print("   • ✅ - победа банкира")
+    print("   • 🟩 - зеленая метка")
+    print("   • 🔰 - ничья")
     print("✅ Таймер 2 минуты между сигналами")
     print("🎯 Догоны 3 шага с интервалами +2/+3/+4")
     print("="*60)
