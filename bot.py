@@ -19,12 +19,6 @@ from telegram.ext import (
 from telegram.error import Conflict
 import random
 import pytz
-import numpy as np
-from sklearn.ensemble import (
-    RandomForestClassifier,
-    GradientBoostingClassifier
-)
-import joblib
 
 # ======== НАСТРОЙКА ЛОГИРОВАНИЯ ========
 class JsonFormatter(logging.Formatter):
@@ -51,12 +45,9 @@ TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"
 INPUT_CHANNEL_ID = -1003469691743
 OUTPUT_CHANNEL_ID = -1003842401391
 
-LOCK_FILE = f'/tmp/hybrid_bot_{TOKEN[-10:]}.lock'
+LOCK_FILE = f'/tmp/master_bot_{TOKEN[-10:]}.lock'
 
-# ======== ХРАНИЛИЩЕ ========
-storage = None  # Будет инициализировано позже
-
-# ======== MASTER СТРАТЕГИЯ ========
+# ======== MASTER СТРАТЕГИЯ (ТВОЙ АЛГОРИТМ) ========
 class MasterStrategy:
     """Твоя профессиональная стратегия с картинками и цифрами"""
     
@@ -72,11 +63,8 @@ class MasterStrategy:
         self.active_signals = []
         self.stats = {'total': 0, 'success': 0, 'failures': []}
         self.signal_counter = 0
-        self.ml = None  # Будет связан с ML анализатором
-        
-    def set_ml(self, ml_instance):
-        """Привязывает ML анализатор"""
-        self.ml = ml_instance
+        self.last_prediction_time = None
+        self.min_time_between = 120  # 2 минуты между сигналами
         
     def check_banker_combo(self, banker_cards):
         """Проверяет комбинацию банкира: картинка + цифра"""
@@ -93,15 +81,12 @@ class MasterStrategy:
         else:
             return False, None
     
-    def get_dogon_plan(self, original_suit, attempt, delay_mode=False):
+    def get_dogon_plan(self, original_suit, attempt):
         """Возвращает план догона"""
         targets = self.color_map.get(original_suit, {})
         
-        # Интервалы: +2/+3 для входа, +4/+5 для затяжки
-        if delay_mode:
-            intervals = [4, 5, 5]
-        else:
-            intervals = [2, 3, 4]
+        # Интервалы: +2 для 1-го, +3 для 2-го, +4 для 3-го
+        intervals = [2, 3, 4]
         
         if attempt >= len(intervals):
             return None
@@ -124,7 +109,7 @@ class MasterStrategy:
             'attempt': attempt + 1
         }
     
-    def check_signal(self, game_data, ml_stats=None):
+    def check_signal(self, game_data):
         """Проверяет условия для входа"""
         banker_cards = game_data.get('banker_cards', [])
         is_valid, suit = self.check_banker_combo(banker_cards)
@@ -132,27 +117,25 @@ class MasterStrategy:
         if not is_valid:
             return None
         
+        # Проверяем таймер
+        current_time = datetime.now(pytz.timezone('Europe/Moscow'))
+        if self.last_prediction_time:
+            time_diff = (current_time - self.last_prediction_time).seconds
+            if time_diff < self.min_time_between:
+                logger.info(f"⏳ Таймер: {time_diff}с, нужно {self.min_time_between}с")
+                return None
+        
         self.signal_counter += 1
         signal_id = self.signal_counter
         
-        # Базовый интервал +2
+        # Вход через +2
         interval = 2
-        confidence = 85  # Базовая уверенность
-        
-        # Если есть ML статистика - корректируем
-        if ml_stats and suit in ml_stats:
-            stats = ml_stats[suit]
-            if stats['total'] > 10:
-                # Корректируем интервал на основе ML
-                interval = stats.get('best_interval', 2)
-                confidence = int(stats['success_rate'] * 100)
-        
         target_game = game_data['game_num'] + interval
         
         # Формируем план догона
         dogon_plans = []
         for i in range(3):
-            plan = self.get_dogon_plan(suit, i, delay_mode=(interval > 3))
+            plan = self.get_dogon_plan(suit, i)
             if plan:
                 dogon_plans.append(plan)
         
@@ -162,18 +145,18 @@ class MasterStrategy:
             'target_game': target_game,
             'suit': suit,
             'interval': interval,
-            'confidence': confidence,
             'dogon_plans': dogon_plans,
             'status': 'pending',
             'attempt': 0,
-            'timestamp': datetime.now(pytz.timezone('Europe/Moscow'))
+            'timestamp': current_time
         }
         
         self.active_signals.append(signal)
+        self.last_prediction_time = current_time
         return signal
     
     def check_predictions(self, current_game_num, game_data):
-        """Проверяет активные сигналы"""
+        """Проверяет активные сигналы по завершенной игре"""
         results = []
         
         for signal in self.active_signals:
@@ -205,15 +188,7 @@ class MasterStrategy:
                 self.stats['total'] += 1
                 self.stats['success'] += 1
                 results.append(('win', signal))
-                
-                # Обновляем ML статистику
-                if self.ml:
-                    self.ml.update_stats(
-                        signal['suit'],
-                        signal['interval'],
-                        None,
-                        True
-                    )
+                logger.info(f"✅ Сигнал #{signal['id']} зашел в игре #{actual_game}")
             else:
                 if signal['attempt'] < len(signal['dogon_plans']):
                     plan = signal['dogon_plans'][signal['attempt']]
@@ -222,6 +197,7 @@ class MasterStrategy:
                     signal['suit'] = plan['suit']
                     signal['status'] = 'pending'
                     results.append(('dogon', signal, plan))
+                    logger.info(f"🔄 Сигнал #{signal['id']} догон {signal['attempt']} на игру #{signal['target_game']}")
                 else:
                     signal['status'] = 'loss'
                     self.stats['total'] += 1
@@ -230,189 +206,35 @@ class MasterStrategy:
                         'signal': signal['id']
                     })
                     results.append(('loss', signal))
-                    
-                    # Обновляем ML статистику
-                    if self.ml:
-                        self.ml.update_stats(
-                            signal['suit'],
-                            signal['interval'],
-                            None,
-                            False
-                        )
+                    logger.info(f"❌ Сигнал #{signal['id']} не зашел после 3 попыток")
         
         return results
-
-# ======== ML АНАЛИЗАТОР ========
-class MLAnalyzer:
-    """Интеллектуальный анализ на основе истории"""
     
-    def __init__(self):
-        self.history = deque(maxlen=1000)
-        self.suit_stats = {
-            '♥️': {'total': 0, 'success': 0, 'intervals': defaultdict(int), 'replacements': defaultdict(int)},
-            '♦️': {'total': 0, 'success': 0, 'intervals': defaultdict(int), 'replacements': defaultdict(int)},
-            '♠️': {'total': 0, 'success': 0, 'intervals': defaultdict(int), 'replacements': defaultdict(int)},
-            '♣️': {'total': 0, 'success': 0, 'intervals': defaultdict(int), 'replacements': defaultdict(int)}
-        }
-        
-    def add_game(self, game_data, signal_result=None):
-        """Добавляет игру в историю"""
-        self.history.append({
-            'game_num': game_data['game_num'],
-            'player_suits': [c['suit'] for c in game_data.get('player_cards', [])],
-            'banker_cards': game_data.get('banker_cards', []),
-            'winner': game_data.get('winner'),
-            'timestamp': game_data.get('timestamp'),
-            'signal': signal_result
-        })
-    
-    def analyze_suit(self, suit, games=500):
-        """Анализирует статистику по масти"""
-        recent = list(self.history)[-games:]
-        if not recent:
-            return {'total': 0, 'success_rate': 0, 'best_interval': 2}
-        
-        stats = self.suit_stats[suit]
-        
-        # Анализируем успешность
-        total = stats['total']
-        success = stats['success']
-        success_rate = success / max(1, total)
-        
-        # Находим лучший интервал
-        best_interval = 2
-        max_success = 0
-        for interval, count in stats['intervals'].items():
-            if count > max_success:
-                max_success = count
-                best_interval = interval
-        
-        # Анализируем замены
-        best_replacement = 'same'
-        max_replacement = 0
-        for repl, count in stats['replacements'].items():
-            if count > max_replacement:
-                max_replacement = count
-                best_replacement = repl
-        
-        return {
-            'total': total,
-            'success': success,
-            'success_rate': success_rate,
-            'best_interval': best_interval,
-            'best_replacement': best_replacement
-        }
-    
-    def update_stats(self, suit, interval, replacement, succeeded):
-        """Обновляет статистику по результату"""
-        stats = self.suit_stats[suit]
-        stats['total'] += 1
-        stats['intervals'][interval] += 1
-        
-        if replacement:
-            stats['replacements'][replacement] += 1
-        
-        if succeeded:
-            stats['success'] += 1
-
-# ======== ГИБРИДНЫЙ ПРЕДИКТОР ========
-class HybridPredictor:
-    def __init__(self):
-        self.master = MasterStrategy()
-        self.ml = MLAnalyzer()
-        self.master.set_ml(self.ml)  # Связываем стратегию с ML
-        self.last_prediction_time = None
-        self.min_time_between = 120  # 2 минуты
-        
-    async def analyze_and_predict(self, game_data, context):
-        current_time = datetime.now(pytz.timezone('Europe/Moscow'))
-        
-        # Сначала ПРОВЕРЯЕМ РЕЗУЛЬТАТЫ (это важно!)
-        results = self.master.check_predictions(game_data['game_num'], game_data)
-        
-        for result in results:
-            if result[0] == 'win':
-                await self._send_result(result[1], 'win', context)
-            elif result[0] == 'loss':
-                await self._send_result(result[1], 'loss', context)
-            elif result[0] == 'dogon':
-                await self._send_dogon(result[1], result[2], context)
-        
-        # Проверяем таймер для новых сигналов
-        if self.last_prediction_time:
-            time_diff = (current_time - self.last_prediction_time).seconds
-            if time_diff < self.min_time_between:
-                logger.info(f"⏳ Таймер: {time_diff}с, нужно {self.min_time_between}с")
-                # Добавляем игру в историю, но новый сигнал не даем
-                self.ml.add_game(game_data)
-                return
-        
-        # Получаем ML статистику для текущей масти
-        ml_stats = {}
-        for suit in ['♥️', '♦️', '♠️', '♣️']:
-            ml_stats[suit] = self.ml.analyze_suit(suit)
-        
-        # Проверяем сигнал от MASTER стратегии
-        signal = self.master.check_signal(game_data, ml_stats)
-        
-        if signal:
-            self.last_prediction_time = current_time
-            
-            # Формируем сообщение
-            message = self._format_signal(signal, ml_stats)
-            
-            try:
-                await context.bot.send_message(
-                    chat_id=OUTPUT_CHANNEL_ID,
-                    text=message,
-                    parse_mode='Markdown'
-                )
-                logger.info(f"⚜️ MASTER сигнал #{signal['id']} на игру #{signal['target_game']}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки: {e}")
-        
-        # Добавляем игру в ML историю
-        self.ml.add_game(game_data)
-    
-    def _format_signal(self, signal, ml_stats):
+    def _format_signal(self, signal):
         """Форматирует сигнал для вывода"""
-        suit = signal['suit']
-        ml = ml_stats.get(suit, {})
-        
         # Формируем строку догонов
         dogon_lines = []
         for i, plan in enumerate(signal['dogon_plans']):
-            strategy = f"({plan['strategy']})"
-            dogon_lines.append(f"  • #{signal['target_game'] + plan['interval']} (+{plan['interval']}) — {plan['suit']} {strategy}")
+            dogon_lines.append(f"  • #{signal['target_game'] + plan['interval']} (+{plan['interval']}) — {plan['suit']} ({plan['strategy']})")
         
         dogon_text = "\n".join(dogon_lines)
         
-        # Формируем ML анализ
-        ml_text = ""
-        if ml['total'] > 10:
-            ml_text = (
-                f"\n🧠 *ML АНАЛИЗ* (на основе {ml['total']} игр):\n"
-                f"• Интервал: +{ml['best_interval']} (оптимально, успешность {int(ml['success_rate']*100)}%)\n"
-            )
-        
         return (
-            f"⚜️ *MASTER-ML СИГНАЛ #{signal['id']}* ⚜️\n"
+            f"⚜️ *MASTER СИГНАЛ #{signal['id']}* ⚜️\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 *Вход:* #{signal['target_game']} (+{signal['interval']}) — {suit}\n"
-            f"{ml_text}\n"
+            f"🎯 *Вход:* #{signal['target_game']} (+{signal['interval']}) — {signal['suit']}\n\n"
             f"🔄 *Догон:* \n{dogon_text}\n\n"
-            f"📈 *Уверенность:* {signal['confidence']}%\n"
             f"⏱ От игры #{signal['source_game']}"
         )
     
-    async def _send_result(self, signal, result, context):
-        """Отправляет результат"""
+    def _format_result(self, signal, result):
+        """Форматирует результат"""
         emoji = "✅" if result == 'win' else "❌"
         status = "ЗАШЁЛ" if result == 'win' else "НЕ ЗАШЁЛ"
         
         # Считаем проценты
-        total = self.master.stats['total']
-        success = self.master.stats['success']
+        total = self.stats['total']
+        success = self.stats['success']
         percent = int(success / max(1, total) * 100) if total > 0 else 0
         
         text = (
@@ -421,26 +243,26 @@ class HybridPredictor:
             f"📊 *ИСТОЧНИК:* #{signal['source_game']}\n"
             f"🎯 *ЦЕЛЬ:* #{signal['target_game']}\n"
             f"🃏 *МАСТЬ:* {signal['suit']}\n"
-            f"🎲 *НАЙДЕНО В ИГРЕ:* #{signal.get('actual_game', '?')}\n\n"
-            f"📊 *СТАТИСТИКА MASTER:*\n"
+        )
+        
+        if result == 'win':
+            text += f"🎯 *НАЙДЕНО В ИГРЕ:* #{signal.get('actual_game', '?')}\n\n"
+        else:
+            text += f"\n"
+        
+        text += (
+            f"📊 *СТАТИСТИКА:*\n"
             f"• Всего: {total}\n"
             f"• Успешно: {success}\n"
             f"• Процент: {percent}%\n"
             f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
         )
         
-        try:
-            await context.bot.send_message(
-                chat_id=OUTPUT_CHANNEL_ID,
-                text=text,
-                parse_mode='Markdown'
-            )
-        except:
-            pass
+        return text
     
-    async def _send_dogon(self, signal, plan, context):
-        """Отправляет догон"""
-        text = (
+    def _format_dogon(self, signal, plan):
+        """Форматирует догон"""
+        return (
             f"🔄 *MASTER ДОГОН #{signal['id']} — ПОПЫТКА {signal['attempt']}*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{signal['source_game']}\n"
@@ -449,21 +271,12 @@ class HybridPredictor:
             f"📈 *ИНТЕРВАЛ:* +{plan['interval']}\n"
             f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
         )
-        
-        try:
-            await context.bot.send_message(
-                chat_id=OUTPUT_CHANNEL_ID,
-                text=text,
-                parse_mode='Markdown'
-            )
-        except:
-            pass
 
 # ======== ХРАНИЛИЩЕ ========
 class GameStorage:
     def __init__(self):
         self.games = {}
-        self.hybrid = HybridPredictor()
+        self.strategy = MasterStrategy()
 
 storage = GameStorage()
 lock_fd = None
@@ -560,7 +373,7 @@ def parse_game_data(text):
     has_green_square = '🟩' in text
     is_tie = '🔰' in text
     
-    # Игра завершена если есть ✅ или 🟩 или 🔰 (НИЧЬЯ)
+    # Игра завершена если есть ✅ или 🟩 или 🔰
     is_complete = has_check or has_green_square or is_tie
     
     player_draws = '👈' in text
@@ -653,10 +466,6 @@ def parse_game_data(text):
         'timestamp': datetime.now(pytz.timezone('Europe/Moscow'))
     }
 
-async def check_ml_predictions(current_game_num, game_data, context):
-    """Проверяет прогнозы для завершенной игры"""
-    await storage.hybrid.analyze_and_predict(game_data, context)
-
 async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = None
@@ -703,7 +512,29 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_edit:
             logger.info(f"✏️ Редактирование игры #{game_num}")
             storage.games[game_num] = game_data
-            await check_ml_predictions(game_num, game_data, context)
+            
+            # Проверяем прогнозы если игра завершена
+            if game_data['is_complete']:
+                results = storage.strategy.check_predictions(game_num, game_data)
+                for result in results:
+                    if result[0] == 'win':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(result[1], 'win'),
+                            parse_mode='Markdown'
+                        )
+                    elif result[0] == 'loss':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(result[1], 'loss'),
+                            parse_mode='Markdown'
+                        )
+                    elif result[0] == 'dogon':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_dogon(result[1], result[2]),
+                            parse_mode='Markdown'
+                        )
             
             if game_num in pending_games:
                 del pending_games[game_num]
@@ -714,7 +545,16 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"⏳ Игра #{game_num}: ожидание третьей карты")
             pending_games[game_num] = PendingGame(game_data, datetime.now())
             storage.games[game_num] = game_data
-            await storage.hybrid.analyze_and_predict(game_data, context)
+            
+            # Проверяем сигнал (таймер внутри check_signal)
+            signal = storage.strategy.check_signal(game_data)
+            if signal:
+                await context.bot.send_message(
+                    chat_id=OUTPUT_CHANNEL_ID,
+                    text=storage.strategy._format_signal(signal),
+                    parse_mode='Markdown'
+                )
+            
             return
         
         if not game_data['player_draws'] and not game_data['banker_draws']:
@@ -726,14 +566,39 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             storage.games[game_num] = game_data
             
-            # ВАЖНО: Проверяем прогнозы ТОЛЬКО если игра завершена
+            # ВАЖНО: Проверяем прогнозы если игра завершена
             if game_data['is_complete']:
                 logger.info(f"🔍 Игра #{game_num} завершена, проверяем прогнозы")
-                await check_ml_predictions(game_num, game_data, context)
-            else:
-                logger.info(f"⏳ Игра #{game_num} ещё не завершена, прогнозы не проверяем")
-                # Просто анализируем игру без проверки
-                await storage.hybrid.analyze_and_predict(game_data, context)
+                results = storage.strategy.check_predictions(game_num, game_data)
+                
+                for result in results:
+                    if result[0] == 'win':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(result[1], 'win'),
+                            parse_mode='Markdown'
+                        )
+                    elif result[0] == 'loss':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(result[1], 'loss'),
+                            parse_mode='Markdown'
+                        )
+                    elif result[0] == 'dogon':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_dogon(result[1], result[2]),
+                            parse_mode='Markdown'
+                        )
+            
+            # Проверяем новый сигнал
+            signal = storage.strategy.check_signal(game_data)
+            if signal:
+                await context.bot.send_message(
+                    chat_id=OUTPUT_CHANNEL_ID,
+                    text=storage.strategy._format_signal(signal),
+                    parse_mode='Markdown'
+                )
         
         # Очистка старых данных
         current_time = datetime.now()
@@ -765,22 +630,42 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"⏰ Игра #{game_num} зависла в ожидании >2 мин, проверяем")
             
             if game_num in storage.games:
-                await check_ml_predictions(game_num, storage.games[game_num], context)
+                # Проверяем прогнозы для зависшей игры
+                game_data = storage.games[game_num]
+                results = storage.strategy.check_predictions(game_num, game_data)
+                
+                for result in results:
+                    if result[0] == 'win':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(result[1], 'win'),
+                            parse_mode='Markdown'
+                        )
+                    elif result[0] == 'loss':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(result[1], 'loss'),
+                            parse_mode='Markdown'
+                        )
+                    elif result[0] == 'dogon':
+                        await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_dogon(result[1], result[2]),
+                            parse_mode='Markdown'
+                        )
             
             del pending_games[game_num]
 
 def main():
     print("\n" + "="*60)
-    print("🤖 ГИБРИДНЫЙ MASTER-ML БОТ")
+    print("⚜️ MASTER СТРАТЕГИЯ - ТВОЙ АЛГОРИТМ")
     print("="*60)
-    print("⚜️ MASTER-СТРАТЕГИЯ: картинка+цифра, догоны по цвету")
-    print("🧠 ML АНАЛИЗ: оптимизация на основе истории")
-    print("✅ ПРОВЕРКА РЕЗУЛЬТАТОВ: во всех завершенных играх")
-    print("   • ✅ - победа банкира")
-    print("   • 🟩 - зеленая метка")
-    print("   • 🔰 - ничья")
+    print("✅ Банкир: картинка (K,Q,J) + цифра")
+    print("✅ Масть берем от цифры")
+    print("✅ Вход через +2 игры")
+    print("✅ Догон 3 шага: +2 (цвет), +3 (против), +4 (прямая)")
     print("✅ Таймер 2 минуты между сигналами")
-    print("🎯 Догоны 3 шага с интервалами +2/+3/+4")
+    print("✅ ПРОВЕРКА РЕЗУЛЬТАТОВ в завершенных играх")
     print("="*60)
     
     if not acquire_lock():
