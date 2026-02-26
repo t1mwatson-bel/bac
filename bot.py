@@ -148,7 +148,8 @@ class MasterStrategy:
             'dogon_plans': dogon_plans,
             'status': 'pending',
             'attempt': 0,
-            'timestamp': current_time
+            'timestamp': current_time,
+            'msg_id': None  # Здесь будем хранить ID сообщения для обновления
         }
         
         self.active_signals.append(signal)
@@ -163,7 +164,7 @@ class MasterStrategy:
             if signal['status'] != 'pending':
                 continue
             
-            # Проверяем только если target_game <= current_game_num
+            # Проверяем все игры от target_game до current_game_num
             if signal['target_game'] > current_game_num:
                 continue
             
@@ -221,10 +222,33 @@ class MasterStrategy:
             f"⏱ От игры #{signal['source_game']}"
         )
     
-    def _format_result(self, signal, result):
+    def _format_status(self, signal):
+        """Форматирует текущий статус сигнала (для обновления)"""
+        status_text = f"⚜️ *MASTER СИГНАЛ #{signal['id']}* ⚜️\n"
+        status_text += f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        if signal['attempt'] == 0:
+            status_text += f"📊 *Статус:* Ожидание входа в игре #{signal['target_game']}\n"
+            status_text += f"🎯 *Масть:* {signal['suit']}\n\n"
+        else:
+            status_text += f"📊 *Статус:* Догон {signal['attempt']}/3\n"
+            status_text += f"🎯 *Следующая цель:* #{signal['target_game']}\n"
+            status_text += f"🃏 *Масть:* {signal['suit']}\n\n"
+        
+        # Показываем оставшиеся догоны
+        if signal['attempt'] < len(signal['dogon_plans']):
+            status_text += f"🔄 *Осталось догонов:*\n"
+            for i in range(signal['attempt'], len(signal['dogon_plans'])):
+                plan = signal['dogon_plans'][i]
+                status_text += f"  • #{signal['target_game'] + plan['interval']} (+{plan['interval']}) — {plan['suit']} ({plan['strategy']})\n"
+        
+        status_text += f"\n⏱ От игры #{signal['source_game']}"
+        return status_text
+    
+    def _format_result(self, signal):
         """Форматирует результат"""
-        emoji = "✅" if result == 'win' else "❌"
-        status = "ЗАШЁЛ" if result == 'win' else "НЕ ЗАШЁЛ"
+        emoji = "✅" if signal['status'] == 'win' else "❌"
+        status = "ЗАШЁЛ" if signal['status'] == 'win' else "НЕ ЗАШЁЛ"
         
         # Считаем проценты
         total = self.stats['total']
@@ -239,7 +263,7 @@ class MasterStrategy:
             f"🃏 *МАСТЬ:* {signal['suit']}\n"
         )
         
-        if result == 'win':
+        if signal['status'] == 'win':
             text += f"🎯 *НАЙДЕНО В ИГРЕ:* #{signal.get('actual_game', '?')}\n\n"
         else:
             text += f"\n"
@@ -253,18 +277,6 @@ class MasterStrategy:
         )
         
         return text
-    
-    def _format_dogon(self, signal, plan):
-        """Форматирует догон"""
-        return (
-            f"🔄 *MASTER ДОГОН #{signal['id']} — ПОПЫТКА {signal['attempt']}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📊 *ИСТОЧНИК:* #{signal['source_game']}\n"
-            f"🎯 *ЦЕЛЬ:* #{signal['target_game']}\n"
-            f"🃏 *МАСТЬ:* {signal['suit']} ({plan['strategy']})\n"
-            f"📈 *ИНТЕРВАЛ:* +{plan['interval']}\n"
-            f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
-        )
 
 # ======== ХРАНИЛИЩЕ ========
 class GameStorage:
@@ -510,29 +522,49 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Проверяем все активные сигналы
             results = storage.strategy.check_predictions(game_num, game_data)
             
-            # Отправляем результаты
+            # Отправляем/обновляем результаты
             for result in results:
-                if result[0] == 'win':
-                    await context.bot.send_message(
-                        chat_id=OUTPUT_CHANNEL_ID,
-                        text=storage.strategy._format_result(result[1], 'win'),
-                        parse_mode='Markdown'
-                    )
-                    logger.info(f"✅ Сигнал #{result[1]['id']} зашел в игре #{game_num}")
-                elif result[0] == 'loss':
-                    await context.bot.send_message(
-                        chat_id=OUTPUT_CHANNEL_ID,
-                        text=storage.strategy._format_result(result[1], 'loss'),
-                        parse_mode='Markdown'
-                    )
-                    logger.info(f"❌ Сигнал #{result[1]['id']} не зашел в игре #{game_num}")
+                if result[0] in ['win', 'loss']:
+                    signal = result[1]
+                    if signal['msg_id']:
+                        # Обновляем существующее сообщение
+                        try:
+                            await context.bot.edit_message_text(
+                                chat_id=OUTPUT_CHANNEL_ID,
+                                message_id=signal['msg_id'],
+                                text=storage.strategy._format_result(signal),
+                                parse_mode='Markdown'
+                            )
+                        except:
+                            # Если не получилось обновить, шлем новое
+                            msg = await context.bot.send_message(
+                                chat_id=OUTPUT_CHANNEL_ID,
+                                text=storage.strategy._format_result(signal),
+                                parse_mode='Markdown'
+                            )
+                            signal['msg_id'] = msg.message_id
+                    else:
+                        # Шлем новое сообщение
+                        msg = await context.bot.send_message(
+                            chat_id=OUTPUT_CHANNEL_ID,
+                            text=storage.strategy._format_result(signal),
+                            parse_mode='Markdown'
+                        )
+                        signal['msg_id'] = msg.message_id
+                
                 elif result[0] == 'dogon':
-                    await context.bot.send_message(
-                        chat_id=OUTPUT_CHANNEL_ID,
-                        text=storage.strategy._format_dogon(result[1], result[2]),
-                        parse_mode='Markdown'
-                    )
-                    logger.info(f"🔄 Сигнал #{result[1]['id']} догон {result[1]['attempt']} на игру #{result[1]['target_game']}")
+                    signal = result[1]
+                    if signal['msg_id']:
+                        # Обновляем статус
+                        try:
+                            await context.bot.edit_message_text(
+                                chat_id=OUTPUT_CHANNEL_ID,
+                                message_id=signal['msg_id'],
+                                text=storage.strategy._format_status(signal),
+                                parse_mode='Markdown'
+                            )
+                        except:
+                            pass
         
         # ======== СОХРАНЯЕМ ИГРУ ========
         storage.games[game_num] = game_data
@@ -546,11 +578,12 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if storage.strategy.get_active_count() == 0:
                 signal = storage.strategy.check_signal(game_data)
                 if signal:
-                    await context.bot.send_message(
+                    msg = await context.bot.send_message(
                         chat_id=OUTPUT_CHANNEL_ID,
                         text=storage.strategy._format_signal(signal),
                         parse_mode='Markdown'
                     )
+                    signal['msg_id'] = msg.message_id
             
             return
         
@@ -564,11 +597,12 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if storage.strategy.get_active_count() == 0:
                 signal = storage.strategy.check_signal(game_data)
                 if signal:
-                    await context.bot.send_message(
+                    msg = await context.bot.send_message(
                         chat_id=OUTPUT_CHANNEL_ID,
                         text=storage.strategy._format_signal(signal),
                         parse_mode='Markdown'
                     )
+                    signal['msg_id'] = msg.message_id
         
         # ======== ОЧИСТКА ========
         current_time = datetime.now()
@@ -606,30 +640,49 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
                 results = storage.strategy.check_predictions(game_num, game_data)
                 
                 for result in results:
-                    if result[0] == 'win':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_result(result[1], 'win'),
-                            parse_mode='Markdown'
-                        )
-                    elif result[0] == 'loss':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_result(result[1], 'loss'),
-                            parse_mode='Markdown'
-                        )
+                    if result[0] in ['win', 'loss']:
+                        signal = result[1]
+                        if signal['msg_id']:
+                            try:
+                                await context.bot.edit_message_text(
+                                    chat_id=OUTPUT_CHANNEL_ID,
+                                    message_id=signal['msg_id'],
+                                    text=storage.strategy._format_result(signal),
+                                    parse_mode='Markdown'
+                                )
+                            except:
+                                msg = await context.bot.send_message(
+                                    chat_id=OUTPUT_CHANNEL_ID,
+                                    text=storage.strategy._format_result(signal),
+                                    parse_mode='Markdown'
+                                )
+                                signal['msg_id'] = msg.message_id
+                        else:
+                            msg = await context.bot.send_message(
+                                chat_id=OUTPUT_CHANNEL_ID,
+                                text=storage.strategy._format_result(signal),
+                                parse_mode='Markdown'
+                            )
+                            signal['msg_id'] = msg.message_id
+                    
                     elif result[0] == 'dogon':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_dogon(result[1], result[2]),
-                            parse_mode='Markdown'
-                        )
+                        signal = result[1]
+                        if signal['msg_id']:
+                            try:
+                                await context.bot.edit_message_text(
+                                    chat_id=OUTPUT_CHANNEL_ID,
+                                    message_id=signal['msg_id'],
+                                    text=storage.strategy._format_status(signal),
+                                    parse_mode='Markdown'
+                                )
+                            except:
+                                pass
             
             del pending_games[game_num]
 
 def main():
     print("\n" + "="*60)
-    print("⚜️ MASTER СТРАТЕГИЯ - ТВОЙ АЛГОРИТМ")
+    print("⚜️ MASTER СТРАТЕГИЯ - БЕЗ СПАМА")
     print("="*60)
     print("✅ Банкир: картинка (K,Q,J) + цифра")
     print("✅ Масть берем от цифры")
@@ -637,6 +690,7 @@ def main():
     print("✅ Догон 3 шага: +2 (цвет), +3 (против), +4 (прямая)")
     print("✅ Таймер 2 минуты между сигналами")
     print("✅ ПРОВЕРКА КАЖДОЙ ЗАВЕРШЕННОЙ ИГРЫ")
+    print("✅ ОДНО СООБЩЕНИЕ на весь прогноз")
     print("="*60)
     
     if not acquire_lock():
