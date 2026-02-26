@@ -47,87 +47,10 @@ OUTPUT_CHANNEL_ID = -1003842401391
 
 LOCK_FILE = f'/tmp/master_bot_{TOKEN[-10:]}.lock'
 
-# ======== АДАПТИВНЫЕ ВЕСА ========
-class AdaptiveWeights:
-    def __init__(self):
-        self.weights = {
-            'banker_combo': 1.0,
-            'doubtful': -2.0,
-            'history_trend': 0.5,
-            'time_pattern': 0.3,
-            'suit_distance': 0.4,
-            'r_tag_nearby': -1.0
-        }
-        self.performance = defaultdict(list)
-        self.total_signals = 0
-        self.successful = 0
-    
-    def update(self, condition, success):
-        if condition not in self.weights:
-            return
-        self.performance[condition].append(1 if success else 0)
-        if len(self.performance[condition]) >= 10:
-            recent = self.performance[condition][-10:]
-            rate = sum(recent) / len(recent)
-            if rate > 0.7:
-                self.weights[condition] *= 1.05
-            elif rate < 0.3:
-                self.weights[condition] *= 0.95
-    
-    def get_score(self, conditions):
-        score = 0.0
-        details = []
-        for cond, met in conditions.items():
-            if met and cond in self.weights:
-                score += self.weights[cond]
-                details.append(f"{cond}: {self.weights[cond]:+.1f}")
-        return round(score, 1), details
-    
-    def get_stats(self):
-        return {
-            'total': self.total_signals,
-            'success': self.successful,
-            'percent': int(self.successful / max(1, self.total_signals) * 100),
-            'weights': self.weights.copy()
-        }
-
-# ======== РЕЖИМ ОСТОРОЖНОСТИ ========
-class CautiousMode:
-    def __init__(self):
-        self.losses = 0
-        self.cooldown = 0
-        self.max_losses = 3
-        self.cooldown_games = 5
-        self.history = deque(maxlen=10)
-    
-    def update(self, result, game_num):
-        self.history.append({'game': game_num, 'result': result})
-        if result == 'loss':
-            self.losses += 1
-            if self.losses >= self.max_losses:
-                self.cooldown = self.cooldown_games
-                logger.info(f"🛑 Режим осторожности: {self.cooldown} игр")
-        else:
-            self.losses = 0
-        if self.cooldown > 0:
-            self.cooldown -= 1
-    
-    def can_play(self):
-        if self.cooldown > 0:
-            return False, f"осторожность {self.cooldown}"
-        if self.losses >= self.max_losses - 1:
-            return False, f"предупреждение {self.losses + 1}/3"
-        return True, "ok"
-    
-    def get_status(self):
-        return {
-            'losses': self.losses,
-            'cooldown': self.cooldown,
-            'active': self.cooldown > 0
-        }
-
-# ======== MASTER СТРАТЕГИЯ ========
+# ======== MASTER СТРАТЕГИЯ С ИНТЕЛЛЕКТОМ ========
 class MasterStrategy:
+    """Твоя стратегия с анализом сомнительных ситуаций"""
+    
     def __init__(self):
         self.picture_values = {'K', 'Q', 'J'}
         self.number_values = {'A', '2', '3', '4', '5', '6', '7', '8', '9', '10'}
@@ -138,367 +61,304 @@ class MasterStrategy:
             '♣️': {'same': '♠️', 'opposite': '♦️', 'direct': '♠️'}
         }
         self.active_signals = []
-        self.completed_signals = []
-        self.weights = AdaptiveWeights()
-        self.cautious = CautiousMode()
-        self.last_prediction_time = None
-        self.min_time_between = 120
+        self.stats = {'total': 0, 'success': 0, 'failures': []}
         self.signal_counter = 0
-        self.suit_history = defaultdict(list)
-        self.hourly_stats = defaultdict(lambda: {'total': 0, 'wins': 0})
+        self.last_prediction_time = None
+        self.min_time_between = 120  # 2 минуты между сигналами
         
-    def analyze_time(self):
-        hour = datetime.now(pytz.timezone('Europe/Moscow')).hour
-        stats = self.hourly_stats[hour]
-        if stats['total'] >= 5:
-            rate = stats['wins'] / stats['total'] * 100
-            if rate < 40:
-                return True, f"{hour}:00 ({rate:.0f}%)"
-        return False, ""
-    
-    def analyze_suit_trend(self, window=20):
-        games = list(storage.games.values())[-window:]
-        counts = defaultdict(int)
-        total = 0
-        for game in games:
-            # Считаем только карты игрока (слева)
-            for card in game.get('player_cards', []):
-                counts[card['suit']] += 1
-                total += 1
-        if total == 0:
-            return {}
-        percents = {s: round(c/total*100) for s, c in counts.items()}
-        hot = [s for s, p in percents.items() if p > 30]
-        cold = [s for s, p in percents.items() if p < 15]
-        return {'percents': percents, 'hot': hot, 'cold': cold}
-    
-    def analyze_distance(self, suit):
-        if suit not in self.suit_history or len(self.suit_history[suit]) < 3:
-            return None
-        gaps = []
-        sorted_games = sorted(self.suit_history[suit])
-        for i in range(1, len(sorted_games)):
-            gaps.append(sorted_games[i] - sorted_games[i-1])
-        return sum(gaps) / len(gaps)
-    
-    def is_doubtful(self, game_data):
-        banker = game_data.get('banker_cards', [])
+        # Статистика для анализа
+        self.doubtful_stats = {
+            'skipped': 0,
+            'taken': 0,
+            'success_from_doubtful': 0
+        }
+        
+    def is_doubtful_situation(self, game_data):
+        """Проверяет сомнительную ситуацию по критериям"""
+        banker_cards = game_data.get('banker_cards', [])
+        player_cards = game_data.get('player_cards', [])
+        
         reasons = []
         
-        if len(banker) >= 2 and banker[0]['suit'] == banker[1]['suit']:
-            reasons.append(f"две {banker[0]['suit']}")
-        if len(banker) == 3:
-            if banker[1]['suit'] == banker[2]['suit']:
-                reasons.append(f"вторая=третья {banker[1]['suit']}")
-            if banker[0]['suit'] == banker[1]['suit'] == banker[2]['suit']:
-                reasons.append(f"все три {banker[0]['suit']}")
+        # 1️⃣ ДВЕ ОДИНАКОВЫЕ МАСТИ В ПЕРВОЙ ИГРЕ
+        if len(banker_cards) >= 2:
+            if banker_cards[0]['suit'] == banker_cards[1]['suit']:
+                reasons.append(f"две одинаковые масти {banker_cards[0]['suit']}")
+        
+        # 2️⃣ ТРЕТЬЯ ДОБИРАЕТСЯ ОДИНАКОВАЯ
+        if len(banker_cards) == 3:
+            if banker_cards[2]['suit'] == banker_cards[1]['suit']:
+                reasons.append(f"третья добирается той же мастью {banker_cards[2]['suit']}")
+        
+        # 3️⃣ ВТОРАЯ И ТРЕТЬЯ С ДОБОРОМ - ОДИНАКОВЫЕ
+        if len(banker_cards) == 3:
+            if banker_cards[1]['suit'] == banker_cards[2]['suit']:
+                reasons.append(f"вторая и третья одинаковые {banker_cards[1]['suit']}")
+        
+        # 4️⃣ ОГРАНИЧЕНИЕ ДОБОРА (2+3 карты)
+        if len(banker_cards) == 3 and len(player_cards) == 2:
+            reasons.append("добор в первой игре (2+3)")
+        
+        # 5️⃣ ВСЕ ОДИНАКОВЫЕ МАСТИ
+        if len(banker_cards) == 3:
+            if banker_cards[0]['suit'] == banker_cards[1]['suit'] == banker_cards[2]['suit']:
+                reasons.append(f"все три одинаковые масти {banker_cards[0]['suit']}")
         
         if reasons:
             return True, "; ".join(reasons)
         return False, ""
     
-    def check_banker_combo(self, cards):
-        if len(cards) != 2:
+    def check_banker_combo(self, banker_cards):
+        """Проверяет комбинацию банкира"""
+        if len(banker_cards) != 2:
             return False, None
-        c1, c2 = cards
-        if c1['suit'] == c2['suit']:
+        
+        card1, card2 = banker_cards
+        
+        # Если масти одинаковые - пропускаем
+        if card1['suit'] == card2['suit']:
+            logger.info(f"⏭️ Пропускаем: обе карты банкира одной масти {card1['suit']}")
             return False, None
-        if (c1['value'] in self.picture_values and c2['value'] in self.number_values):
-            return True, c2['suit']
-        if (c2['value'] in self.picture_values and c1['value'] in self.number_values):
-            return True, c1['suit']
+        
+        # Проверяем что одна карта - картинка, другая - цифра
+        if (card1['value'] in self.picture_values and card2['value'] in self.number_values):
+            return True, card2['suit']
+        elif (card2['value'] in self.picture_values and card1['value'] in self.number_values):
+            return True, card1['suit']
+        
         return False, None
     
-    def get_dogon_plan(self, suit, attempt):
-        targets = self.color_map.get(suit, {})
+    def get_dogon_plan(self, original_suit, attempt):
+        """Возвращает план догона"""
+        targets = self.color_map.get(original_suit, {})
         intervals = [2, 3, 4]
+        
         if attempt >= len(intervals):
             return None
+        
         if attempt == 0:
-            return {'suit': targets.get('same', suit), 'interval': 2, 'strategy': 'цвет'}
+            new_suit = targets.get('same', original_suit)
+            strategy = 'цвет'
         elif attempt == 1:
-            return {'suit': targets.get('opposite', suit), 'interval': 3, 'strategy': 'против'}
+            new_suit = targets.get('opposite', original_suit)
+            strategy = 'против'
         else:
-            return {'suit': targets.get('direct', suit), 'interval': 4, 'strategy': 'прямая'}
+            new_suit = targets.get('direct', original_suit)
+            strategy = 'прямая'
+        
+        return {
+            'suit': new_suit,
+            'interval': intervals[attempt],
+            'strategy': strategy,
+            'attempt': attempt + 1
+        }
     
     def check_signal(self, game_data):
-        # Проверка режима
-        can, reason = self.cautious.can_play()
-        if not can:
-            logger.info(f"🛑 Режим: {reason}")
+        """Проверяет условия для входа с учетом сомнительных ситуаций"""
+        banker_cards = game_data.get('banker_cards', [])
+        
+        # Проверяем сомнительную ситуацию
+        is_doubtful, reason = self.is_doubtful_situation(game_data)
+        
+        if is_doubtful:
+            logger.info(f"⚠️ Сомнительная ситуация в игре #{game_data['game_num']}: {reason}")
+            self.doubtful_stats['skipped'] += 1
             return None
         
-        # Проверка времени
-        skip_time, time_reason = self.analyze_time()
-        if skip_time:
-            logger.info(f"⏰ Пропуск по времени: {time_reason}")
+        is_valid, suit = self.check_banker_combo(banker_cards)
+        
+        if not is_valid:
             return None
         
-        # Проверка комбинации
-        valid, suit = self.check_banker_combo(game_data.get('banker_cards', []))
-        if not valid:
-            return None
-        
-        # Проверка таймера
-        now = datetime.now(pytz.timezone('Europe/Moscow'))
+        # Проверяем таймер
+        current_time = datetime.now(pytz.timezone('Europe/Moscow'))
         if self.last_prediction_time:
-            diff = (now - self.last_prediction_time).seconds
-            if diff < self.min_time_between:
-                logger.info(f"⏳ Таймер: {diff}/{self.min_time_between}")
+            time_diff = (current_time - self.last_prediction_time).seconds
+            if time_diff < self.min_time_between:
+                logger.info(f"⏳ Таймер: {time_diff}с, нужно {self.min_time_between}с")
                 return None
         
-        # Оценка ситуации
-        doubtful, doubt_reason = self.is_doubtful(game_data)
-        conditions = {
-            'banker_combo': True,
-            'doubtful': doubtful,
-            'history_trend': len(storage.games) > 10,
-            'time_pattern': not skip_time,
-            'suit_distance': self.analyze_distance(suit) is not None,
-            'r_tag_nearby': False
-        }
-        
-        score, details = self.weights.get_score(conditions)
-        
-        if score < 0:
-            logger.info(f"⏭️ Низкий score: {score}")
-            return None
-        
-        # Создаем сигнал
         self.signal_counter += 1
         signal_id = self.signal_counter
         
+        # Вход через +2
+        interval = 2
+        target_game = game_data['game_num'] + interval
+        
+        # Формируем план догона
         dogon_plans = []
         for i in range(3):
             plan = self.get_dogon_plan(suit, i)
             if plan:
                 dogon_plans.append(plan)
         
-        # Анализ тренда
-        trend = self.analyze_suit_trend()
-        
         signal = {
             'id': signal_id,
             'source_game': game_data['game_num'],
-            'target_game': game_data['game_num'] + 2,
+            'target_game': target_game,
             'suit': suit,
+            'interval': interval,
             'dogon_plans': dogon_plans,
             'status': 'pending',
             'attempt': 0,
-            'timestamp': now,
+            'timestamp': current_time,
             'msg_id': None,
-            'score': score,
-            'conditions': conditions,
-            'doubtful': doubtful,
-            'doubt_reason': doubt_reason if doubtful else '',
-            'trend': trend.get('percents', {}).get(suit, 0),
-            'hot': suit in trend.get('hot', []),
-            'cold': suit in trend.get('cold', [])
+            'from_doubtful': is_doubtful
         }
         
         self.active_signals.append(signal)
-        self.last_prediction_time = now
-        self.weights.total_signals += 1
-        
-        logger.info(f"⚜️ Сигнал #{signal_id} на {suit} score={score}")
+        self.last_prediction_time = current_time
+        self.doubtful_stats['taken'] += 1
+        logger.info(f"⚜️ MASTER сигнал #{signal_id} от игры #{game_data['game_num']} на масть {suit}")
         return signal
     
-    def check_predictions(self, game_num, game_data):
+    def check_predictions(self, current_game_num, game_data):
+        """Проверяет активные сигналы по завершенной игре"""
         results = []
-        # Берем ТОЛЬКО карты игрока (слева)
-        player_suits = [c['suit'] for c in game_data.get('player_cards', [])]
         
         for signal in self.active_signals:
             if signal['status'] != 'pending':
                 continue
-            if signal['target_game'] > game_num:
+            
+            if signal['target_game'] > current_game_num:
                 continue
             
-            # Проверяем заход ТОЛЬКО по картам игрока
-            succeeded = signal['suit'] in player_suits
-            actual_game = game_num if succeeded else None
+            succeeded = False
+            actual_game = None
+            
+            for game_num in range(signal['target_game'], current_game_num + 1):
+                game = storage.games.get(game_num)
+                if not game:
+                    continue
+                
+                player_suits = [c['suit'] for c in game.get('player_cards', [])]
+                
+                if signal['suit'] in player_suits:
+                    succeeded = True
+                    actual_game = game_num
+                    break
             
             if succeeded:
                 signal['status'] = 'win'
                 signal['actual_game'] = actual_game
-                self.completed_signals.append(signal)
-                self.weights.successful += 1
-                self.cautious.update('win', game_num)
+                self.stats['total'] += 1
+                self.stats['success'] += 1
                 
-                # Обновляем историю мастей
-                for suit in player_suits:
-                    self.suit_history[suit].append(game_num)
-                
-                # Обновляем веса
-                for cond in signal['conditions']:
-                    self.weights.update(cond, True)
-                
-                # Обновляем статистику по часам
-                hour = signal['timestamp'].hour
-                self.hourly_stats[hour]['total'] += 1
-                self.hourly_stats[hour]['wins'] += 1
+                if signal.get('from_doubtful'):
+                    self.doubtful_stats['success_from_doubtful'] += 1
                 
                 results.append(('win', signal))
-                logger.info(f"✅ Сигнал #{signal['id']} зашел в игре #{game_num} (игрок: {player_suits})")
-                
-            elif signal['attempt'] < len(signal['dogon_plans']):
-                plan = signal['dogon_plans'][signal['attempt']]
-                signal['attempt'] += 1
-                signal['target_game'] = game_num + plan['interval']
-                signal['suit'] = plan['suit']
-                results.append(('dogon', signal, plan))
-                logger.info(f"🔄 Сигнал #{signal['id']} догон {signal['attempt']} на игру #{signal['target_game']}")
-                
+                logger.info(f"✅ MASTER сигнал #{signal['id']} зашел в игре #{actual_game}")
             else:
-                signal['status'] = 'loss'
-                signal['actual_game'] = None
-                self.completed_signals.append(signal)
-                self.cautious.update('loss', game_num)
-                
-                for cond in signal['conditions']:
-                    self.weights.update(cond, False)
-                
-                hour = signal['timestamp'].hour
-                self.hourly_stats[hour]['total'] += 1
-                
-                results.append(('loss', signal))
-                logger.info(f"❌ Сигнал #{signal['id']} не зашел (игрок: {player_suits})")
-        
-        # Очистка старых сигналов
-        self.active_signals = [s for s in self.active_signals if s['status'] == 'pending']
+                if signal['attempt'] < len(signal['dogon_plans']):
+                    plan = signal['dogon_plans'][signal['attempt']]
+                    signal['attempt'] += 1
+                    signal['target_game'] = current_game_num + plan['interval']
+                    signal['suit'] = plan['suit']
+                    signal['status'] = 'pending'
+                    results.append(('dogon', signal, plan))
+                    logger.info(f"🔄 MASTER сигнал #{signal['id']} догон {signal['attempt']} на игру #{signal['target_game']}")
+                else:
+                    signal['status'] = 'loss'
+                    self.stats['total'] += 1
+                    self.stats['failures'].append({
+                        'game': current_game_num,
+                        'signal': signal['id']
+                    })
+                    results.append(('loss', signal))
+                    logger.info(f"❌ MASTER сигнал #{signal['id']} не зашел после 3 попыток")
         
         return results
     
-    def format_signal(self, signal):
+    def get_active_count(self):
+        return len([s for s in self.active_signals if s['status'] == 'pending'])
+    
+    def get_stats(self):
+        """Возвращает полную статистику"""
+        total = self.stats['total']
+        success = self.stats['success']
+        percent = int(success / max(1, total) * 100) if total > 0 else 0
+        
+        doubtful_percent = 0
+        if self.doubtful_stats['taken'] > 0:
+            doubtful_percent = int(self.doubtful_stats['success_from_doubtful'] / self.doubtful_stats['taken'] * 100)
+        
+        return {
+            'total': total,
+            'success': success,
+            'percent': percent,
+            'doubtful': {
+                'skipped': self.doubtful_stats['skipped'],
+                'taken': self.doubtful_stats['taken'],
+                'success': self.doubtful_stats['success_from_doubtful'],
+                'percent': doubtful_percent
+            }
+        }
+    
+    def _format_signal(self, signal):
+        """Форматирует сигнал для вывода"""
         dogon_lines = []
-        for i, p in enumerate(signal['dogon_plans']):
-            arrow = "→" if i < signal['attempt'] else "•"
-            status = " (текущий)" if i == signal['attempt'] - 1 and signal['attempt'] > 0 else ""
-            dogon_lines.append(f"  {arrow} #{signal['source_game'] + p['interval']} (+{p['interval']}) — {p['suit']} ({p['strategy']}){status}")
+        for i, plan in enumerate(signal['dogon_plans']):
+            dogon_lines.append(f"  • #{signal['target_game'] + plan['interval']} (+{plan['interval']}) — {plan['suit']} ({plan['strategy']})")
         
-        trend_info = ""
-        if signal['hot']:
-            trend_info = "🔥 горячая"
-        elif signal['cold']:
-            trend_info = "❄️ холодная"
-        
-        doubt_info = f"\n⚠️ Сомнительно: {signal['doubt_reason']}" if signal['doubtful'] else ""
+        dogon_text = "\n".join(dogon_lines)
         
         return (
-            f"⚜️ MASTER СИГНАЛ #{signal['id']} ⚜️\n"
+            f"⚜️ *MASTER СИГНАЛ #{signal['id']}* ⚜️\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 ВХОД: #{signal['target_game']} (+2) — {signal['suit']} {trend_info}\n\n"
-            f"🔄 ДОГОНЫ:\n{dogon_lines}\n"
-            f"{doubt_info}\n"
-            f"📊 АНАЛИЗ:\n"
-            f"• Score: {signal['score']}\n"
-            f"• Частота {signal['suit']}: {signal['trend']}%\n"
+            f"🎯 *Вход:* #{signal['target_game']} (+{signal['interval']}) — {signal['suit']}\n\n"
+            f"🔄 *Догон:* \n{dogon_text}\n\n"
             f"⏱ От игры #{signal['source_game']}"
         )
     
-    def format_status(self, signal):
-        dogon_lines = []
-        for i, p in enumerate(signal['dogon_plans']):
-            if i < signal['attempt']:
-                dogon_lines.append(f"  ✓ #{signal['source_game'] + p['interval']} (+{p['interval']}) — {p['suit']} (было)")
-            else:
-                dogon_lines.append(f"  • #{signal['source_game'] + p['interval']} (+{p['interval']}) — {p['suit']} ({p['strategy']})")
+    def _format_status(self, signal):
+        """Форматирует текущий статус сигнала"""
+        status_text = f"⚜️ *MASTER СИГНАЛ #{signal['id']}* ⚜️\n"
+        status_text += f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        return (
-            f"⚜️ MASTER СИГНАЛ #{signal['id']} ⚜️\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📊 СТАТУС: Догон {signal['attempt']}/3\n\n"
-            f"🎯 ЦЕЛЬ: #{signal['target_game']} (+{signal['dogon_plans'][signal['attempt']-1]['interval']})\n"
-            f"🃏 МАСТЬ: {signal['suit']}\n\n"
-            f"🔄 ОСТАЛОСЬ:\n{dogon_lines}\n\n"
-            f"⏱ От игры #{signal['source_game']}"
-        )
+        if signal['attempt'] == 0:
+            status_text += f"📊 *Статус:* Ожидание входа в игре #{signal['target_game']}\n"
+            status_text += f"🎯 *Масть:* {signal['suit']}\n\n"
+        else:
+            status_text += f"📊 *Статус:* Догон {signal['attempt']}/3\n"
+            status_text += f"🎯 *Следующая цель:* #{signal['target_game']}\n"
+            status_text += f"🃏 *Масть:* {signal['suit']}\n\n"
+        
+        if signal['attempt'] < len(signal['dogon_plans']):
+            status_text += f"🔄 *Осталось догонов:*\n"
+            for i in range(signal['attempt'], len(signal['dogon_plans'])):
+                plan = signal['dogon_plans'][i]
+                status_text += f"  • #{signal['target_game'] + plan['interval']} (+{plan['interval']}) — {plan['suit']} ({plan['strategy']})\n"
+        
+        status_text += f"\n⏱ От игры #{signal['source_game']}"
+        return status_text
     
-    def format_result(self, signal):
+    def _format_result(self, signal):
+        """Форматирует результат"""
         emoji = "✅" if signal['status'] == 'win' else "❌"
         status = "ЗАШЁЛ" if signal['status'] == 'win' else "НЕ ЗАШЁЛ"
         
-        stats = self.weights.get_stats()
-        cautious = self.cautious.get_status()
-        
-        # Получаем карты игрока из целевой игры
-        target_game = storage.games.get(signal['target_game'], {})
-        player_cards = target_game.get('player_cards', [])
-        player_suits = [c['suit'] for c in player_cards]
+        stats = self.get_stats()
         
         text = (
-            f"{emoji} MASTER СИГНАЛ #{signal['id']} {status}!\n"
+            f"{emoji} *MASTER СИГНАЛ #{signal['id']} {status}!*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 БЫЛО: #{signal['target_game']} — {signal['suit']}\n"
+            f"📊 *ИСТОЧНИК:* #{signal['source_game']}\n"
+            f"🎯 *ЦЕЛЬ:* #{signal['target_game']}\n"
+            f"🃏 *МАСТЬ:* {signal['suit']}\n"
         )
         
         if signal['status'] == 'win':
-            text += f"✅ НАЙДЕН В ИГРЕ: #{signal['actual_game']} (игрок: {', '.join(player_suits)})\n\n"
+            text += f"🎯 *НАЙДЕНО В ИГРЕ:* #{signal.get('actual_game', '?')}\n\n"
         else:
-            text += f"📊 ВЫПАЛО У ИГРОКА: {', '.join(player_suits) if player_suits else 'нет карт'}\n\n"
-        
-        if signal['doubtful'] and signal['status'] == 'loss':
-            text += f"🧠 АНАЛИЗ ОШИБКИ:\n"
-            text += f"• {signal['doubt_reason']}\n"
-            if signal['cold']:
-                text += f"• Масть была холодной ({signal['trend']}%)\n"
             text += f"\n"
         
         text += (
-            f"📊 СТАТИСТИКА:\n"
+            f"📊 *СТАТИСТИКА:*\n"
             f"• Всего сигналов: {stats['total']}\n"
             f"• Успешно: {stats['success']}\n"
             f"• Процент: {stats['percent']}%\n"
-        )
-        
-        if cautious['active']:
-            text += f"⚠️ РЕЖИМ: осторожность {cautious['cooldown']} игр\n"
-        
-        text += f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
-        
-        return text
-    
-    def format_stats(self):
-        stats = self.weights.get_stats()
-        cautious = self.cautious.get_status()
-        trend = self.analyze_suit_trend(50)
-        
-        # Статистика по часам
-        hour_lines = []
-        for h in sorted(self.hourly_stats.keys()):
-            s = self.hourly_stats[h]
-            if s['total'] > 0:
-                rate = s['wins'] / s['total'] * 100
-                marker = "✅" if rate > 60 else "⚠️" if rate > 40 else "❌"
-                hour_lines.append(f"  {marker} {h}:00 — {s['wins']}/{s['total']} ({rate:.0f}%)")
-        
-        # Горячие/холодные масти
-        hot_line = f"🔥 {', '.join(trend.get('hot', []))}" if trend.get('hot') else "🔥 нет"
-        cold_line = f"❄️ {', '.join(trend.get('cold', []))}" if trend.get('cold') else "❄️ нет"
-        
-        # Веса условий
-        weight_lines = []
-        for cond, w in sorted(stats['weights'].items(), key=lambda x: abs(x[1]), reverse=True)[:5]:
-            emoji = "✅" if w > 0 else "⚠️" if w < 0 else "⚪"
-            weight_lines.append(f"  {emoji} {cond}: {w:+.2f}")
-        
-        text = (
-            f"📊 СТАТИСТИКА MASTER БОТА\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📈 ОБЩАЯ:\n"
-            f"• Сигналов: {stats['total']}\n"
-            f"• Успешно: {stats['success']}\n"
-            f"• Процент: {stats['percent']}%\n\n"
-            f"⚠️ РЕЖИМ:\n"
-            f"• Поражений подряд: {cautious['losses']}\n"
-            f"• Осторожность: {'вкл' if cautious['active'] else 'выкл'}\n\n"
-            f"🔥 ТРЕНДЫ МАСТЕЙ:\n"
-            f"{hot_line}\n"
-            f"{cold_line}\n\n"
-            f"🕐 ПО ЧАСАМ:\n"
-            f"{chr(10).join(hour_lines[:5])}\n\n"
-            f"🧠 ВЕСА УСЛОВИЙ:\n"
-            f"{chr(10).join(weight_lines)}\n\n"
+            f"• Пропущено сомнительных: {stats['doubtful']['skipped']}\n"
             f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
         )
         
@@ -581,6 +441,15 @@ def extract_suits(text):
             suits.append(norm)
     return suits
 
+def extract_left_part(text):
+    separators = [' 👈 ', '👈', ' - ', ' – ', '—', '-', '👉👈', '👈👉', '🔰']
+    for sep in separators:
+        if sep in text:
+            parts = text.split(sep, 1)
+            left = re.sub(r'#N\d+\.?\s*', '', parts[0].strip())
+            return left
+    return text.strip()
+
 def parse_game_data(text):
     text = re.sub(r'([♥️♦️♠️♣️])\1+', r'\1', text)
     
@@ -601,24 +470,20 @@ def parse_game_data(text):
     player_draws = '👈' in text
     banker_draws = '👉' in text
     
-    # Разделяем левую (игрок) и правую (банкир) части
-    separators = [' 👈 ', '👈', ' - ', ' – ', '—', '-', '👉👈', '👈👉']
-    left_part = text
-    right_part = ""
+    left_part = extract_left_part(text)
+    left_part = re.sub(r'([♥️♦️♠️♣️])\1+', r'\1', left_part)
     
-    for sep in separators:
-        if sep in text:
-            parts = text.split(sep, 1)
-            left_part = parts[0].strip()
-            right_part = parts[1].strip() if len(parts) > 1 else ""
-            break
+    left_suits = extract_suits(left_part)
     
-    # Очищаем левую часть от #N
-    left_part = re.sub(r'#N\d+\.?\s*', '', left_part)
-    left_part = re.sub(r'[()]', '', left_part)  # убираем скобки
+    if not left_suits:
+        return None
     
-    # Парсим карты игрока (только слева)
+    first_suit = left_suits[0] if len(left_suits) > 0 else None
+    second_suit = left_suits[1] if len(left_suits) > 1 else None
+    
     player_cards = []
+    banker_cards = []
+    
     card_pattern = r'(\d+|A|J|Q|K)\s*([♥️♦️♠️♣️])'
     
     for match in re.finditer(card_pattern, left_part):
@@ -627,9 +492,14 @@ def parse_game_data(text):
         if suit and value:
             player_cards.append({'value': value, 'suit': suit})
     
-    # Парсим карты банкира (справа)
-    banker_cards = []
-    right_part = re.sub(r'[()]', '', right_part)
+    separators = [' 👈 ', '👈', ' - ', ' – ', '—', '-', '👉👈', '👈👉']
+    right_part = ""
+    for sep in separators:
+        if sep in text:
+            right_part = text.split(sep, 1)[1]
+            break
+    
+    right_part = re.sub(r'([♥️♦️♠️♣️])\1+', r'\1', right_part)
     
     for match in re.finditer(card_pattern, right_part):
         value, suit = match.groups()
@@ -637,44 +507,39 @@ def parse_game_data(text):
         if suit and value:
             banker_cards.append({'value': value, 'suit': suit})
     
-    # Ограничиваем до 3 карт
     if len(player_cards) > 3:
         player_cards = player_cards[:3]
     
     if len(banker_cards) > 3:
         banker_cards = banker_cards[:3]
     
-    # Определяем победителя
     winner = None
     if '✅' in text:
         winner = 'banker'
     elif '🔰' in text:
         winner = 'tie'
-    elif '🟩' in text:
+    else:
         winner = 'player'
     
     total_match = re.search(r'#T(\d+)', text)
     total_sum = int(total_match.group(1)) if total_match else 0
     
-    # Извлекаем очки
     player_score = 0
     banker_score = 0
     
-    score_match = re.search(r'\((\d+)\)', left_part)
+    score_match = re.search(r'(\d+)\s*\(', left_part)
     if score_match:
         player_score = int(score_match.group(1))
     
-    score_match = re.search(r'\((\d+)\)', right_part)
+    score_match = re.search(r'(\d+)\s*\(', right_part)
     if score_match:
         banker_score = int(score_match.group(1))
-    
-    # Первая масть игрока для анализа
-    first_suit = player_cards[0]['suit'] if player_cards else None
     
     return {
         'game_num': game_num,
         'first_suit': first_suit,
-        'all_suits': [c['suit'] for c in player_cards],
+        'second_suit': second_suit,
+        'all_suits': left_suits,
         'has_r_tag': has_r_tag,
         'has_x_tag': has_x_tag,
         'has_check': has_check,
@@ -752,20 +617,20 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.edit_message_text(
                                 chat_id=OUTPUT_CHANNEL_ID,
                                 message_id=signal['msg_id'],
-                                text=storage.strategy.format_result(signal),
+                                text=storage.strategy._format_result(signal),
                                 parse_mode='Markdown'
                             )
                         except:
                             msg = await context.bot.send_message(
                                 chat_id=OUTPUT_CHANNEL_ID,
-                                text=storage.strategy.format_result(signal),
+                                text=storage.strategy._format_result(signal),
                                 parse_mode='Markdown'
                             )
                             signal['msg_id'] = msg.message_id
                     else:
                         msg = await context.bot.send_message(
                             chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy.format_result(signal),
+                            text=storage.strategy._format_result(signal),
                             parse_mode='Markdown'
                         )
                         signal['msg_id'] = msg.message_id
@@ -777,7 +642,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.edit_message_text(
                                 chat_id=OUTPUT_CHANNEL_ID,
                                 message_id=signal['msg_id'],
-                                text=storage.strategy.format_status(signal),
+                                text=storage.strategy._format_status(signal),
                                 parse_mode='Markdown'
                             )
                         except:
@@ -789,7 +654,7 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if signal:
                     msg = await context.bot.send_message(
                         chat_id=OUTPUT_CHANNEL_ID,
-                        text=storage.strategy.format_signal(signal),
+                        text=storage.strategy._format_signal(signal),
                         parse_mode='Markdown'
                     )
                     signal['msg_id'] = msg.message_id
@@ -847,20 +712,20 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
                                 await context.bot.edit_message_text(
                                     chat_id=OUTPUT_CHANNEL_ID,
                                     message_id=signal['msg_id'],
-                                    text=storage.strategy.format_result(signal),
+                                    text=storage.strategy._format_result(signal),
                                     parse_mode='Markdown'
                                 )
                             except:
                                 msg = await context.bot.send_message(
                                     chat_id=OUTPUT_CHANNEL_ID,
-                                    text=storage.strategy.format_result(signal),
+                                    text=storage.strategy._format_result(signal),
                                     parse_mode='Markdown'
                                 )
                                 signal['msg_id'] = msg.message_id
                         else:
                             msg = await context.bot.send_message(
                                 chat_id=OUTPUT_CHANNEL_ID,
-                                text=storage.strategy.format_result(signal),
+                                text=storage.strategy._format_result(signal),
                                 parse_mode='Markdown'
                             )
                             signal['msg_id'] = msg.message_id
@@ -872,7 +737,7 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
                                 await context.bot.edit_message_text(
                                     chat_id=OUTPUT_CHANNEL_ID,
                                     message_id=signal['msg_id'],
-                                    text=storage.strategy.format_status(signal),
+                                    text=storage.strategy._format_status(signal),
                                     parse_mode='Markdown'
                                 )
                             except:
@@ -882,7 +747,22 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
 
 async def send_stats(context: ContextTypes.DEFAULT_TYPE):
     """Отправляет статистику каждые 3 часа"""
-    text = storage.strategy.format_stats()
+    stats = storage.strategy.get_stats()
+    
+    text = (
+        f"📊 *СТАТИСТИКА MASTER БОТА*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📈 *ОБЩАЯ СТАТИСТИКА:*\n"
+        f"• Всего сигналов: {stats['total']}\n"
+        f"• Успешно: {stats['success']}\n"
+        f"• Процент: {stats['percent']}%\n\n"
+        f"⚠️ *СОМНИТЕЛЬНЫЕ СИТУАЦИИ:*\n"
+        f"• Пропущено: {stats['doubtful']['skipped']}\n"
+        f"• Взято: {stats['doubtful']['taken']}\n"
+        f"• Успешно из взятых: {stats['doubtful']['success']}\n"
+        f"• Процент из взятых: {stats['doubtful']['percent']}%\n\n"
+        f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
+    )
     
     await context.bot.send_message(
         chat_id=OUTPUT_CHANNEL_ID,
@@ -894,11 +774,14 @@ def main():
     print("\n" + "="*60)
     print("⚜️ MASTER БОТ - ИНТЕЛЛЕКТУАЛЬНЫЙ")
     print("="*60)
-    print("✅ Анализ только по картам игрока")
-    print("✅ Адаптивные веса условий")
-    print("✅ Режим осторожности после проигрышей")
-    print("✅ Статистика по часам")
-    print("✅ Горячие/холодные масти")
+    print("✅ Анализ сомнительных ситуаций:")
+    print("   • Две одинаковые масти")
+    print("   • Третья добирается той же")
+    print("   • Вторая и третья одинаковые")
+    print("   • Добор 2+3")
+    print("   • Все три одинаковые")
+    print("✅ Статистика каждые 3 часа")
+    print("✅ Таймер 2 минуты между сигналами")
     print("="*60)
     
     if not acquire_lock():
