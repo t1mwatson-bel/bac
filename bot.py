@@ -53,6 +53,9 @@ OUTPUT_CHANNEL_ID = -1003842401391
 
 LOCK_FILE = f'/tmp/hybrid_bot_{TOKEN[-10:]}.lock'
 
+# ======== ХРАНИЛИЩЕ ========
+storage = None  # Будет инициализировано позже
+
 # ======== MASTER СТРАТЕГИЯ ========
 class MasterStrategy:
     """Твоя профессиональная стратегия с картинками и цифрами"""
@@ -69,6 +72,11 @@ class MasterStrategy:
         self.active_signals = []
         self.stats = {'total': 0, 'success': 0, 'failures': []}
         self.signal_counter = 0
+        self.ml = None  # Будет связан с ML анализатором
+        
+    def set_ml(self, ml_instance):
+        """Привязывает ML анализатор"""
+        self.ml = ml_instance
         
     def check_banker_combo(self, banker_cards):
         """Проверяет комбинацию банкира: картинка + цифра"""
@@ -172,21 +180,41 @@ class MasterStrategy:
             if signal['status'] != 'pending':
                 continue
             
+            # Проверяем все игры от target_game до current_game_num
             if signal['target_game'] > current_game_num:
                 continue
             
-            # Проверяем наличие масти у игрока
-            player_suits = [c['suit'] for c in game_data.get('player_cards', [])]
-            succeeded = signal['suit'] in player_suits
+            succeeded = False
+            actual_game = None
+            
+            for game_num in range(signal['target_game'], current_game_num + 1):
+                game = storage.games.get(game_num)
+                if not game:
+                    continue
+                
+                player_suits = [c['suit'] for c in game.get('player_cards', [])]
+                
+                if signal['suit'] in player_suits:
+                    succeeded = True
+                    actual_game = game_num
+                    break
             
             if succeeded:
                 signal['status'] = 'win'
-                signal['actual_game'] = current_game_num
+                signal['actual_game'] = actual_game
                 self.stats['total'] += 1
                 self.stats['success'] += 1
                 results.append(('win', signal))
+                
+                # Обновляем ML статистику
+                if self.ml:
+                    self.ml.update_stats(
+                        signal['suit'],
+                        signal['interval'],
+                        None,
+                        True
+                    )
             else:
-                # Пробуем догон
                 if signal['attempt'] < len(signal['dogon_plans']):
                     plan = signal['dogon_plans'][signal['attempt']]
                     signal['attempt'] += 1
@@ -202,6 +230,15 @@ class MasterStrategy:
                         'signal': signal['id']
                     })
                     results.append(('loss', signal))
+                    
+                    # Обновляем ML статистику
+                    if self.ml:
+                        self.ml.update_stats(
+                            signal['suit'],
+                            signal['interval'],
+                            None,
+                            False
+                        )
         
         return results
 
@@ -283,17 +320,31 @@ class HybridPredictor:
     def __init__(self):
         self.master = MasterStrategy()
         self.ml = MLAnalyzer()
+        self.master.set_ml(self.ml)  # Связываем стратегию с ML
         self.last_prediction_time = None
         self.min_time_between = 120  # 2 минуты
         
     async def analyze_and_predict(self, game_data, context):
         current_time = datetime.now(pytz.timezone('Europe/Moscow'))
         
-        # Проверяем таймер
+        # Сначала ПРОВЕРЯЕМ РЕЗУЛЬТАТЫ (это важно!)
+        results = self.master.check_predictions(game_data['game_num'], game_data)
+        
+        for result in results:
+            if result[0] == 'win':
+                await self._send_result(result[1], 'win', context)
+            elif result[0] == 'loss':
+                await self._send_result(result[1], 'loss', context)
+            elif result[0] == 'dogon':
+                await self._send_dogon(result[1], result[2], context)
+        
+        # Проверяем таймер для новых сигналов
         if self.last_prediction_time:
             time_diff = (current_time - self.last_prediction_time).seconds
             if time_diff < self.min_time_between:
                 logger.info(f"⏳ Таймер: {time_diff}с, нужно {self.min_time_between}с")
+                # Добавляем игру в историю, но новый сигнал не даем
+                self.ml.add_game(game_data)
                 return
         
         # Получаем ML статистику для текущей масти
@@ -322,33 +373,6 @@ class HybridPredictor:
         
         # Добавляем игру в ML историю
         self.ml.add_game(game_data)
-        
-        # Проверяем результаты
-        results = self.master.check_predictions(game_data['game_num'], game_data)
-        
-        for result in results:
-            if result[0] == 'win':
-                signal = result[1]
-                # Обновляем ML статистику
-                self.ml.update_stats(
-                    signal['suit'], 
-                    signal['interval'],
-                    None,
-                    True
-                )
-                await self._send_result(signal, 'win', context)
-            elif result[0] == 'loss':
-                signal = result[1]
-                self.ml.update_stats(
-                    signal['suit'],
-                    signal['interval'],
-                    None,
-                    False
-                )
-                await self._send_result(signal, 'loss', context)
-            elif result[0] == 'dogon':
-                signal, plan = result[1], result[2]
-                await self._send_dogon(signal, plan, context)
     
     def _format_signal(self, signal, ml_stats):
         """Форматирует сигнал для вывода"""
@@ -386,16 +410,22 @@ class HybridPredictor:
         emoji = "✅" if result == 'win' else "❌"
         status = "ЗАШЁЛ" if result == 'win' else "НЕ ЗАШЁЛ"
         
+        # Считаем проценты
+        total = self.master.stats['total']
+        success = self.master.stats['success']
+        percent = int(success / max(1, total) * 100) if total > 0 else 0
+        
         text = (
             f"{emoji} *MASTER СИГНАЛ #{signal['id']} {status}!*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📊 *ИСТОЧНИК:* #{signal['source_game']}\n"
             f"🎯 *ЦЕЛЬ:* #{signal['target_game']}\n"
-            f"🃏 *МАСТЬ:* {signal['suit']}\n\n"
+            f"🃏 *МАСТЬ:* {signal['suit']}\n"
+            f"🎲 *НАЙДЕНО В ИГРЕ:* #{signal.get('actual_game', '?')}\n\n"
             f"📊 *СТАТИСТИКА MASTER:*\n"
-            f"• Всего: {self.master.stats['total']}\n"
-            f"• Успешно: {self.master.stats['success']}\n"
-            f"• Процент: {int(self.master.stats['success']/max(1,self.master.stats['total'])*100)}%\n"
+            f"• Всего: {total}\n"
+            f"• Успешно: {success}\n"
+            f"• Процент: {percent}%\n"
             f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
         )
         
@@ -416,7 +446,8 @@ class HybridPredictor:
             f"📊 *ИСТОЧНИК:* #{signal['source_game']}\n"
             f"🎯 *ЦЕЛЬ:* #{signal['target_game']}\n"
             f"🃏 *МАСТЬ:* {signal['suit']} ({plan['strategy']})\n"
-            f"📈 *ИНТЕРВАЛ:* +{plan['interval']}"
+            f"📈 *ИНТЕРВАЛ:* +{plan['interval']}\n"
+            f"⏱ {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%H:%M')} МСК"
         )
         
         try:
@@ -733,7 +764,8 @@ def main():
     print("🤖 ГИБРИДНЫЙ MASTER-ML БОТ")
     print("="*60)
     print("⚜️ MASTER-СТРАТЕГИЯ: картинка+цифра, догоны по цвету")
-    print("🧠 ML АНАЛИЗ: оптимизация на основе 500+ игр")
+    print("🧠 ML АНАЛИЗ: оптимизация на основе истории")
+    print("✅ ПРОВЕРКА РЕЗУЛЬТАТОВ: после каждой игры")
     print("✅ Таймер 2 минуты между сигналами")
     print("🎯 Догоны 3 шага с интервалами +2/+3/+4")
     print("="*60)
