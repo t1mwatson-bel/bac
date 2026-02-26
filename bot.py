@@ -163,33 +163,23 @@ class MasterStrategy:
             if signal['status'] != 'pending':
                 continue
             
-            # Проверяем все игры от target_game до current_game_num
+            # Проверяем только если target_game <= current_game_num
             if signal['target_game'] > current_game_num:
                 continue
             
-            succeeded = False
-            actual_game = None
-            
-            for game_num in range(signal['target_game'], current_game_num + 1):
-                game = storage.games.get(game_num)
-                if not game:
-                    continue
-                
-                player_suits = [c['suit'] for c in game.get('player_cards', [])]
-                
-                if signal['suit'] in player_suits:
-                    succeeded = True
-                    actual_game = game_num
-                    break
+            # Проверяем наличие масти у игрока
+            player_suits = [c['suit'] for c in game_data.get('player_cards', [])]
+            succeeded = signal['suit'] in player_suits
             
             if succeeded:
                 signal['status'] = 'win'
-                signal['actual_game'] = actual_game
+                signal['actual_game'] = current_game_num
                 self.stats['total'] += 1
                 self.stats['success'] += 1
                 results.append(('win', signal))
-                logger.info(f"✅ Сигнал #{signal['id']} зашел в игре #{actual_game}")
+                logger.info(f"✅ Сигнал #{signal['id']} зашел в игре #{current_game_num}")
             else:
+                # Пробуем догон
                 if signal['attempt'] < len(signal['dogon_plans']):
                     plan = signal['dogon_plans'][signal['attempt']]
                     signal['attempt'] += 1
@@ -209,6 +199,10 @@ class MasterStrategy:
                     logger.info(f"❌ Сигнал #{signal['id']} не зашел после 3 попыток")
         
         return results
+    
+    def get_active_count(self):
+        """Возвращает количество активных сигналов"""
+        return len([s for s in self.active_signals if s['status'] == 'pending'])
     
     def _format_signal(self, signal):
         """Форматирует сигнал для вывода"""
@@ -509,98 +503,74 @@ async def handle_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"   Добор: игрок {'👈' if game_data['player_draws'] else 'нет'}, банкир {'👉' if game_data['banker_draws'] else 'нет'}")
         logger.info(f"   Завершена: {game_data['is_complete']}")
         
-        if is_edit:
-            logger.info(f"✏️ Редактирование игры #{game_num}")
-            storage.games[game_num] = game_data
+        # ======== ВАЖНО: СНАЧАЛА ПРОВЕРЯЕМ РЕЗУЛЬТАТЫ ========
+        if game_data['is_complete']:
+            logger.info(f"🔍 Игра #{game_num} завершена, проверяем прогнозы")
             
-            # Проверяем прогнозы если игра завершена
-            if game_data['is_complete']:
-                results = storage.strategy.check_predictions(game_num, game_data)
-                for result in results:
-                    if result[0] == 'win':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_result(result[1], 'win'),
-                            parse_mode='Markdown'
-                        )
-                    elif result[0] == 'loss':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_result(result[1], 'loss'),
-                            parse_mode='Markdown'
-                        )
-                    elif result[0] == 'dogon':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_dogon(result[1], result[2]),
-                            parse_mode='Markdown'
-                        )
+            # Проверяем все активные сигналы
+            results = storage.strategy.check_predictions(game_num, game_data)
             
-            if game_num in pending_games:
-                del pending_games[game_num]
-            
-            return
+            # Отправляем результаты
+            for result in results:
+                if result[0] == 'win':
+                    await context.bot.send_message(
+                        chat_id=OUTPUT_CHANNEL_ID,
+                        text=storage.strategy._format_result(result[1], 'win'),
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"✅ Сигнал #{result[1]['id']} зашел в игре #{game_num}")
+                elif result[0] == 'loss':
+                    await context.bot.send_message(
+                        chat_id=OUTPUT_CHANNEL_ID,
+                        text=storage.strategy._format_result(result[1], 'loss'),
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"❌ Сигнал #{result[1]['id']} не зашел в игре #{game_num}")
+                elif result[0] == 'dogon':
+                    await context.bot.send_message(
+                        chat_id=OUTPUT_CHANNEL_ID,
+                        text=storage.strategy._format_dogon(result[1], result[2]),
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"🔄 Сигнал #{result[1]['id']} догон {result[1]['attempt']} на игру #{result[1]['target_game']}")
         
+        # ======== СОХРАНЯЕМ ИГРУ ========
+        storage.games[game_num] = game_data
+        
+        # ======== ОБРАБОТКА ДОБОРА ========
         if game_data['player_draws'] or game_data['banker_draws']:
             logger.info(f"⏳ Игра #{game_num}: ожидание третьей карты")
             pending_games[game_num] = PendingGame(game_data, datetime.now())
-            storage.games[game_num] = game_data
             
-            # Проверяем сигнал (таймер внутри check_signal)
-            signal = storage.strategy.check_signal(game_data)
-            if signal:
-                await context.bot.send_message(
-                    chat_id=OUTPUT_CHANNEL_ID,
-                    text=storage.strategy._format_signal(signal),
-                    parse_mode='Markdown'
-                )
+            # Проверяем новый сигнал только если нет активных
+            if storage.strategy.get_active_count() == 0:
+                signal = storage.strategy.check_signal(game_data)
+                if signal:
+                    await context.bot.send_message(
+                        chat_id=OUTPUT_CHANNEL_ID,
+                        text=storage.strategy._format_signal(signal),
+                        parse_mode='Markdown'
+                    )
             
             return
         
+        # ======== ПОЛНАЯ ИГРА ========
         if not game_data['player_draws'] and not game_data['banker_draws']:
             if game_num in pending_games:
                 logger.info(f"✅ Игра #{game_num}: получена полная версия")
                 del pending_games[game_num]
-            else:
-                logger.info(f"✅ Игра #{game_num}: полная версия сразу")
             
-            storage.games[game_num] = game_data
-            
-            # ВАЖНО: Проверяем прогнозы если игра завершена
-            if game_data['is_complete']:
-                logger.info(f"🔍 Игра #{game_num} завершена, проверяем прогнозы")
-                results = storage.strategy.check_predictions(game_num, game_data)
-                
-                for result in results:
-                    if result[0] == 'win':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_result(result[1], 'win'),
-                            parse_mode='Markdown'
-                        )
-                    elif result[0] == 'loss':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_result(result[1], 'loss'),
-                            parse_mode='Markdown'
-                        )
-                    elif result[0] == 'dogon':
-                        await context.bot.send_message(
-                            chat_id=OUTPUT_CHANNEL_ID,
-                            text=storage.strategy._format_dogon(result[1], result[2]),
-                            parse_mode='Markdown'
-                        )
-            
-            # Проверяем новый сигнал
-            signal = storage.strategy.check_signal(game_data)
-            if signal:
-                await context.bot.send_message(
-                    chat_id=OUTPUT_CHANNEL_ID,
-                    text=storage.strategy._format_signal(signal),
-                    parse_mode='Markdown'
-                )
+            # Проверяем новый сигнал только если нет активных
+            if storage.strategy.get_active_count() == 0:
+                signal = storage.strategy.check_signal(game_data)
+                if signal:
+                    await context.bot.send_message(
+                        chat_id=OUTPUT_CHANNEL_ID,
+                        text=storage.strategy._format_signal(signal),
+                        parse_mode='Markdown'
+                    )
         
-        # Очистка старых данных
+        # ======== ОЧИСТКА ========
         current_time = datetime.now()
         for pending_num in list(pending_games.keys()):
             if pending_num < game_num - 20:
@@ -630,8 +600,9 @@ async def check_stuck_games(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"⏰ Игра #{game_num} зависла в ожидании >2 мин, проверяем")
             
             if game_num in storage.games:
-                # Проверяем прогнозы для зависшей игры
                 game_data = storage.games[game_num]
+                
+                # Проверяем прогнозы для зависшей игры
                 results = storage.strategy.check_predictions(game_num, game_data)
                 
                 for result in results:
@@ -665,7 +636,7 @@ def main():
     print("✅ Вход через +2 игры")
     print("✅ Догон 3 шага: +2 (цвет), +3 (против), +4 (прямая)")
     print("✅ Таймер 2 минуты между сигналами")
-    print("✅ ПРОВЕРКА РЕЗУЛЬТАТОВ в завершенных играх")
+    print("✅ ПРОВЕРКА КАЖДОЙ ЗАВЕРШЕННОЙ ИГРЫ")
     print("="*60)
     
     if not acquire_lock():
