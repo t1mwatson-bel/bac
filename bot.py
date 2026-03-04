@@ -104,6 +104,16 @@ class MasterStrategy:
             if banker_cards[0]['suit'] == banker_cards[1]['suit'] == banker_cards[2]['suit']:
                 reasons.append(f"все три одинаковые масти {banker_cards[0]['suit']}")
         
+        # 🔥 НОВОЕ: ДВЕ КАРТИНКИ ПОДРЯД (K, Q, J)
+        if len(banker_cards) >= 2:
+            if (banker_cards[0]['value'] in self.picture_values and 
+                banker_cards[1]['value'] in self.picture_values):
+                reasons.append(f"две картинки подряд ({banker_cards[0]['value']} и {banker_cards[1]['value']})")
+        
+        # 🔥 НОВОЕ: ЕСЛИ ЕСТЬ И МАСТИ И КАРТИНКИ - ТОЖЕ ПРОПУСКАЕМ
+        if len(reasons) >= 2:
+            reasons.append("комбо из нескольких аномалий")
+        
         if reasons:
             return True, "; ".join(reasons)
         return False, ""
@@ -129,9 +139,9 @@ class MasterStrategy:
         return False, None
     
     def get_dogon_plan(self, original_suit, attempt):
-        """Возвращает план догона"""
+        """Возвращает план догона (ТЕПЕРЬ ТОЛЬКО 2 ПОПЫТКИ)"""
         targets = self.color_map.get(original_suit, {})
-        intervals = [2, 3, 4]
+        intervals = [2, 3]  # БЫЛО [2, 3, 4] - убрали третью попытку
         
         if attempt >= len(intervals):
             return None
@@ -143,8 +153,7 @@ class MasterStrategy:
             new_suit = targets.get('opposite', original_suit)
             strategy = 'против'
         else:
-            new_suit = targets.get('direct', original_suit)
-            strategy = 'прямая'
+            return None  # Больше нет третьей попытки
         
         return {
             'suit': new_suit,
@@ -185,9 +194,9 @@ class MasterStrategy:
         interval = 2
         target_game = game_data['game_num'] + interval
         
-        # Формируем план догона
+        # Формируем план догона (теперь максимум 2 попытки)
         dogon_plans = []
-        for i in range(3):
+        for i in range(2):  # БЫЛО range(3) - теперь 2 попытки
             plan = self.get_dogon_plan(suit, i)
             if plan:
                 dogon_plans.append(plan)
@@ -266,7 +275,7 @@ class MasterStrategy:
                         'signal': signal['id']
                     })
                     results.append(('loss', signal))
-                    logger.info(f"❌ MASTER сигнал #{signal['id']} не зашел после 3 попыток")
+                    logger.info(f"❌ MASTER сигнал #{signal['id']} не зашел после 2 попыток")  # БЫЛО "после 3 попыток"
         
         return results
     
@@ -320,7 +329,7 @@ class MasterStrategy:
             status_text += f"📊 *Статус:* Ожидание входа в игре #{signal['target_game']}\n"
             status_text += f"🎯 *Масть:* {signal['suit']}\n\n"
         else:
-            status_text += f"📊 *Статус:* Догон {signal['attempt']}/3\n"
+            status_text += f"📊 *Статус:* Догон {signal['attempt']}/2\n"  # БЫЛО /3
             status_text += f"🎯 *Следующая цель:* #{signal['target_game']}\n"
             status_text += f"🃏 *Масть:* {signal['suit']}\n\n"
         
@@ -772,7 +781,7 @@ async def send_stats(context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     print("\n" + "="*60)
-    print("⚜️ MASTER БОТ - ИНТЕЛЛЕКТУАЛЬНЫЙ")
+    print("⚜️ MASTER БОТ - ИНТЕЛЛЕКТУАЛЬНЫЙ (ОПТИМИЗИРОВАННЫЙ)")
     print("="*60)
     print("✅ Анализ сомнительных ситуаций:")
     print("   • Две одинаковые масти")
@@ -780,6 +789,8 @@ def main():
     print("   • Вторая и третья одинаковые")
     print("   • Добор 2+3")
     print("   • Все три одинаковые")
+    print("   🔥 ДВЕ КАРТИНКИ ПОДРЯД (НОВОЕ)")
+    print("✅ ТОЛЬКО 2 ДОГОНА (вместо 3)")
     print("✅ Статистика каждые 3 часа")
     print("✅ Таймер 2 минуты между сигналами")
     print("="*60)
