@@ -16,7 +16,7 @@ import pytz
 
 # ======== НАСТРОЙКИ ========
 TOKEN = "1163348874:AAFgZEXveILvD4MbhQ8jiLTwIxs4puYhmq0"  # Вставь токен свободного бота
-INPUT_CHANNEL_ID = -1003855079501  # Канал со статистикой 21 Classic
+INPUT_CHANNEL_ID = -1003179573402  # Канал со статистикой 21 Classic
 OUTPUT_FILE = "value_statistics.csv"  # Файл для сохранения данных
 # ===========================
 
