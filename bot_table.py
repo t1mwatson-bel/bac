@@ -19,7 +19,6 @@ print("=" * 60, flush=True)
 # =====================================================================
 # Сначала пробуем взять из стандартного поля Bot Token
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-# Если нет — пробуем из кастомной переменной
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 
@@ -48,6 +47,7 @@ print("✅ Все переменные заданы!", flush=True)
 HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
+PROCESSED_GAMES = set()  # Для отслеживания уже обработанных игр
 
 # =====================================================================
 # ФУНКЦИИ
@@ -222,7 +222,7 @@ def save_offset(offset):
         f.write(str(offset))
 
 # =====================================================================
-# ОСНОВНОЙ ЦИКЛ
+# ОСНОВНОЙ ЦИКЛ (с поддержкой редактирований)
 # =====================================================================
 def main():
     print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН", flush=True)
@@ -241,16 +241,32 @@ def main():
                 offset = update["update_id"] + 1
                 save_offset(offset)
                 
+                # Проверяем новое сообщение
                 channel_post = update.get("channel_post")
-                if not channel_post:
+                # Проверяем отредактированное сообщение
+                edited_post = update.get("edited_channel_post")
+                
+                # Берём то, что есть
+                post = channel_post if channel_post else edited_post
+                if not post:
                     continue
                 
-                chat_id = channel_post.get("chat", {}).get("id")
+                chat_id = post.get("chat", {}).get("id")
                 if str(chat_id) != str(CHANNEL_STATS):
                     continue
                 
-                text = channel_post.get("text", "")
+                text = post.get("text", "")
                 if not text or "#N" not in text:
+                    continue
+                
+                # Проверяем, не обрабатывали ли уже эту игру
+                game_id_match = re.search(r'#N(\d+)', text)
+                if not game_id_match:
+                    continue
+                game_number = int(game_id_match.group(1))
+                
+                # Если игра уже обработана — пропускаем
+                if game_number in PROCESSED_GAMES:
                     continue
                 
                 print(f"📥 {text[:50]}...", flush=True)
@@ -259,6 +275,7 @@ def main():
                 if not game_data:
                     continue
                 
+                # Прогноз только для чётных игр
                 if game_data["number"] % 2 != 0:
                     continue
                 
@@ -278,6 +295,9 @@ def main():
                 if send_message(msg):
                     print(f"✅ Прогноз отправлен: #N{prognoz['target']}", flush=True)
                     
+                    # Добавляем игру в обработанные
+                    PROCESSED_GAMES.add(game_data["number"])
+                    
                     history.append({
                         "from_game": game_data["number"],
                         "target": prognoz["target"],
@@ -288,8 +308,13 @@ def main():
                     })
                     save_history(history)
             
+            # Очистка памяти
             history = clean_memory(history)
             save_history(history)
+            
+            # Очищаем PROCESSED_GAMES, если он слишком большой
+            if len(PROCESSED_GAMES) > 500:
+                PROCESSED_GAMES.clear()
             
             time.sleep(5)
             
