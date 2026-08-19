@@ -15,26 +15,27 @@ print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ЗАПУСК", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
-# ДИАГНОСТИКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
+# ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # =====================================================================
-print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
+# Сначала пробуем взять из стандартного поля Bot Token
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+# Если нет — пробуем из кастомной переменной
+if not BOT_TOKEN:
+    BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 
-BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 CHANNEL_STATS = os.getenv('CHANNEL_STATS_ID')
 CHANNEL_PROGNOZ = os.getenv('CHANNEL_PROGNOZ_ID')
 
-print(f"BOT_TOKEN_PROGNOZ: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
+print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
+print(f"BOT_TOKEN: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
 print(f"CHANNEL_STATS_ID: {CHANNEL_STATS if CHANNEL_STATS else 'НЕ ЗАДАН'}", flush=True)
 print(f"CHANNEL_PROGNOZ_ID: {CHANNEL_PROGNOZ if CHANNEL_PROGNOZ else 'НЕ ЗАДАН'}", flush=True)
 print("=" * 60, flush=True)
 
-# =====================================================================
-# ПРОВЕРКА ПЕРЕМЕННЫХ
-# =====================================================================
 if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
     print("❌ ОШИБКА: переменные окружения не заданы!", flush=True)
     print("Проверьте:", flush=True)
-    print("  - BOT_TOKEN_PROGNOZ", flush=True)
+    print("  - BOT_TOKEN (стандартное поле) или BOT_TOKEN_PROGNOZ", flush=True)
     print("  - CHANNEL_STATS_ID", flush=True)
     print("  - CHANNEL_PROGNOZ_ID", flush=True)
     exit(1)
@@ -52,7 +53,6 @@ MAX_HISTORY = 200
 # ФУНКЦИИ
 # =====================================================================
 def get_updates(offset):
-    """Получает новые сообщения из канала"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     params = {"offset": offset, "timeout": 30}
     try:
@@ -63,7 +63,6 @@ def get_updates(offset):
         return {}
 
 def send_message(text):
-    """Отправляет сообщение в канал прогнозов"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": CHANNEL_PROGNOZ, "text": text, "parse_mode": "HTML"}
     try:
@@ -74,10 +73,6 @@ def send_message(text):
         return False
 
 def parse_game(text):
-    """
-    Парсит сообщение с раздачей.
-    Пример: #N1135. ✅21(K♣️9♥️8♣️)-28(J♣️10♦️7♠️9♠️) #T49
-    """
     try:
         game_match = re.search(r'#N(\d+)', text)
         if not game_match:
@@ -125,7 +120,6 @@ def parse_game(text):
         return None
 
 def get_highest_card(cards):
-    """Находит самую старшую карту (игнорирует 10)"""
     ranks_order = {"6": 1, "7": 2, "8": 3, "9": 4, "10": 0, "J": 5, "Q": 6, "K": 7, "A": 8}
     filtered = [c for c in cards if c["rank"] != "10"]
     if not filtered:
@@ -134,7 +128,6 @@ def get_highest_card(cards):
     return highest
 
 def get_next_card(rank):
-    """6→J, 7→Q, 8→K, 9→A, J→J, Q→Q, K→K, A→A"""
     map_rank = {
         "6": "J", "7": "Q", "8": "K", "9": "A",
         "J": "J", "Q": "Q", "K": "K", "A": "A"
@@ -142,12 +135,10 @@ def get_next_card(rank):
     return map_rank.get(rank, rank)
 
 def get_suit_by_position(position):
-    """1→♣, 2→♦, 3→♥, 4→♠"""
     suits = {1: "♣", 2: "♦", 3: "♥", 4: "♠"}
     return suits.get(position, "?")
 
 def predict(game_data):
-    """Применяет систему прогноза"""
     game_num = game_data["number"]
     if game_num % 2 != 0:
         return None
