@@ -17,7 +17,6 @@ print("=" * 60, flush=True)
 # =====================================================================
 # ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # =====================================================================
-# Сначала пробуем взять из стандартного поля Bot Token
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
@@ -33,10 +32,6 @@ print("=" * 60, flush=True)
 
 if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
     print("❌ ОШИБКА: переменные окружения не заданы!", flush=True)
-    print("Проверьте:", flush=True)
-    print("  - BOT_TOKEN (стандартное поле) или BOT_TOKEN_PROGNOZ", flush=True)
-    print("  - CHANNEL_STATS_ID", flush=True)
-    print("  - CHANNEL_PROGNOZ_ID", flush=True)
     exit(1)
 
 print("✅ Все переменные заданы!", flush=True)
@@ -47,7 +42,7 @@ print("✅ Все переменные заданы!", flush=True)
 HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
-PROCESSED_GAMES = set()  # Для отслеживания уже обработанных игр
+PROCESSED_GAMES = set()
 
 # =====================================================================
 # ФУНКЦИИ
@@ -71,6 +66,10 @@ def send_message(text):
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}", flush=True)
         return False
+
+def is_final_game(text):
+    """Проверяет, что раздача финальная (есть ✅ или 🔰)"""
+    return "✅" in text or "🔰" in text
 
 def parse_game(text):
     try:
@@ -222,7 +221,7 @@ def save_offset(offset):
         f.write(str(offset))
 
 # =====================================================================
-# ОСНОВНОЙ ЦИКЛ (с поддержкой редактирований)
+# ОСНОВНОЙ ЦИКЛ
 # =====================================================================
 def main():
     print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН", flush=True)
@@ -241,12 +240,8 @@ def main():
                 offset = update["update_id"] + 1
                 save_offset(offset)
                 
-                # Проверяем новое сообщение
                 channel_post = update.get("channel_post")
-                # Проверяем отредактированное сообщение
                 edited_post = update.get("edited_channel_post")
-                
-                # Берём то, что есть
                 post = channel_post if channel_post else edited_post
                 if not post:
                     continue
@@ -259,7 +254,6 @@ def main():
                 if not text or "#N" not in text:
                     continue
                 
-                # Проверяем, не обрабатывали ли уже эту игру
                 game_id_match = re.search(r'#N(\d+)', text)
                 if not game_id_match:
                     continue
@@ -267,6 +261,11 @@ def main():
                 
                 # Если игра уже обработана — пропускаем
                 if game_number in PROCESSED_GAMES:
+                    continue
+                
+                # Если раздача не финальная — ждём
+                if not is_final_game(text):
+                    print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
                     continue
                 
                 print(f"📥 {text[:50]}...", flush=True)
@@ -294,10 +293,7 @@ def main():
                 
                 if send_message(msg):
                     print(f"✅ Прогноз отправлен: #N{prognoz['target']}", flush=True)
-                    
-                    # Добавляем игру в обработанные
                     PROCESSED_GAMES.add(game_data["number"])
-                    
                     history.append({
                         "from_game": game_data["number"],
                         "target": prognoz["target"],
@@ -308,11 +304,9 @@ def main():
                     })
                     save_history(history)
             
-            # Очистка памяти
             history = clean_memory(history)
             save_history(history)
             
-            # Очищаем PROCESSED_GAMES, если он слишком большой
             if len(PROCESSED_GAMES) > 500:
                 PROCESSED_GAMES.clear()
             
