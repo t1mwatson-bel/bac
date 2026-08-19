@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 import json
 import re
@@ -6,22 +7,45 @@ import time
 from datetime import datetime, timedelta
 
 # =====================================================================
-# ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+# ПРИНУДИТЕЛЬНЫЙ ВЫВОД ЛОГОВ
 # =====================================================================
+sys.stdout.flush()
+print("=" * 60, flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ЗАПУСК", flush=True)
+print("=" * 60, flush=True)
+
+# =====================================================================
+# ДИАГНОСТИКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
+# =====================================================================
+print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
+
 BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 CHANNEL_STATS = os.getenv('CHANNEL_STATS_ID')
 CHANNEL_PROGNOZ = os.getenv('CHANNEL_PROGNOZ_ID')
 
+print(f"BOT_TOKEN_PROGNOZ: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
+print(f"CHANNEL_STATS_ID: {CHANNEL_STATS if CHANNEL_STATS else 'НЕ ЗАДАН'}", flush=True)
+print(f"CHANNEL_PROGNOZ_ID: {CHANNEL_PROGNOZ if CHANNEL_PROGNOZ else 'НЕ ЗАДАН'}", flush=True)
+print("=" * 60, flush=True)
+
+# =====================================================================
+# ПРОВЕРКА ПЕРЕМЕННЫХ
+# =====================================================================
 if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
-    print("❌ Ошибка: переменные окружения не заданы!")
+    print("❌ ОШИБКА: переменные окружения не заданы!", flush=True)
+    print("Проверьте:", flush=True)
+    print("  - BOT_TOKEN_PROGNOZ", flush=True)
+    print("  - CHANNEL_STATS_ID", flush=True)
+    print("  - CHANNEL_PROGNOZ_ID", flush=True)
     exit(1)
+
+print("✅ Все переменные заданы!", flush=True)
 
 # =====================================================================
 # НАСТРОЙКИ
 # =====================================================================
 HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
-PROGNOZ_COUNT = 0
 MAX_HISTORY = 200
 
 # =====================================================================
@@ -35,7 +59,7 @@ def get_updates(offset):
         response = requests.get(url, params=params, timeout=35)
         return response.json()
     except Exception as e:
-        print(f"❌ Ошибка getUpdates: {e}")
+        print(f"❌ Ошибка getUpdates: {e}", flush=True)
         return {}
 
 def send_message(text):
@@ -46,7 +70,7 @@ def send_message(text):
         response = requests.post(url, json=payload, timeout=10)
         return response.status_code == 200
     except Exception as e:
-        print(f"❌ Ошибка отправки: {e}")
+        print(f"❌ Ошибка отправки: {e}", flush=True)
         return False
 
 def parse_game(text):
@@ -55,18 +79,15 @@ def parse_game(text):
     Пример: #N1135. ✅21(K♣️9♥️8♣️)-28(J♣️10♦️7♠️9♠️) #T49
     """
     try:
-        # Номер игры
         game_match = re.search(r'#N(\d+)', text)
         if not game_match:
             return None
         game_number = int(game_match.group(1))
         
-        # Разделяем на части
         parts = text.split('-')
         if len(parts) < 2:
             return None
         
-        # Игрок (левая часть)
         player_part = parts[0].strip()
         player_match = re.search(r'(\d+)\(([^)]+)\)', player_part)
         if not player_match:
@@ -74,7 +95,6 @@ def parse_game(text):
         player_score = int(player_match.group(1))
         player_cards_str = player_match.group(2).strip()
         
-        # Дилер (правая часть)
         dealer_part = parts[1].strip()
         dealer_match = re.search(r'(\d+)\(([^)]+)\)', dealer_part)
         if not dealer_match:
@@ -82,7 +102,6 @@ def parse_game(text):
         dealer_score = int(dealer_match.group(1))
         dealer_cards_str = dealer_match.group(2).strip() if dealer_match else ""
         
-        # Карты в список
         player_cards = []
         for card in re.findall(r'([AKQJ]|10|\d)([♠♣♦♥])', player_cards_str):
             rank, suit = card
@@ -102,21 +121,15 @@ def parse_game(text):
             "text": text
         }
     except Exception as e:
-        print(f"❌ Ошибка парсинга: {e}")
+        print(f"❌ Ошибка парсинга: {e}", flush=True)
         return None
 
 def get_highest_card(cards):
-    """
-    Находит самую старшую карту (игнорирует 10)
-    """
+    """Находит самую старшую карту (игнорирует 10)"""
     ranks_order = {"6": 1, "7": 2, "8": 3, "9": 4, "10": 0, "J": 5, "Q": 6, "K": 7, "A": 8}
-    
-    # Фильтруем 10
     filtered = [c for c in cards if c["rank"] != "10"]
     if not filtered:
         return None
-    
-    # Находим самую старшую
     highest = max(filtered, key=lambda c: ranks_order.get(c["rank"], 0))
     return highest
 
@@ -134,18 +147,13 @@ def get_suit_by_position(position):
     return suits.get(position, "?")
 
 def predict(game_data):
-    """
-    Применяет систему прогноза
-    """
+    """Применяет систему прогноза"""
     game_num = game_data["number"]
-    
-    # Только чётные
     if game_num % 2 != 0:
         return None
     
     result = {}
     
-    # Прогноз от игрока
     player_highest = get_highest_card(game_data["player_cards"])
     if player_highest:
         pos = 1
@@ -159,7 +167,6 @@ def predict(game_data):
     else:
         result["player"] = None
     
-    # Прогноз от дилера
     dealer_highest = get_highest_card(game_data["dealer_cards"])
     if dealer_highest:
         pos = 1
@@ -173,7 +180,6 @@ def predict(game_data):
     else:
         result["dealer"] = None
     
-    # Целевая игра (+10 чётных)
     target_game = game_num + 10
     while target_game % 2 != 0:
         target_game += 1
@@ -195,11 +201,8 @@ def load_history():
     return []
 
 def clean_memory(history):
-    """Очищает старые записи"""
     if len(history) > MAX_HISTORY:
         history = history[-MAX_HISTORY:]
-    
-    # Удаляем записи старше 7 дней
     now = datetime.now()
     new_history = []
     for item in history:
@@ -212,27 +215,7 @@ def clean_memory(history):
                 new_history.append(item)
         else:
             new_history.append(item)
-    
     return new_history
-
-def check_results(history):
-    """Проверяет, зашли ли прогнозы"""
-    for item in history:
-        if item.get("status") != "pending":
-            continue
-        
-        # Проверяем, прошло ли достаточно времени
-        if "time" in item:
-            try:
-                item_time = datetime.fromisoformat(item["time"])
-                if (datetime.now() - item_time).seconds < 60:
-                    continue
-            except:
-                pass
-        
-        # Здесь можно добавить проверку по каналу
-        # Пока просто отмечаем как "waiting"
-        pass
 
 def get_offset():
     if os.path.exists(OFFSET_FILE):
@@ -252,6 +235,9 @@ def save_offset(offset):
 # =====================================================================
 def main():
     print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН", flush=True)
+    print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
+    print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
+    print("=" * 60, flush=True)
     
     offset = get_offset()
     history = load_history()
@@ -264,7 +250,6 @@ def main():
                 offset = update["update_id"] + 1
                 save_offset(offset)
                 
-                # Проверяем, что сообщение из нужного канала
                 channel_post = update.get("channel_post")
                 if not channel_post:
                     continue
@@ -283,7 +268,6 @@ def main():
                 if not game_data:
                     continue
                 
-                # Прогноз только для чётных игр
                 if game_data["number"] % 2 != 0:
                     continue
                 
@@ -291,7 +275,6 @@ def main():
                 if not prognoz:
                     continue
                 
-                # Формируем сообщение с прогнозом
                 msg = f"🔮 <b>ПРОГНОЗ</b>\n"
                 msg += f"📊 От игры: #N{game_data['number']}\n"
                 if prognoz.get("player"):
@@ -304,7 +287,6 @@ def main():
                 if send_message(msg):
                     print(f"✅ Прогноз отправлен: #N{prognoz['target']}", flush=True)
                     
-                    # Сохраняем в историю
                     history.append({
                         "from_game": game_data["number"],
                         "target": prognoz["target"],
@@ -315,7 +297,6 @@ def main():
                     })
                     save_history(history)
             
-            # Очистка памяти
             history = clean_memory(history)
             save_history(history)
             
