@@ -259,12 +259,12 @@ def main():
                     continue
                 game_number = int(game_id_match.group(1))
                 
-                # 🔥 СНАЧАЛА ПРОВЕРЯЕМ ФИНАЛЬНОСТЬ
+                # Сначала проверяем финальность
                 if not is_final_game(text):
                     print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
                     continue
                 
-                # ПОТОМ ПРОВЕРЯЕМ, НЕ ОБРАБОТАНА ЛИ УЖЕ
+                # Если игра уже обработана — пропускаем
                 if game_number in PROCESSED_GAMES:
                     continue
                 
@@ -274,7 +274,6 @@ def main():
                 if not game_data:
                     continue
                 
-                # Прогноз только для чётных игр
                 if game_data["number"] % 2 != 0:
                     continue
                 
