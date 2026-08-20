@@ -208,7 +208,7 @@ def get_random_predictions():
     return selected
 
 def check_results(history, all_messages):
-    """Проверяет результаты прогнозов (3 догона) с полной информацией"""
+    """Проверяет результаты прогнозов (целевая + 3 догона)"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -221,6 +221,7 @@ def check_results(history, all_messages):
         if not cards_to_find:
             continue
         
+        # Проверяем только целевую игру и догоны (НЕ проверяем исходную игру!)
         found = False
         found_game = None
         found_dogon = None
@@ -244,7 +245,7 @@ def check_results(history, all_messages):
             if found:
                 break
         
-        # Отправляем результат с полной информацией
+        # Отправляем результат
         if found:
             msg = f"✅ <b>ПРОГНОЗ ЗАШЁЛ!</b>\n"
             msg += f"📊 От игры: #N{from_game}\n"
@@ -254,15 +255,31 @@ def check_results(history, all_messages):
             send_message(msg)
             entry["status"] = "win"
         else:
-            msg = f"❌ <b>ПРОГНОЗ НЕ ЗАШЁЛ</b>\n"
-            msg += f"📊 От игры: #N{from_game}\n"
-            msg += f"🃏 Карты: {cards_str}\n"
-            msg += f"🎯 Целевая игра: #N{target}\n"
-            msg += f"📈 3 догона проверены до #N{target+3}"
-            send_message(msg)
-            entry["status"] = "loss"
-        
-        save_history(history)
+            # Проверяем, прошли ли все 4 игры (целевая + 3 догона)
+            # Для этого проверяем, есть ли финальные раздачи всех 4 игр
+            all_games_present = True
+            for i in range(4):
+                game_to_check = target + i
+                found_msg = False
+                for msg in all_messages:
+                    if f"#N{game_to_check}" in msg:
+                        found_msg = True
+                        break
+                if not found_msg:
+                    all_games_present = False
+                    break
+            
+            if all_games_present:
+                msg = f"❌ <b>ПРОГНОЗ НЕ ЗАШЁЛ</b>\n"
+                msg += f"📊 От игры: #N{from_game}\n"
+                msg += f"🃏 Карты: {cards_str}\n"
+                msg += f"🎯 Целевая игра: #N{target}\n"
+                msg += f"📈 3 догона проверены до #N{target+3}"
+                send_message(msg)
+                entry["status"] = "loss"
+            else:
+                # Если не все игры ещё прошли, просто ждём
+                print(f"⏳ Ожидание завершения догонов для #N{target}", flush=True)
 
 def save_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -376,7 +393,7 @@ def main():
                 add_to_queue(game_data)
                 PROCESSED_GAMES.add(game_number)
             
-            # Проверяем результаты с полной информацией
+            # Проверяем результаты
             check_results(history, all_messages)
             
             # Если прошло 10 минут — даём случайные прогнозы
