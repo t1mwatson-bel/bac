@@ -62,9 +62,11 @@ def send_message(text):
     payload = {"chat_id": CHANNEL_PROGNOZ, "text": text, "parse_mode": "HTML"}
     try:
         response = requests.post(url, json=payload, timeout=10)
-        print(f"📡 Статус отправки: {response.status_code}", flush=True)
-        print(f"📡 Ответ: {response.text[:200]}", flush=True)
-        return response.status_code == 200
+        if response.status_code == 200:
+            return True
+        else:
+            print(f"❌ Ошибка отправки: {response.status_code} - {response.text}", flush=True)
+            return False
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}", flush=True)
         return False
@@ -89,14 +91,12 @@ def parse_game(text):
         player_match = re.search(r'(\d+)\(([^)]+)\)', player_part)
         if not player_match:
             return None
-        player_score = int(player_match.group(1))
         player_cards_str = player_match.group(2).strip()
         
         dealer_part = parts[1].strip()
         dealer_match = re.search(r'(\d+)\(([^)]+)\)', dealer_part)
         if not dealer_match:
             return None
-        dealer_score = int(dealer_match.group(1))
         dealer_cards_str = dealer_match.group(2).strip() if dealer_match else ""
         
         player_cards = []
@@ -113,8 +113,6 @@ def parse_game(text):
             "number": game_number,
             "player_cards": player_cards,
             "dealer_cards": dealer_cards,
-            "player_score": player_score,
-            "dealer_score": dealer_score,
             "text": text
         }
     except Exception as e:
@@ -146,7 +144,9 @@ def predict(game_data):
         return None
     
     result = {}
+    cards_list = []
     
+    # Прогноз от игрока
     player_highest = get_highest_card(game_data["player_cards"])
     if player_highest:
         pos = 1
@@ -157,9 +157,11 @@ def predict(game_data):
         next_rank = get_next_card(player_highest["rank"])
         next_suit = get_suit_by_position(pos)
         result["player"] = f"{next_rank}{next_suit}"
+        cards_list.append(result["player"])
     else:
         result["player"] = None
     
+    # Прогноз от дилера
     dealer_highest = get_highest_card(game_data["dealer_cards"])
     if dealer_highest:
         pos = 1
@@ -170,6 +172,8 @@ def predict(game_data):
         next_rank = get_next_card(dealer_highest["rank"])
         next_suit = get_suit_by_position(pos)
         result["dealer"] = f"{next_rank}{next_suit}"
+        if result["dealer"] not in cards_list:
+            cards_list.append(result["dealer"])
     else:
         result["dealer"] = None
     
@@ -178,6 +182,7 @@ def predict(game_data):
         target_game += 1
     
     result["target"] = target_game
+    result["cards"] = " ".join(cards_list) if cards_list else "Нет прогноза"
 
     print(f"🔍 Прогноз для #N{game_num}: {result}", flush=True)
     
@@ -288,13 +293,12 @@ def main():
                     print(f"❌ predict() вернул None для #N{game_number}", flush=True)
                     continue
                 
+                # Новый формат сообщения
                 msg = f"🔮 <b>ПРОГНОЗ</b>\n"
                 msg += f"📊 От игры: #N{game_data['number']}\n"
-                if prognoz.get("player"):
-                    msg += f"🃏 Игрок: {prognoz['player']}\n"
-                if prognoz.get("dealer"):
-                    msg += f"🃏 Дилер: {prognoz['dealer']}\n"
+                msg += f"🃏 Игрок и Дилер: {prognoz['cards']}\n"
                 msg += f"🎯 Целевая игра: #N{prognoz['target']}\n"
+                msg += f"📈 3 игры догон\n"
                 msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
                 
                 if send_message(msg):
@@ -305,6 +309,7 @@ def main():
                         "target": prognoz["target"],
                         "player_prognoz": prognoz.get("player"),
                         "dealer_prognoz": prognoz.get("dealer"),
+                        "cards": prognoz['cards'],
                         "time": datetime.now().isoformat(),
                         "status": "pending"
                     })
