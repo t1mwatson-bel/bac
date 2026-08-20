@@ -259,13 +259,13 @@ def main():
                     continue
                 game_number = int(game_id_match.group(1))
                 
-                # Если игра уже обработана — пропускаем
-                if game_number in PROCESSED_GAMES:
-                    continue
-                
-                # Если раздача не финальная — ждём
+                # 🔥 СНАЧАЛА ПРОВЕРЯЕМ ФИНАЛЬНОСТЬ
                 if not is_final_game(text):
                     print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
+                    continue
+                
+                # ПОТОМ ПРОВЕРЯЕМ, НЕ ОБРАБОТАНА ЛИ УЖЕ
+                if game_number in PROCESSED_GAMES:
                     continue
                 
                 print(f"📥 {text[:50]}...", flush=True)
