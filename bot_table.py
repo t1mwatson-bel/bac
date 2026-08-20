@@ -4,6 +4,7 @@ import requests
 import json
 import re
 import time
+import random
 from datetime import datetime, timedelta
 
 # =====================================================================
@@ -11,7 +12,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ЗАПУСК (ЛАЙВ)", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - РАНДОМ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -43,8 +44,8 @@ HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
-MIN_INTERVAL = 120  # 2 минуты между прогнозами
 LAST_PREDICT_TIME = 0
+PREDICT_INTERVAL = 300  # 5 минут между прогнозами
 
 # =====================================================================
 # ФУНКЦИИ
@@ -148,7 +149,6 @@ def predict(game_data):
     result = {}
     cards_list = []
     
-    # Прогноз от игрока
     player_highest = get_highest_card(game_data["player_cards"])
     if player_highest:
         pos = 1
@@ -163,7 +163,6 @@ def predict(game_data):
     else:
         result["player"] = None
     
-    # Прогноз от дилера
     dealer_highest = get_highest_card(game_data["dealer_cards"])
     if dealer_highest:
         pos = 1
@@ -191,7 +190,6 @@ def predict(game_data):
     return result
 
 def check_results(history, all_messages):
-    """Проверяет результаты прогнозов (целевая + 3 догона)"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -303,7 +301,7 @@ def save_offset(offset):
 def main():
     global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (ЛАЙВ)", flush=True)
+    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (РАНДОМ)", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print("=" * 60, flush=True)
@@ -361,10 +359,15 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # 🔥 ПРЯМОЙ ПРОГНОЗ СРАЗУ
+                # РАНДОМ: 50% шанс пропустить игру
+                if random.random() > 0.3:  # 30% шанс дать прогноз
+                    print(f"⏭️ Случайно пропускаем #N{game_number}", flush=True)
+                    continue
+                
+                # Проверяем интервал
                 current_time = time.time()
-                if current_time - LAST_PREDICT_TIME < MIN_INTERVAL:
-                    print(f"⏳ Пропускаем #N{game_number}, прошло {int(current_time - LAST_PREDICT_TIME)} сек (мин {MIN_INTERVAL} сек)", flush=True)
+                if current_time - LAST_PREDICT_TIME < PREDICT_INTERVAL:
+                    print(f"⏳ Интервал: {int(current_time - LAST_PREDICT_TIME)} сек < {PREDICT_INTERVAL} сек, пропускаем", flush=True)
                     continue
                 
                 prognoz = predict(game_data)
@@ -390,10 +393,7 @@ def main():
                         })
                         save_history(history)
             
-            # Проверяем результаты
             check_results(history, all_messages)
-            
-            # Очистка памяти
             history = clean_memory(history)
             save_history(history)
             
