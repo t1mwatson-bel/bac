@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - РАНДОМ (РЕДАКТИРОВАНИЕ)", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ФИЛЬТРАЦИЯ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -50,6 +50,18 @@ PREDICT_INTERVAL = 300  # 5 минут
 # =====================================================================
 # ФУНКЦИИ
 # =====================================================================
+def is_skip_game(text):
+    """Проверяет, нужно ли пропустить игру"""
+    # 1. Пропускаем игры с ⚠️ (нестандартные комбинации)
+    if "⚠️" in text:
+        return True
+    
+    # 2. Пропускаем игры, где у кого-то 21 очко
+    if "21" in text and ("✅" in text or "🔰" in text):
+        return True
+    
+    return False
+
 def get_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     params = {"offset": offset, "timeout": 30}
@@ -98,7 +110,7 @@ def parse_game(text):
             return None
         game_number = int(game_match.group(1))
         
-        clean_text = text.replace('✅', '').replace('🔰', '').replace('▶️', '').replace('◀️', '')
+        clean_text = text.replace('✅', '').replace('🔰', '').replace('▶️', '').replace('◀️', '').replace('⚠️', '')
         
         parts = clean_text.split('-')
         if len(parts) < 2:
@@ -237,7 +249,6 @@ def check_results(history, all_messages):
             if found:
                 break
         
-        # Проверяем, прошли ли все 4 игры
         all_games_present = True
         for i in range(4):
             game_to_check = target + i
@@ -251,9 +262,8 @@ def check_results(history, all_messages):
                 break
         
         if not all_games_present:
-            continue  # ещё не все игры прошли
+            continue
         
-        # Формируем результат
         original_text = f"🔮 <b>ПРОГНОЗ</b>\n"
         original_text += f"📊 От игры: #N{from_game}\n"
         original_text += f"🃏 Игрок и Дилер: {cards_str}\n"
@@ -318,9 +328,11 @@ def save_offset(offset):
 def main():
     global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (РЕДАКТИРОВАНИЕ)", flush=True)
+    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (ФИЛЬТРАЦИЯ)", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
+    print("=" * 60, flush=True)
+    print("📌 Фильтры: ⚠️ и 21 очко — пропускаются")
     print("=" * 60, flush=True)
     
     offset = get_offset()
@@ -349,14 +361,19 @@ def main():
                 if not text or "#N" not in text:
                     continue
                 
-                all_messages.append(text)
-                if len(all_messages) > 500:
-                    all_messages = all_messages[-500:]
-                
                 game_id_match = re.search(r'#N(\d+)', text)
                 if not game_id_match:
                     continue
                 game_number = int(game_id_match.group(1))
+                
+                # 🔥 ПРОВЕРКА НА ФИЛЬТРЫ
+                if is_skip_game(text):
+                    print(f"⏭️ Пропускаем #N{game_number} (⚠️ или 21)", flush=True)
+                    continue
+                
+                all_messages.append(text)
+                if len(all_messages) > 500:
+                    all_messages = all_messages[-500:]
                 
                 if game_number in PROCESSED_GAMES:
                     continue
