@@ -43,7 +43,7 @@ HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
-all_messages = []
+all_messages = []  # Глобальная переменная для хранения сообщений
 
 # =====================================================================
 # ФУНКЦИИ
@@ -191,6 +191,8 @@ def predict(game_data):
 
 def check_results(history):
     """Проверяет результаты прогнозов (целевая + 3 догона)"""
+    global all_messages
+    
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -302,6 +304,8 @@ def save_offset(offset):
 # ОСНОВНОЙ ЦИКЛ
 # =====================================================================
 def main():
+    global all_messages
+    
     print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (ЛАЙВ)", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
