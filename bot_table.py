@@ -43,7 +43,6 @@ HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
-all_messages = []  # Глобальная переменная для хранения сообщений
 
 # =====================================================================
 # ФУНКЦИИ
@@ -166,7 +165,7 @@ def predict(game_data):
     dealer_highest = get_highest_card(game_data["dealer_cards"])
     if dealer_highest:
         pos = 1
-        for i, card in enumerate(game_data["dealer_cards"]):
+        for i, card in enumerate(game_data["dealer_cards"]:
             if card["rank"] == dealer_highest["rank"] and card["suit"] == dealer_highest["suit"]:
                 pos = i + 1
                 break
@@ -189,10 +188,8 @@ def predict(game_data):
     
     return result
 
-def check_results(history):
+def check_results(history, all_messages):
     """Проверяет результаты прогнозов (целевая + 3 догона)"""
-    global all_messages
-    
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -304,8 +301,6 @@ def save_offset(offset):
 # ОСНОВНОЙ ЦИКЛ
 # =====================================================================
 def main():
-    global all_messages
-    
     print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (ЛАЙВ)", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
@@ -313,6 +308,7 @@ def main():
     
     offset = get_offset()
     history = load_history()
+    all_messages = []  # Локальный список сообщений
     
     while True:
         try:
@@ -364,7 +360,7 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # 🔥 Прямой прогноз в реальном времени
+                # Прямой прогноз в реальном времени
                 prognoz = predict(game_data)
                 if prognoz:
                     msg = f"🔮 <b>ПРОГНОЗ</b>\n"
@@ -388,7 +384,7 @@ def main():
                         save_history(history)
             
             # Проверяем результаты
-            check_results(history)
+            check_results(history, all_messages)
             
             # Очистка памяти
             history = clean_memory(history)
