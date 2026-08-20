@@ -4,7 +4,6 @@ import requests
 import json
 import re
 import time
-import random
 from datetime import datetime, timedelta
 
 # =====================================================================
@@ -12,7 +11,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ЗАПУСК (РАНДОМ)", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ЗАПУСК (ЛАЙВ)", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -44,9 +43,8 @@ HISTORY_FILE = "history.json"
 OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
-QUEUE = []
+MIN_INTERVAL = 120  # 2 минуты между прогнозами
 LAST_PREDICT_TIME = 0
-PREDICT_INTERVAL = 600  # 10 минут в секундах
 
 # =====================================================================
 # ФУНКЦИИ
@@ -192,21 +190,6 @@ def predict(game_data):
     
     return result
 
-def add_to_queue(game_data):
-    """Добавляет игру в очередь для прогнозов"""
-    if game_data["number"] not in [g["number"] for g in QUEUE]:
-        QUEUE.append(game_data)
-
-def get_random_predictions():
-    """Выбирает 1-2 случайные игры из очереди"""
-    global QUEUE
-    if not QUEUE:
-        return []
-    count = random.randint(1, min(2, len(QUEUE)))
-    selected = random.sample(QUEUE, count)
-    QUEUE = [g for g in QUEUE if g not in selected]
-    return selected
-
 def check_results(history, all_messages):
     """Проверяет результаты прогнозов (целевая + 3 догона)"""
     for entry in history:
@@ -225,7 +208,6 @@ def check_results(history, all_messages):
         found_game = None
         found_dogon = None
         
-        # Проверяем целевую игру и 3 догона
         for i in range(4):
             game_to_check = target + i
             
@@ -251,7 +233,6 @@ def check_results(history, all_messages):
             send_message(msg)
             entry["status"] = "win"
         else:
-            # Проверяем, прошли ли все 4 игры
             all_games_present = True
             for i in range(4):
                 game_to_check = target + i
@@ -320,14 +301,11 @@ def save_offset(offset):
 # ОСНОВНОЙ ЦИКЛ
 # =====================================================================
 def main():
-    global LAST_PREDICT_TIME, QUEUE
+    global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (РАНДОМ)", flush=True)
+    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (ЛАЙВ)", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
-    print("=" * 60, flush=True)
-    print(f"⏱️ Интервал: {PREDICT_INTERVAL} сек (10 минут)", flush=True)
-    print(f"📊 1-2 случайных прогноза за интервал", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
@@ -383,50 +361,37 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # Добавляем в очередь
-                add_to_queue(game_data)
-                PROCESSED_GAMES.add(game_number)
+                # 🔥 ПРЯМОЙ ПРОГНОЗ СРАЗУ
+                current_time = time.time()
+                if current_time - LAST_PREDICT_TIME < MIN_INTERVAL:
+                    print(f"⏳ Пропускаем #N{game_number}, прошло {int(current_time - LAST_PREDICT_TIME)} сек (мин {MIN_INTERVAL} сек)", flush=True)
+                    continue
+                
+                prognoz = predict(game_data)
+                if prognoz:
+                    msg = f"🔮 <b>ПРОГНОЗ</b>\n"
+                    msg += f"📊 От игры: #N{game_data['number']}\n"
+                    msg += f"🃏 Игрок и Дилер: {prognoz['cards']}\n"
+                    msg += f"🎯 Целевая игра: #N{prognoz['target']}\n"
+                    msg += f"📈 3 игры догон\n"
+                    msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+                    
+                    if send_message(msg):
+                        print(f"✅ Прогноз отправлен: #N{prognoz['target']}", flush=True)
+                        LAST_PREDICT_TIME = current_time
+                        PROCESSED_GAMES.add(game_number)
+                        
+                        history.append({
+                            "from_game": game_data["number"],
+                            "target": prognoz["target"],
+                            "cards": prognoz['cards'],
+                            "time": datetime.now().isoformat(),
+                            "status": "pending"
+                        })
+                        save_history(history)
             
             # Проверяем результаты
             check_results(history, all_messages)
-            
-            # Если прошло 10 минут — даём случайные прогнозы
-            current_time = time.time()
-            if current_time - LAST_PREDICT_TIME > PREDICT_INTERVAL:
-                predictions = get_random_predictions()
-                if predictions:
-                    print(f"🎯 Выбрано {len(predictions)} случайных прогнозов из очереди (осталось {len(QUEUE)})", flush=True)
-                    
-                    for game_data in predictions:
-                        prognoz = predict(game_data)
-                        if not prognoz:
-                            continue
-                        
-                        msg = f"🔮 <b>ПРОГНОЗ</b>\n"
-                        msg += f"📊 От игры: #N{game_data['number']}\n"
-                        msg += f"🃏 Игрок и Дилер: {prognoz['cards']}\n"
-                        msg += f"🎯 Целевая игра: #N{prognoz['target']}\n"
-                        msg += f"📈 3 игры догон\n"
-                        msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
-                        
-                        if send_message(msg):
-                            print(f"✅ Прогноз отправлен: #N{prognoz['target']}", flush=True)
-                            
-                            history.append({
-                                "from_game": game_data["number"],
-                                "target": prognoz["target"],
-                                "cards": prognoz['cards'],
-                                "time": datetime.now().isoformat(),
-                                "status": "pending"
-                            })
-                            save_history(history)
-                        
-                        time.sleep(2)  # небольшая пауза между прогнозами
-                    
-                    LAST_PREDICT_TIME = current_time
-                else:
-                    print("⏳ Очередь пуста, ждём новые игры", flush=True)
-                    LAST_PREDICT_TIME = current_time  # сбрасываем, чтобы не проверять каждую секунду
             
             # Очистка памяти
             history = clean_memory(history)
