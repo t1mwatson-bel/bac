@@ -259,22 +259,24 @@ def main():
                     continue
                 game_number = int(game_id_match.group(1))
                 
-                # Сначала проверяем финальность
-                if not is_final_game(text):
-                    print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
-                    continue
-                
                 # Если игра уже обработана — пропускаем
                 if game_number in PROCESSED_GAMES:
+                    continue
+                
+                # Если игра нечётная — пропускаем
+                if game_number % 2 != 0:
+                    print(f"⏭️ Пропускаем нечётную игру #N{game_number}", flush=True)
+                    continue
+                
+                # Если раздача не финальная — ждём
+                if not is_final_game(text):
+                    print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
                     continue
                 
                 print(f"📥 {text[:50]}...", flush=True)
                 
                 game_data = parse_game(text)
                 if not game_data:
-                    continue
-                
-                if game_data["number"] % 2 != 0:
                     continue
                 
                 prognoz = predict(game_data)
