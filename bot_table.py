@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ФИЛЬТРАЦИЯ", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - РАБОЧАЯ ВЕРСИЯ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -45,21 +45,30 @@ OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
 LAST_PREDICT_TIME = 0
-PREDICT_INTERVAL = 300  # 5 минут
+PREDICT_INTERVAL = 120  # 2 минуты
 
 # =====================================================================
 # ФУНКЦИИ
 # =====================================================================
-def is_skip_game(text):
+def count_numeric_cards(cards):
+    """Считает количество числовых карт (6-10)"""
+    numeric = ['6', '7', '8', '9', '10']
+    count = 0
+    for card in cards:
+        if card["rank"] in numeric:
+            count += 1
+    return count
+
+def is_skip_game(text, game_data=None):
     """Проверяет, нужно ли пропустить игру"""
-    # 1. Пропускаем игры с ⚠️ (нестандартные комбинации)
-    if "⚠️" in text:
+    if "21" in text:
         return True
-    
-    # 2. Пропускаем игры, где у кого-то 21 очко
-    if "21" in text and ("✅" in text or "🔰" in text):
+    if "🔰" in text:
         return True
-    
+    if game_data:
+        total = count_numeric_cards(game_data["player_cards"]) + count_numeric_cards(game_data["dealer_cards"])
+        if total >= 4:
+            return True
     return False
 
 def get_updates(offset):
@@ -328,11 +337,12 @@ def save_offset(offset):
 def main():
     global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (ФИЛЬТРАЦИЯ)", flush=True)
+    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print("=" * 60, flush=True)
-    print("📌 Фильтры: ⚠️ и 21 очко — пропускаются")
+    print("📌 Фильтры: 21, 🔰 и общее число 6-10 ≥ 4 — пропускаются", flush=True)
+    print(f"⏱️ Интервал: {PREDICT_INTERVAL} сек (2 мин)", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
@@ -366,11 +376,6 @@ def main():
                     continue
                 game_number = int(game_id_match.group(1))
                 
-                # 🔥 ПРОВЕРКА НА ФИЛЬТРЫ
-                if is_skip_game(text):
-                    print(f"⏭️ Пропускаем #N{game_number} (⚠️ или 21)", flush=True)
-                    continue
-                
                 all_messages.append(text)
                 if len(all_messages) > 500:
                     all_messages = all_messages[-500:]
@@ -393,8 +398,15 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # Рандом: 30% шанс дать прогноз
-                if random.random() > 0.3:
+                # 🔥 ФИЛЬТРЫ
+                if is_skip_game(text, game_data):
+                    numeric_count = count_numeric_cards(game_data["player_cards"]) + count_numeric_cards(game_data["dealer_cards"])
+                    reason = "21" if "21" in text else "🔰" if "🔰" in text else f"числовых: {numeric_count} (≥4)"
+                    print(f"⏭️ Пропускаем #N{game_number} (фильтр: {reason})", flush=True)
+                    continue
+                
+                # Рандом: 70% шанс дать прогноз
+                if random.random() > 0.7:
                     print(f"⏭️ Случайно пропускаем #N{game_number}", flush=True)
                     continue
                 
