@@ -207,31 +207,60 @@ def get_random_predictions():
     QUEUE = [g for g in QUEUE if g not in selected]
     return selected
 
-def check_results(history):
-    """Проверяет результаты прогнозов (3 догона)"""
+def check_results(history, all_messages):
+    """Проверяет результаты прогнозов (3 догона) с полной информацией"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
         
         target = entry.get("target")
         cards_to_find = entry.get("cards", "").split()
+        from_game = entry.get("from_game")
+        cards_str = entry.get("cards", "")
+        
         if not cards_to_find:
             continue
         
-        # Проверяем целевую игру и 3 догона
         found = False
+        found_game = None
+        found_dogon = None
+        
+        # Проверяем целевую игру и 3 догона
         for i in range(4):  # 0, 1, 2, 3 = 4 игры
             game_to_check = target + i
-            # Здесь нужно искать сообщение с этой игрой в канале
-            # Для простоты пока пропускаем, в реальном коде надо парсить канал
-            pass
+            
+            # Ищем сообщение с этой игрой в сохранённых сообщениях
+            for msg in all_messages:
+                if f"#N{game_to_check}" in msg:
+                    # Проверяем, есть ли прогнозируемые карты
+                    for card in cards_to_find:
+                        if card in msg:
+                            found = True
+                            found_game = game_to_check
+                            found_dogon = i + 1
+                            break
+                    if found:
+                        break
+            if found:
+                break
         
+        # Отправляем результат с полной информацией
         if found:
+            msg = f"✅ <b>ПРОГНОЗ ЗАШЁЛ!</b>\n"
+            msg += f"📊 От игры: #N{from_game}\n"
+            msg += f"🃏 Карты: {cards_str}\n"
+            msg += f"🎯 Целевая игра: #N{target}\n"
+            msg += f"📈 Зашло на догоне {found_dogon}: #N{found_game}"
+            send_message(msg)
             entry["status"] = "win"
-            send_message(f"✅ ПРОГНОЗ ЗАШЁЛ!\n📊 #N{target} → #N{game_to_check}")
         else:
+            msg = f"❌ <b>ПРОГНОЗ НЕ ЗАШЁЛ</b>\n"
+            msg += f"📊 От игры: #N{from_game}\n"
+            msg += f"🃏 Карты: {cards_str}\n"
+            msg += f"🎯 Целевая игра: #N{target}\n"
+            msg += f"📈 3 догона проверены до #N{target+3}"
+            send_message(msg)
             entry["status"] = "loss"
-            send_message(f"❌ ПРОГНОЗ НЕ ЗАШЁЛ\n📊 #N{target} (3 догона)")
         
         save_history(history)
 
@@ -291,6 +320,7 @@ def main():
     
     offset = get_offset()
     history = load_history()
+    all_messages = []  # Храним все сообщения из канала для проверки
     
     while True:
         try:
@@ -313,6 +343,11 @@ def main():
                 text = post.get("text", "")
                 if not text or "#N" not in text:
                     continue
+                
+                # Сохраняем все сообщения для проверки результатов
+                all_messages.append(text)
+                if len(all_messages) > 500:
+                    all_messages = all_messages[-500:]
                 
                 game_id_match = re.search(r'#N(\d+)', text)
                 if not game_id_match:
@@ -341,8 +376,8 @@ def main():
                 add_to_queue(game_data)
                 PROCESSED_GAMES.add(game_number)
             
-            # Проверяем результаты
-            check_results(history)
+            # Проверяем результаты с полной информацией
+            check_results(history, all_messages)
             
             # Если прошло 10 минут — даём случайные прогнозы
             if time.time() - LAST_PREDICT_TIME > PREDICT_INTERVAL:
