@@ -78,7 +78,10 @@ def parse_game(text):
             return None
         game_number = int(game_match.group(1))
         
-        parts = text.split('-')
+        # Убираем эмодзи из текста для чистого парсинга
+        clean_text = text.replace('✅', '').replace('🔰', '').replace('▶️', '').replace('◀️', '')
+        
+        parts = clean_text.split('-')
         if len(parts) < 2:
             return None
         
@@ -175,6 +178,10 @@ def predict(game_data):
         target_game += 1
     
     result["target"] = target_game
+
+    # 🔍 ДИАГНОСТИКА
+    print(f"🔍 Прогноз для #N{game_num}: {result}", flush=True)
+    
     return result
 
 def save_history(history):
@@ -273,15 +280,16 @@ def main():
                     print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
                     continue
                 
-                # Если всё ок — парсим и даём прогноз
                 print(f"📥 {text[:50]}...", flush=True)
                 
                 game_data = parse_game(text)
                 if not game_data:
+                    print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
                 prognoz = predict(game_data)
                 if not prognoz:
+                    print(f"❌ predict() вернул None для #N{game_number}", flush=True)
                     continue
                 
                 msg = f"🔮 <b>ПРОГНОЗ</b>\n"
@@ -305,6 +313,8 @@ def main():
                         "status": "pending"
                     })
                     save_history(history)
+                else:
+                    print(f"❌ Не удалось отправить прогноз для #N{game_number}", flush=True)
             
             history = clean_memory(history)
             save_history(history)
