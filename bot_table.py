@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - РАНДОМ", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - РАНДОМ (РЕДАКТИРОВАНИЕ)", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -45,7 +45,7 @@ OFFSET_FILE = "offset.txt"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
 LAST_PREDICT_TIME = 0
-PREDICT_INTERVAL = 300  # 5 минут между прогнозами
+PREDICT_INTERVAL = 300  # 5 минут
 
 # =====================================================================
 # ФУНКЦИИ
@@ -66,12 +66,26 @@ def send_message(text):
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            return True
+            return response.json()["result"]["message_id"]
         else:
             print(f"❌ Ошибка отправки: {response.status_code} - {response.text}", flush=True)
-            return False
+            return None
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}", flush=True)
+        return None
+
+def edit_message(message_id, text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+    payload = {"chat_id": CHANNEL_PROGNOZ, "message_id": message_id, "text": text, "parse_mode": "HTML"}
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            return True
+        else:
+            print(f"❌ Ошибка редактирования: {response.status_code} - {response.text}", flush=True)
+            return False
+    except Exception as e:
+        print(f"❌ Ошибка редактирования: {e}", flush=True)
         return False
 
 def is_final_game(text):
@@ -198,8 +212,9 @@ def check_results(history, all_messages):
         cards_to_find = entry.get("cards", "").split()
         from_game = entry.get("from_game")
         cards_str = entry.get("cards", "")
+        message_id = entry.get("message_id")
         
-        if not cards_to_find:
+        if not cards_to_find or not message_id:
             continue
         
         found = False
@@ -222,35 +237,37 @@ def check_results(history, all_messages):
             if found:
                 break
         
-        if found:
-            msg = f"✅ <b>ПРОГНОЗ ЗАШЁЛ!</b>\n"
-            msg += f"📊 От игры: #N{from_game}\n"
-            msg += f"🃏 Карты: {cards_str}\n"
-            msg += f"🎯 Целевая игра: #N{target}\n"
-            msg += f"📈 Зашло на догоне {found_dogon}: #N{found_game}"
-            send_message(msg)
-            entry["status"] = "win"
-        else:
-            all_games_present = True
-            for i in range(4):
-                game_to_check = target + i
-                found_msg = False
-                for msg in all_messages:
-                    if f"#N{game_to_check}" in msg:
-                        found_msg = True
-                        break
-                if not found_msg:
-                    all_games_present = False
+        # Проверяем, прошли ли все 4 игры
+        all_games_present = True
+        for i in range(4):
+            game_to_check = target + i
+            found_msg = False
+            for msg in all_messages:
+                if f"#N{game_to_check}" in msg:
+                    found_msg = True
                     break
-            
-            if all_games_present:
-                msg = f"❌ <b>ПРОГНОЗ НЕ ЗАШЁЛ</b>\n"
-                msg += f"📊 От игры: #N{from_game}\n"
-                msg += f"🃏 Карты: {cards_str}\n"
-                msg += f"🎯 Целевая игра: #N{target}\n"
-                msg += f"📈 3 догона проверены до #N{target+3}"
-                send_message(msg)
-                entry["status"] = "loss"
+            if not found_msg:
+                all_games_present = False
+                break
+        
+        if not all_games_present:
+            continue  # ещё не все игры прошли
+        
+        # Формируем результат
+        original_text = f"🔮 <b>ПРОГНОЗ</b>\n"
+        original_text += f"📊 От игры: #N{from_game}\n"
+        original_text += f"🃏 Игрок и Дилер: {cards_str}\n"
+        original_text += f"🎯 Целевая игра: #N{target}\n"
+        original_text += f"📈 3 игры догон\n"
+        original_text += f"⏰ {entry.get('time', '')[:16]}"
+        
+        if found:
+            result_text = f"\n\n✅ <b>ЗАШЛО</b> на догоне {found_dogon}: #N{found_game}"
+        else:
+            result_text = f"\n\n❌ <b>НЕ ЗАШЛО</b> (3 догона проверены до #N{target+3})"
+        
+        edit_message(message_id, original_text + result_text)
+        entry["status"] = "win" if found else "loss"
 
 def save_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -301,7 +318,7 @@ def save_offset(offset):
 def main():
     global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (РАНДОМ)", flush=True)
+    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (РЕДАКТИРОВАНИЕ)", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print("=" * 60, flush=True)
@@ -359,15 +376,14 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # РАНДОМ: 50% шанс пропустить игру
-                if random.random() > 0.3:  # 30% шанс дать прогноз
+                # Рандом: 30% шанс дать прогноз
+                if random.random() > 0.3:
                     print(f"⏭️ Случайно пропускаем #N{game_number}", flush=True)
                     continue
                 
-                # Проверяем интервал
                 current_time = time.time()
                 if current_time - LAST_PREDICT_TIME < PREDICT_INTERVAL:
-                    print(f"⏳ Интервал: {int(current_time - LAST_PREDICT_TIME)} сек < {PREDICT_INTERVAL} сек, пропускаем", flush=True)
+                    print(f"⏳ Интервал: {int(current_time - LAST_PREDICT_TIME)} сек < {PREDICT_INTERVAL} сек", flush=True)
                     continue
                 
                 prognoz = predict(game_data)
@@ -379,7 +395,8 @@ def main():
                     msg += f"📈 3 игры догон\n"
                     msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
                     
-                    if send_message(msg):
+                    message_id = send_message(msg)
+                    if message_id:
                         print(f"✅ Прогноз отправлен: #N{prognoz['target']}", flush=True)
                         LAST_PREDICT_TIME = current_time
                         PROCESSED_GAMES.add(game_number)
@@ -389,7 +406,8 @@ def main():
                             "target": prognoz["target"],
                             "cards": prognoz['cards'],
                             "time": datetime.now().isoformat(),
-                            "status": "pending"
+                            "status": "pending",
+                            "message_id": message_id
                         })
                         save_history(history)
             
