@@ -62,13 +62,14 @@ def send_message(text):
     payload = {"chat_id": CHANNEL_PROGNOZ, "text": text, "parse_mode": "HTML"}
     try:
         response = requests.post(url, json=payload, timeout=10)
+        print(f"📡 Статус отправки: {response.status_code}", flush=True)
+        print(f"📡 Ответ: {response.text[:200]}", flush=True)
         return response.status_code == 200
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}", flush=True)
         return False
 
 def is_final_game(text):
-    """Проверяет, что раздача финальная (есть ✅ или 🔰)"""
     return "✅" in text or "🔰" in text
 
 def parse_game(text):
@@ -78,7 +79,6 @@ def parse_game(text):
             return None
         game_number = int(game_match.group(1))
         
-        # Убираем эмодзи из текста для чистого парсинга
         clean_text = text.replace('✅', '').replace('🔰', '').replace('▶️', '').replace('◀️', '')
         
         parts = clean_text.split('-')
@@ -179,7 +179,6 @@ def predict(game_data):
     
     result["target"] = target_game
 
-    # 🔍 ДИАГНОСТИКА
     print(f"🔍 Прогноз для #N{game_num}: {result}", flush=True)
     
     return result
@@ -266,16 +265,13 @@ def main():
                     continue
                 game_number = int(game_id_match.group(1))
                 
-                # Если игра уже обработана — пропускаем
                 if game_number in PROCESSED_GAMES:
                     continue
                 
-                # Если игра нечётная — пропускаем
                 if game_number % 2 != 0:
                     print(f"⏭️ Пропускаем нечётную игру #N{game_number}", flush=True)
                     continue
                 
-                # Если раздача не финальная — ждём
                 if not is_final_game(text):
                     print(f"⏳ Ожидание финальной раздачи для #N{game_number}", flush=True)
                     continue
