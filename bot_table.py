@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - РАБОЧАЯ ВЕРСИЯ", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ТОЛЬКО ПОБЕДА ДИЛЕРА", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -61,6 +61,16 @@ def count_numeric_cards(cards):
 
 def is_skip_game(text, game_data=None):
     """Проверяет, нужно ли пропустить игру"""
+    
+    # 🔥 НОВОЕ ПРАВИЛО: если выиграл игрок (#ПИ) — пропускаем
+    if "✅" in text and "#ПИ" in text:
+        return True
+    
+    # Если выиграл дилер (#ПД) — НЕ пропускаем (берём сигнал)
+    if "✅" in text and "#ПД" in text:
+        return False
+    
+    # Остальные фильтры
     if "21" in text:
         return True
     if "🔰" in text:
@@ -341,6 +351,7 @@ def main():
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print("=" * 60, flush=True)
+    print("📌 Правила: берём сигналы только с #ПД (победа дилера)", flush=True)
     print("📌 Фильтры: 21, 🔰 и общее число 6-10 ≥ 4 — пропускаются", flush=True)
     print(f"⏱️ Интервал: {PREDICT_INTERVAL} сек (2 мин)", flush=True)
     print("=" * 60, flush=True)
@@ -398,10 +409,9 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # 🔥 ФИЛЬТРЫ
+                # 🔥 ФИЛЬТРЫ (включая проверку на #ПД)
                 if is_skip_game(text, game_data):
-                    numeric_count = count_numeric_cards(game_data["player_cards"]) + count_numeric_cards(game_data["dealer_cards"])
-                    reason = "21" if "21" in text else "🔰" if "🔰" in text else f"числовых: {numeric_count} (≥4)"
+                    reason = "победа игрока (#ПИ)" if "#ПИ" in text else "21" if "21" in text else "🔰" if "🔰" in text else f"числовых: {count_numeric_cards(game_data['player_cards']) + count_numeric_cards(game_data['dealer_cards'])} (≥4)"
                     print(f"⏭️ Пропускаем #N{game_number} (фильтр: {reason})", flush=True)
                     continue
                 
