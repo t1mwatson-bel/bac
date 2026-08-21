@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ТОЛЬКО ПОБЕДА ДИЛЕРА", flush=True)
+print("🃏 ПРОГНОЗИСТ 21 ОЧКО - ЗЕРКАЛО МАСТЕЙ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -61,16 +61,6 @@ def count_numeric_cards(cards):
 
 def is_skip_game(text, game_data=None):
     """Проверяет, нужно ли пропустить игру"""
-    
-    # 🔥 НОВОЕ ПРАВИЛО: если выиграл игрок (#ПИ) — пропускаем
-    if "✅" in text and "#ПИ" in text:
-        return True
-    
-    # Если выиграл дилер (#ПД) — НЕ пропускаем (берём сигнал)
-    if "✅" in text and "#ПД" in text:
-        return False
-    
-    # Остальные фильтры
     if "21" in text:
         return True
     if "🔰" in text:
@@ -129,6 +119,15 @@ def parse_game(text):
             return None
         game_number = int(game_match.group(1))
         
+        # Извлекаем очки дилера для проверки чётности
+        dealer_score = 0
+        parts = text.split('-')
+        if len(parts) >= 2:
+            dealer_part = parts[1].strip()
+            dealer_match = re.search(r'(\d+)\(', dealer_part)
+            if dealer_match:
+                dealer_score = int(dealer_match.group(1))
+        
         clean_text = text.replace('✅', '').replace('🔰', '').replace('▶️', '').replace('◀️', '').replace('⚠️', '')
         
         parts = clean_text.split('-')
@@ -161,6 +160,7 @@ def parse_game(text):
             "number": game_number,
             "player_cards": player_cards,
             "dealer_cards": dealer_cards,
+            "dealer_score": dealer_score,
             "text": text
         }
     except Exception as e:
@@ -229,6 +229,32 @@ def predict(game_data):
     
     result["target"] = target_game
     result["cards"] = " ".join(cards_list) if cards_list else "Нет прогноза"
+    
+    # 🔥 ЗЕРКАЛО МАСТЕЙ ПРИ НЕЧЁТНЫХ ОЧКАХ ДИЛЕРА
+    dealer_score = game_data.get("dealer_score", 0)
+    if dealer_score % 2 != 0 and result["cards"] != "Нет прогноза":
+        mirror_map = {
+            '♣': '♥',
+            '♥': '♣',
+            '♦': '♠',
+            '♠': '♦'
+        }
+        # Зеркалим масти в cards_list
+        new_cards = []
+        for card in cards_list:
+            rank = card[:-1]
+            suit = card[-1]
+            new_suit = mirror_map.get(suit, suit)
+            new_cards.append(rank + new_suit)
+        result["cards"] = " ".join(new_cards)
+        
+        # Зеркалим в player и dealer
+        for key in ['player', 'dealer']:
+            if key in result and result[key]:
+                rank = result[key][:-1]
+                suit = result[key][-1]
+                new_suit = mirror_map.get(suit, suit)
+                result[key] = rank + new_suit
 
     print(f"🔍 Прогноз для #N{game_num}: {result}", flush=True)
     
@@ -351,7 +377,7 @@ def main():
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print("=" * 60, flush=True)
-    print("📌 Правила: берём сигналы только с #ПД (победа дилера)", flush=True)
+    print("📌 Зеркало мастей при нечётных очках дилера", flush=True)
     print("📌 Фильтры: 21, 🔰 и общее число 6-10 ≥ 4 — пропускаются", flush=True)
     print(f"⏱️ Интервал: {PREDICT_INTERVAL} сек (2 мин)", flush=True)
     print("=" * 60, flush=True)
@@ -409,13 +435,12 @@ def main():
                     print(f"❌ Не удалось распарсить #N{game_number}", flush=True)
                     continue
                 
-                # 🔥 ФИЛЬТРЫ (включая проверку на #ПД)
                 if is_skip_game(text, game_data):
-                    reason = "победа игрока (#ПИ)" if "#ПИ" in text else "21" if "21" in text else "🔰" if "🔰" in text else f"числовых: {count_numeric_cards(game_data['player_cards']) + count_numeric_cards(game_data['dealer_cards'])} (≥4)"
+                    numeric_count = count_numeric_cards(game_data["player_cards"]) + count_numeric_cards(game_data["dealer_cards"])
+                    reason = "21" if "21" in text else "🔰" if "🔰" in text else f"числовых: {numeric_count} (≥4)"
                     print(f"⏭️ Пропускаем #N{game_number} (фильтр: {reason})", flush=True)
                     continue
                 
-                # Рандом: 70% шанс дать прогноз
                 if random.random() > 0.7:
                     print(f"⏭️ Случайно пропускаем #N{game_number}", flush=True)
                     continue
