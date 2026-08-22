@@ -119,7 +119,7 @@ def is_final_game(text):
     return "✅" in text or "🔰" in text
 
 def parse_game(text):
-    """Парсит игру и возвращает карты игрока"""
+    """Парсит игру и возвращает карты игрока и дилера"""
     try:
         game_match = re.search(r'#N(\d+)', text)
         if not game_match:
@@ -133,19 +133,32 @@ def parse_game(text):
             return None
         
         player_part = parts[0].strip()
+        dealer_part = parts[1].strip()
+        
         player_match = re.search(r'(\d+)\(([^)]+)\)', player_part)
         if not player_match:
             return None
         player_cards_str = player_match.group(2).strip()
+        
+        dealer_match = re.search(r'(\d+)\(([^)]+)\)', dealer_part)
+        if not dealer_match:
+            return None
+        dealer_cards_str = dealer_match.group(2).strip()
         
         player_cards = []
         for card in re.findall(r'([AKQJ]|10|\d)([♠♣♦♥])', player_cards_str):
             rank, suit = card
             player_cards.append({"rank": rank, "suit": suit})
         
+        dealer_cards = []
+        for card in re.findall(r'([AKQJ]|10|\d)([♠♣♦♥])', dealer_cards_str):
+            rank, suit = card
+            dealer_cards.append({"rank": rank, "suit": suit})
+        
         return {
             "number": game_number,
             "player_cards": player_cards,
+            "dealer_cards": dealer_cards,
             "text": text
         }
     except Exception as e:
@@ -220,7 +233,7 @@ def predict(game_data):
     }
 
 def check_results(history, all_messages):
-    """Проверяет результаты прогнозов"""
+    """Проверяет результаты прогнозов (игрок + дилер)"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -242,15 +255,23 @@ def check_results(history, all_messages):
             game_to_check = target + i
             for msg in all_messages:
                 if f"#N{game_to_check}" in msg:
-                    # Проверяем, есть ли этот ранг в картах игрока
                     game_data = parse_game(msg)
                     if game_data:
+                        # Проверяем игрока
                         for card in game_data["player_cards"]:
                             if card["rank"] == rank:
                                 found = True
                                 found_game = game_to_check
                                 found_dogon = i + 1
                                 break
+                        # Проверяем дилера
+                        if not found:
+                            for card in game_data["dealer_cards"]:
+                                if card["rank"] == rank:
+                                    found = True
+                                    found_game = game_to_check
+                                    found_dogon = i + 1
+                                    break
                     if found:
                         break
             if found:
