@@ -433,7 +433,6 @@ def main():
                 msg = f"🔮 <b>ПРОГНОЗ</b>\n"
                 msg += f"📊 От игры: #N{game_data['number']}\n"
                 msg += f"🃏 Масть: {prognoz['suit']} {suit_name}\n"
-                msg += f"📌 Позиция самой старшей: {prognoz['position']}\n"
                 msg += f"🎯 Целевая игра: #N{prognoz['target']}\n"
                 msg += f"📈 3 игры догон (N+1, N+2, N+3)\n"
                 msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
