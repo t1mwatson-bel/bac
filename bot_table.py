@@ -72,8 +72,16 @@ def get_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     params = {"offset": offset, "timeout": 30}
     try:
+        print(f"📥 Запрос getUpdates с offset={offset}...", flush=True)
         response = requests.get(url, params=params, timeout=35)
-        return response.json()
+        print(f"📥 Статус: {response.status_code}", flush=True)
+        if response.status_code == 200:
+            data = response.json()
+            print(f"📥 Получено обновлений: {len(data.get('result', []))}", flush=True)
+            return data
+        else:
+            print(f"❌ Ошибка getUpdates: {response.status_code}", flush=True)
+            return {}
     except Exception as e:
         print(f"❌ Ошибка getUpdates: {e}", flush=True)
         return {}
@@ -322,6 +330,26 @@ def save_offset(offset):
     with open(OFFSET_FILE, "w") as f:
         f.write(str(offset))
 
+def load_recent_messages():
+    """Загружает последние 50 сообщений из канала при запуске"""
+    print(f"📥 Загрузка последних 50 сообщений из канала {CHANNEL_STATS}...", flush=True)
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+    params = {"chat_id": CHANNEL_STATS, "limit": 50}
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            messages = []
+            for update in data.get("result", []):
+                post = update.get("channel_post")
+                if post and post.get("text"):
+                    messages.append(post.get("text"))
+            print(f"📥 Загружено сообщений: {len(messages)}", flush=True)
+            return messages
+    except Exception as e:
+        print(f"❌ Ошибка загрузки истории: {e}", flush=True)
+    return []
+
 # =====================================================================
 # ОСНОВНОЙ ЦИКЛ
 # =====================================================================
@@ -342,10 +370,24 @@ def main():
     
     offset = get_offset()
     history = load_history()
-    all_messages = []
+    
+    # Принудительная загрузка последних сообщений
+    all_messages = load_recent_messages()
+    print(f"📥 Всего сообщений в памяти: {len(all_messages)}", flush=True)
+    
+    last_cleanup_time = time.time()
     
     while True:
         try:
+            current_time = time.time()
+            
+            # Очистка кэша раз в час
+            if current_time - last_cleanup_time > 3600:
+                history = clean_memory(history)
+                save_history(history)
+                print(f"🧹 Кэш очищен. Записей в истории: {len(history)}", flush=True)
+                last_cleanup_time = current_time
+            
             updates = get_updates(offset)
             
             for update in updates.get("result", []):
@@ -390,7 +432,6 @@ def main():
                     continue
                 
                 # Проверяем интервал
-                current_time = time.time()
                 if current_time - LAST_PREDICT_TIME < PREDICT_INTERVAL:
                     print(f"⏳ Интервал: {int(current_time - LAST_PREDICT_TIME)} сек < {PREDICT_INTERVAL} сек", flush=True)
                     continue
