@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ БАККАРА - АЛГОРИТМ ПО ТВОИМ ПРАВИЛАМ", flush=True)
+print("🃏 ПРОГНОЗИСТ 2.0 - ПО ТВОИМ ПРАВИЛАМ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -65,14 +65,6 @@ RANK_VALUES = {
     'K': 13   # Король - старший
 }
 
-# Масть по позиции (порядковому номеру)
-SUIT_BY_POSITION = {
-    1: '♣',  # 1-я карта = Трефы
-    2: '♦',  # 2-я карта = Бубны
-    3: '♥',  # 3-я карта = Червы
-    4: '♠'   # 4-я карта = Пики
-}
-
 # =====================================================================
 # ФУНКЦИИ
 # =====================================================================
@@ -119,7 +111,7 @@ def is_final_game(text):
     return "✅" in text or "🔰" in text
 
 def parse_game(text):
-    """Парсит игру и возвращает карты игрока и дилера"""
+    """Парсит игру и возвращает карты игрока"""
     try:
         game_match = re.search(r'#N(\d+)', text)
         if not game_match:
@@ -138,104 +130,85 @@ def parse_game(text):
             return None
         player_cards_str = player_match.group(2).strip()
         
-        dealer_part = parts[1].strip()
-        dealer_match = re.search(r'(\d+)\(([^)]+)\)', dealer_part)
-        if not dealer_match:
-            return None
-        dealer_cards_str = dealer_match.group(2).strip() if dealer_match else ""
-        
         player_cards = []
         for card in re.findall(r'([AKQJ]|10|\d)([♠♣♦♥])', player_cards_str):
             rank, suit = card
             player_cards.append({"rank": rank, "suit": suit})
         
-        dealer_cards = []
-        for card in re.findall(r'([AKQJ]|10|\d)([♠♣♦♥])', dealer_cards_str):
-            rank, suit = card
-            dealer_cards.append({"rank": rank, "suit": suit})
-        
         return {
             "number": game_number,
             "player_cards": player_cards,
-            "dealer_cards": dealer_cards,
             "text": text
         }
     except Exception as e:
         print(f"❌ Ошибка парсинга: {e}", flush=True)
         return None
 
-def has_duplicate_ranks(cards):
-    """Проверяет, есть ли повторяющиеся ранги среди карт"""
-    ranks = [c["rank"] for c in cards]
-    return len(ranks) != len(set(ranks))
-
-def get_highest_card_index(cards):
+def get_highest_card_info(cards):
     """
-    Находит индекс (позицию) самой старшей карты по ТВОИМ правилам.
-    Возвращает позицию: 1, 2, 3 или 4
-    Если есть одинаковые ранги - возвращает None (пропуск)
+    Находит самую старшую карту и её позицию по ТВОИМ правилам.
+    Возвращает: (ранг, позиция)
+    Если есть одинаковые ранги - возвращает None
     """
+    if not cards:
+        return None, None
+    
     # Проверяем на повторяющиеся ранги
     ranks = [c["rank"] for c in cards]
     if len(ranks) != len(set(ranks)):
-        return None  # Пропуск, есть одинаковые карты
+        return None, None  # Пропуск, есть одинаковые ранги
     
     # Находим карту с максимальным значением ранга
-    max_rank = max(cards, key=lambda c: RANK_VALUES.get(c["rank"], 0))
+    max_rank_value = -1
+    max_rank = None
+    max_position = None
     
-    # Возвращаем её позицию (индекс + 1)
-    return cards.index(max_rank) + 1
+    for idx, card in enumerate(cards, start=1):
+        rank = card["rank"]
+        rank_value = RANK_VALUES.get(rank, 0)
+        if rank_value > max_rank_value:
+            max_rank_value = rank_value
+            max_rank = rank
+            max_position = idx
+    
+    return max_rank, max_position
 
 def predict(game_data):
     """
     ТВОЙ АЛГОРИТМ:
-    1. Проверяем, что у игрока 3 карты
-    2. Берём 4 карты: 3 игрока + 1-я дилера
-    3. Находим самую старшую по ТВОИМ правилам
-    4. Смотрим её порядковый номер (1, 2, 3 или 4)
-    5. По номеру определяем масть
-    6. Прогноз на N+1, N+2, N+3
+    1. Берём карты игрока
+    2. Находим самую старшую по ТВОИМ правилам
+    3. Смотрим её позицию
+    4. Прогноз = ЭТА КАРТА (ранг без масти)
+    5. Проверяем на N+1, N+2, N+3
     """
     player_cards = game_data["player_cards"]
-    dealer_cards = game_data["dealer_cards"]
+    game_num = game_data["number"]
     
-    # 1. Проверяем, что у игрока 3 карты
-    if len(player_cards) != 3:
-        print(f"⏭️ У игрока {len(player_cards)} карт, нужно 3", flush=True)
+    # Проверяем, что у игрока есть карты
+    if not player_cards:
+        print(f"⏭️ Нет карт игрока", flush=True)
         return None
     
-    # 2. Берём 4 карты: 3 игрока + 1-я дилера
-    if not dealer_cards:
-        print(f"⏭️ Нет карт дилера", flush=True)
-        return None
+    # Находим самую старшую карту
+    highest_rank, highest_position = get_highest_card_info(player_cards)
     
-    four_cards = player_cards + [dealer_cards[0]]
-    
-    # 3. Проверяем на повторяющиеся ранги (пропуск)
-    if has_duplicate_ranks(four_cards):
+    if highest_rank is None:
         print(f"⏭️ Есть повторяющиеся ранги - пропуск", flush=True)
         return None
     
-    # 4. Находим позицию самой старшей карты
-    position = get_highest_card_index(four_cards)
-    if position is None:
+    if highest_position is None:
+        print(f"⏭️ Не удалось определить старшую карту", flush=True)
         return None
     
-    # 5. По позиции определяем масть
-    suit = SUIT_BY_POSITION.get(position, '?')
-    game_num = game_data["number"]
-    
-    print(f"🔍 #N{game_num}: самая старшая на позиции {position} → масть {suit}", flush=True)
+    print(f"🔍 #N{game_num}: самая старшая {highest_rank} на позиции {highest_position}", flush=True)
     
     return {
         "from_game": game_num,
-        "position": position,
-        "suit": suit,
-        "target": game_num + 1,  # N+1
-        "dogon_1": game_num + 1,
-        "dogon_2": game_num + 2,
-        "dogon_3": game_num + 3,
-        "cards": suit  # Для отображения
+        "rank": highest_rank,
+        "position": highest_position,
+        "target": game_num + 1,
+        "games": [game_num + 1, game_num + 2, game_num + 3]
     }
 
 def check_results(history, all_messages):
@@ -245,11 +218,11 @@ def check_results(history, all_messages):
             continue
         
         target = entry.get("target")
-        suit = entry.get("suit")
+        rank = entry.get("rank")
         from_game = entry.get("from_game")
         message_id = entry.get("message_id")
         
-        if not suit or not message_id:
+        if not rank or not message_id:
             continue
         
         found = False
@@ -261,11 +234,16 @@ def check_results(history, all_messages):
             game_to_check = target + i
             for msg in all_messages:
                 if f"#N{game_to_check}" in msg:
-                    # Ищем масть в сообщении (в картах)
-                    if suit in msg:
-                        found = True
-                        found_game = game_to_check
-                        found_dogon = i + 1
+                    # Проверяем, есть ли этот ранг в картах игрока
+                    game_data = parse_game(msg)
+                    if game_data:
+                        for card in game_data["player_cards"]:
+                            if card["rank"] == rank:
+                                found = True
+                                found_game = game_to_check
+                                found_dogon = i + 1
+                                break
+                    if found:
                         break
             if found:
                 break
@@ -286,12 +264,9 @@ def check_results(history, all_messages):
         if not all_games_present:
             continue
         
-        # Формируем результат
-        suit_name = {'♣': 'Трефы', '♦': 'Бубны', '♥': 'Червы', '♠': 'Пики'}.get(suit, suit)
-        
         original_text = f"🔮 <b>ПРОГНОЗ</b>\n"
         original_text += f"📊 От игры: #N{from_game}\n"
-        original_text += f"🃏 Масть: {suit} {suit_name}\n"
+        original_text += f"🃏 Ранг: {rank}\n"
         original_text += f"🎯 Целевая игра: #N{target}\n"
         original_text += f"📈 3 игры догон (N+1, N+2, N+3)\n"
         original_text += f"⏰ {entry.get('time', '')[:16]}"
@@ -353,18 +328,16 @@ def save_offset(offset):
 def main():
     global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ ЗАПУЩЕН (НОВЫЙ АЛГОРИТМ)", flush=True)
+    print("🔄 ПРОГНОЗИСТ 2.0 ЗАПУЩЕН", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print("=" * 60, flush=True)
     print("📌 АЛГОРИТМ:", flush=True)
-    print("   1. Ждём игру где у игрока 3 карты", flush=True)
-    print("   2. Берём 4 карты: 3 игрока + 1-я дилера", flush=True)
-    print("   3. Находим самую старшую (K=4, Q=3, J=2, 10=10... A=1)", flush=True)
-    print("   4. Смотрим порядковый номер (1,2,3,4)", flush=True)
-    print("   5. 1=♣, 2=♦, 3=♥, 4=♠", flush=True)
-    print("   6. Прогноз на N+1, N+2, N+3", flush=True)
-    print("   7. Если есть повторяющиеся ранги - ПРОПУСК!", flush=True)
+    print("   1. Берём карты игрока из завершённой игры", flush=True)
+    print("   2. Находим самую старшую (K=4, Q=3, J=2, 10=10... A=1)", flush=True)
+    print("   3. Если есть повторяющиеся ранги - ПРОПУСК!", flush=True)
+    print("   4. Прогноз = этот ранг (БЕЗ МАСТИ)", flush=True)
+    print("   5. Проверяем N+1, N+2, N+3 (игрок + дилер)", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
@@ -428,25 +401,23 @@ def main():
                     print(f"⏭️ Нет прогноза для #N{game_number}", flush=True)
                     continue
                 
-                suit_name = {'♣': 'Трефы', '♦': 'Бубны', '♥': 'Червы', '♠': 'Пики'}.get(prognoz['suit'], prognoz['suit'])
-                
                 msg = f"🔮 <b>ПРОГНОЗ</b>\n"
                 msg += f"📊 От игры: #N{game_data['number']}\n"
-                msg += f"🃏 Масть: {prognoz['suit']} {suit_name}\n"
+                msg += f"🃏 Ранг: {prognoz['rank']}\n"
                 msg += f"🎯 Целевая игра: #N{prognoz['target']}\n"
                 msg += f"📈 3 игры догон (N+1, N+2, N+3)\n"
                 msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
                 
                 message_id = send_message(msg)
                 if message_id:
-                    print(f"✅ Прогноз отправлен: #N{prognoz['target']} - {prognoz['suit']}", flush=True)
+                    print(f"✅ Прогноз отправлен: #N{prognoz['target']} - {prognoz['rank']}", flush=True)
                     LAST_PREDICT_TIME = current_time
                     PROCESSED_GAMES.add(game_number)
                     
                     history.append({
                         "from_game": game_data["number"],
                         "target": prognoz["target"],
-                        "suit": prognoz["suit"],
+                        "rank": prognoz["rank"],
                         "position": prognoz["position"],
                         "time": datetime.now().isoformat(),
                         "status": "pending",
