@@ -39,11 +39,7 @@ print("✅ Все переменные заданы!", flush=True)
 # =====================================================================
 # НАСТРОЙКИ
 # =====================================================================
-def get_offset():
-    return 0  # Всегда начинаем с 0
-
-def save_offset(offset):
-    pass  # Ничего не сохраняем
+HISTORY_FILE = "history.json"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
 LAST_PREDICT_TIME = 0
@@ -341,19 +337,6 @@ def clean_memory(history):
             new_history.append(item)
     return new_history
 
-def get_offset():
-    if os.path.exists(OFFSET_FILE):
-        try:
-            with open(OFFSET_FILE, "r") as f:
-                return int(f.read().strip())
-        except:
-            return 0
-    return 0
-
-def save_offset(offset):
-    with open(OFFSET_FILE, "w") as f:
-        f.write(str(offset))
-
 def load_recent_messages():
     """Загружает последние 50 сообщений из канала при запуске"""
     print(f"📥 Загрузка последних 50 сообщений из канала {CHANNEL_STATS}...", flush=True)
@@ -392,7 +375,8 @@ def main():
     print("   5. Проверяем N+1, N+2, N+3 (игрок + дилер)", flush=True)
     print("=" * 60, flush=True)
     
-    offset = get_offset()
+    # Всегда начинаем с 0
+    offset = 0
     history = load_history()
     
     # Принудительная загрузка последних сообщений
@@ -416,7 +400,6 @@ def main():
             
             for update in updates.get("result", []):
                 offset = update["update_id"] + 1
-                save_offset(offset)
                 
                 channel_post = update.get("channel_post")
                 edited_post = update.get("edited_channel_post")
