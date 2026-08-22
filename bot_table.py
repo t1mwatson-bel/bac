@@ -39,8 +39,11 @@ print("✅ Все переменные заданы!", flush=True)
 # =====================================================================
 # НАСТРОЙКИ
 # =====================================================================
-HISTORY_FILE = "history.json"
-OFFSET_FILE = "offset.txt"
+def get_offset():
+    return 0  # Всегда начинаем с 0
+
+def save_offset(offset):
+    pass  # Ничего не сохраняем
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
 LAST_PREDICT_TIME = 0
