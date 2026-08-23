@@ -251,6 +251,13 @@ def get_highest_card_info(cards):
     
     return max_rank, max_position
 
+def has_ten(cards):
+    """Проверяет, есть ли среди карт десятка"""
+    for card in cards:
+        if card.get("rank") == "10":
+            return True
+    return False
+
 def is_valid_game(game_data):
     """Проверяет, подходит ли игра для прогноза"""
     player_cards = game_data.get("player_cards", [])
@@ -271,11 +278,16 @@ def is_valid_game(game_data):
         print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока 2, у дилера 2", flush=True)
         return False
     
+    # 4. ✅ НОВОЕ ПРАВИЛО: если у игрока есть 10 → пропускаем
+    if has_ten(player_cards):
+        print(f"⏭️ Пропускаем #N{game_data['number']}: есть 10 у игрока", flush=True)
+        return False
+    
     return True
 
 def predict(game_data):
     """
-    ТВОЙ НОВЫЙ АЛГОРИТМ:
+    ТВОЙ АЛГОРИТМ:
     1. Берём карты игрока
     2. Находим самую старшую по ТВОИМ правилам
     3. Смотрим её позицию
@@ -447,12 +459,13 @@ def main():
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print(f"⏰ Часовой пояс: {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')} (МСК)", flush=True)
     print("=" * 60, flush=True)
-    print("📌 ТВОЙ НОВЫЙ АЛГОРИТМ:", flush=True)
+    print("📌 ТВОЙ АЛГОРИТМ:", flush=True)
     print("   1. Берём карты игрока из завершённой игры", flush=True)
-    print("   2. Находим самую старшую по ТВОИМ правилам", flush=True)
-    print("   3. Если есть повторяющиеся ранги - ПРОПУСК!", flush=True)
-    print("   4. Прогноз = этот ранг (БЕЗ МАСТИ)", flush=True)
-    print("   5. Проверяем N+1, N+2, N+3 (игрок + дилер)", flush=True)
+    print("   2. Если есть 10 - ПРОПУСК!", flush=True)
+    print("   3. Находим самую старшую по ТВОИМ правилам", flush=True)
+    print("   4. Если есть повторяющиеся ранги - ПРОПУСК!", flush=True)
+    print("   5. Прогноз = этот ранг (БЕЗ МАСТИ)", flush=True)
+    print("   6. Проверяем N+1, N+2, N+3 (игрок + дилер)", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
