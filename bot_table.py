@@ -17,7 +17,7 @@ MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 2.0 - ПО ТВОИМ ПРАВИЛАМ", flush=True)
+print("🃏 ПРОГНОЗИСТ 2 - ПО РАНГУ (ПРАВИЛО 4 КАРТ)", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -45,9 +45,9 @@ print("✅ Все переменные заданы!", flush=True)
 # =====================================================================
 # НАСТРОЙКИ
 # =====================================================================
-HISTORY_FILE = "history.json"
-OFFSET_FILE = "offset.txt"
-STATS_FILE = "stats.json"
+HISTORY_FILE = "history_rank.json"
+OFFSET_FILE = "offset_rank.txt"
+STATS_FILE = "stats_rank.json"
 MAX_HISTORY = 200
 PROCESSED_GAMES = set()
 LAST_PREDICT_TIME = 0
@@ -109,14 +109,14 @@ def send_stats_report():
     stats = load_stats()
     
     if stats["total"] == 0:
-        msg = "📊 <b>СТАТИСТИКА ПРОГНОЗОВ</b>\n\n"
+        msg = "📊 <b>СТАТИСТИКА ПРОГНОЗОВ (РАНГ)</b>\n\n"
         msg += "Пока нет прогнозов. Ожидаем первые результаты..."
         send_message(msg)
         return
     
     win_rate = (stats["win"] / stats["total"] * 100) if stats["total"] > 0 else 0
     
-    msg = f"📊 <b>СТАТИСТИКА ПРОГНОЗОВ</b>\n"
+    msg = f"📊 <b>СТАТИСТИКА ПРОГНОЗОВ (РАНГ)</b>\n"
     msg += f"{'=' * 30}\n\n"
     msg += f"📈 <b>Всего прогнозов:</b> {stats['total']}\n"
     msg += f"✅ <b>Зашло:</b> {stats['win']} ({win_rate:.1f}%)\n"
@@ -126,7 +126,7 @@ def send_stats_report():
     msg += f"🎯 Целевая игра: {stats['by_dogon'].get(1, 0)}\n"
     msg += f"🔄 Догон 1: {stats['by_dogon'].get(2, 0)}\n"
     msg += f"🔄 Догон 2: {stats['by_dogon'].get(3, 0)}\n"
-    msg += f"🔄 Догон 3 (запас): {stats['by_dogon'].get(4, 0)}\n"
+    msg += f"🔄 Догон 3: {stats['by_dogon'].get(4, 0)}\n"
     msg += f"{'=' * 30}\n"
     msg += f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}"
     
@@ -222,95 +222,82 @@ def parse_game(text):
         print(f"❌ Ошибка парсинга: {e}", flush=True)
         return None
 
-def get_highest_card_info(cards):
-    """
-    Находит самую старшую карту по ТВОИМ правилам.
-    Возвращает: (ранг, позиция)
-    Если есть одинаковые ранги - возвращает None
-    """
-    if not cards:
-        return None, None
-    
-    # Проверяем на повторяющиеся ранги
-    ranks = [c["rank"] for c in cards]
-    if len(ranks) != len(set(ranks)):
-        return None, None  # Пропуск, есть одинаковые ранги
-    
-    # Находим карту с максимальным значением ранга
-    max_rank_value = -1
-    max_rank = None
-    max_position = None
-    
-    for idx, card in enumerate(cards, start=1):
-        rank = card["rank"]
-        rank_value = RANK_VALUES.get(rank, 0)
-        if rank_value > max_rank_value:
-            max_rank_value = rank_value
-            max_rank = rank
-            max_position = idx
-    
-    return max_rank, max_position
-
 def has_ten(cards):
-    """Проверяет, есть ли среди карт десятка"""
     for card in cards:
         if card.get("rank") == "10":
             return True
     return False
 
 def is_valid_game(game_data):
-    """Проверяет, подходит ли игра для прогноза"""
+    """Проверяет, подходит ли игра для прогноза (ПРАВИЛО 4 КАРТ)"""
     player_cards = game_data.get("player_cards", [])
     dealer_cards = game_data.get("dealer_cards", [])
     
-    # 1. Если у дилера 0 карт → пропускаем
-    if len(dealer_cards) == 0:
-        print(f"⏭️ Пропускаем #N{game_data['number']}: у дилера 0 карт", flush=True)
+    # 1. Если у игрока 1, 2 или 5+ карт → пропускаем
+    if len(player_cards) in [1, 2] or len(player_cards) >= 5:
+        print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока {len(player_cards)} карт (нужно 3 или 4)", flush=True)
         return False
     
-    # 2. Если у игрока 2 карты, а у дилера >= 3 → пропускаем
-    if len(player_cards) == 2 and len(dealer_cards) >= 3:
-        print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока 2, у дилера {len(dealer_cards)} (>=3)", flush=True)
-        return False
+    # 2. Если у игрока 3 карты → нужна 1-я карта дилера
+    if len(player_cards) == 3:
+        if len(dealer_cards) == 0:
+            print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока 3 карты, но у дилера 0", flush=True)
+            return False
+        return True
     
-    # 3. Если у игрока 2 карты, у дилера 2 карты → пропускаем
-    if len(player_cards) == 2 and len(dealer_cards) == 2:
-        print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока 2, у дилера 2", flush=True)
-        return False
-    
-    # 4. ✅ НОВОЕ ПРАВИЛО: если у игрока есть 10 → пропускаем
-    if has_ten(player_cards):
-        print(f"⏭️ Пропускаем #N{game_data['number']}: есть 10 у игрока", flush=True)
-        return False
+    # 3. Если у игрока 4 карты → проверяем на 10
+    if len(player_cards) == 4:
+        if has_ten(player_cards):
+            print(f"⏭️ Пропускаем #N{game_data['number']}: есть 10 у игрока", flush=True)
+            return False
+        return True
     
     return True
 
 def predict(game_data):
-    """
-    ТВОЙ АЛГОРИТМ:
-    1. Берём карты игрока
-    2. Находим самую старшую по ТВОИМ правилам
-    3. Смотрим её позицию
-    4. Прогноз = ЭТА КАРТА (ранг без масти)
-    5. Проверяем на N+1, N+2, N+3
-    """
     game_num = game_data["number"]
     player_cards = game_data["player_cards"]
+    dealer_cards = game_data.get("dealer_cards", [])
     
-    # Находим самую старшую карту
-    highest_rank, highest_position = get_highest_card_info(player_cards)
-    
-    if highest_rank is None:
-        print(f"⚠️ Игра #{game_num}: неопределенность (повторяющиеся ранги или нет карт)", flush=True)
+    # Формируем список для анализа (4 карты)
+    if len(player_cards) == 3:
+        if dealer_cards:
+            four_cards = player_cards + [dealer_cards[0]]
+        else:
+            print(f"⚠️ Игра #{game_num}: у дилера нет карт", flush=True)
+            return None
+    elif len(player_cards) == 4:
+        four_cards = player_cards
+    else:
+        print(f"⚠️ Игра #{game_num}: {len(player_cards)} карт — не подходит", flush=True)
         return None
     
-    if highest_position is None:
+    # Проверяем повторяющиеся ранги
+    ranks = [c["rank"] for c in four_cards]
+    if len(ranks) != len(set(ranks)):
+        print(f"⏭️ Пропускаем #N{game_num}: повторяющиеся ранги", flush=True)
+        return None
+    
+    # Находим старшую карту (по рангу)
+    highest_rank = None
+    highest_position = None
+    highest_value = -1
+    
+    for idx, card in enumerate(four_cards, start=1):
+        rank = card["rank"]
+        value = RANK_VALUES.get(rank, 0)
+        if value > highest_value:
+            highest_value = value
+            highest_rank = rank
+            highest_position = idx
+    
+    if highest_rank is None or highest_position is None:
         print(f"⚠️ Игра #{game_num}: не удалось определить старшую карту", flush=True)
         return None
     
     target_game = game_num + 1
     
-    print(f"🔍 #N{game_num}: самая старшая {highest_rank} на позиции {highest_position}", flush=True)
+    print(f"🔍 #N{game_num}: старший ранг {highest_rank} (поз. {highest_position})", flush=True)
     
     return {
         "from_game": game_num,
@@ -321,7 +308,7 @@ def predict(game_data):
     }
 
 def check_results(history, all_messages):
-    """Проверяет результаты прогнозов (игрок + дилер)"""
+    """Проверяет результаты прогнозов — ТОЛЬКО ИГРОК"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -344,21 +331,12 @@ def check_results(history, all_messages):
                 if f"#N{game_to_check}" in msg:
                     game_data = parse_game(msg)
                     if game_data:
-                        # Проверяем игрока
                         for card in game_data["player_cards"]:
                             if card.get("rank") == predicted_rank:
                                 found = True
                                 found_game = game_to_check
                                 found_dogon = i + 1
                                 break
-                        # Проверяем дилера
-                        if not found:
-                            for card in game_data["dealer_cards"]:
-                                if card.get("rank") == predicted_rank:
-                                    found = True
-                                    found_game = game_to_check
-                                    found_dogon = i + 1
-                                    break
                     if found:
                         break
             if found:
@@ -384,7 +362,7 @@ def check_results(history, all_messages):
         else:
             update_stats(0, "lose")
         
-        original_text = f"🔮 <b>ПРОГНОЗ</b>\n"
+        original_text = f"🔮 <b>ПРОГНОЗ (РАНГ)</b>\n"
         original_text += f"📊 От игры: #N{from_game}\n"
         original_text += f"🃏 Ранг: {predicted_rank}\n"
         original_text += f"🎯 Целевая игра: #N{target}\n"
@@ -392,7 +370,10 @@ def check_results(history, all_messages):
         original_text += f"⏰ {entry.get('time', '')[:16]}"
         
         if found:
-            result_text = f"\n\n✅ <b>ЗАШЛО</b> на догоне {found_dogon}: #N{found_game}"
+            if found_dogon == 1:
+                result_text = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{found_game}"
+            else:
+                result_text = f"\n\n✅ <b>ЗАШЛО</b> на догоне {found_dogon-1}: #N{found_game}"
         else:
             result_text = f"\n\n❌ <b>НЕ ЗАШЛО</b> (3 догона проверены до #N{target+3})"
         
@@ -454,18 +435,19 @@ def load_recent_messages():
 def main():
     global LAST_PREDICT_TIME
     
-    print("🔄 ПРОГНОЗИСТ 2.0 ЗАПУЩЕН", flush=True)
+    print("🔄 ПРОГНОЗИСТ 2 (ПО РАНГУ) ЗАПУЩЕН", flush=True)
     print(f"📊 Читает канал: {CHANNEL_STATS}", flush=True)
     print(f"📤 Отправляет в: {CHANNEL_PROGNOZ}", flush=True)
     print(f"⏰ Часовой пояс: {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')} (МСК)", flush=True)
     print("=" * 60, flush=True)
-    print("📌 ТВОЙ АЛГОРИТМ:", flush=True)
-    print("   1. Берём карты игрока из завершённой игры", flush=True)
-    print("   2. Если есть 10 - ПРОПУСК!", flush=True)
-    print("   3. Находим самую старшую по ТВОИМ правилам", flush=True)
-    print("   4. Если есть повторяющиеся ранги - ПРОПУСК!", flush=True)
-    print("   5. Прогноз = этот ранг (БЕЗ МАСТИ)", flush=True)
-    print("   6. Проверяем N+1, N+2, N+3 (игрок + дилер)", flush=True)
+    print("📌 ПРАВИЛА:", flush=True)
+    print("   - Берём 4 карты для прогноза:", flush=True)
+    print("     * Если у игрока 3 карты → 3 игрока + 1-я дилера", flush=True)
+    print("     * Если у игрока 4 карты → 4 игрока", flush=True)
+    print("   - Находим старший ранг (10>9>8>7>6>K>Q>J>A)", flush=True)
+    print("   - Если несколько старших рангов - пропускаем", flush=True)
+    print("   - Если есть 10 у игрока - пропускаем", flush=True)
+    print("   - Прогноз на 4 игры (целевая + 3 догона)", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
@@ -476,6 +458,8 @@ def main():
     all_messages = load_recent_messages()
     print(f"📥 Загружено сообщений: {len(all_messages)}", flush=True)
     
+    check_results(history, all_messages)
+    
     last_cleanup_time = time.time()
     last_stats_time = time.time()
     
@@ -485,7 +469,6 @@ def main():
             current_date = datetime.now(MOSCOW_TZ).date()
             current_hour = datetime.now(MOSCOW_TZ).hour
             
-            # ✅ Ежедневный сброс кэша в 03:00
             if current_date != last_reset_date and current_hour == 3:
                 print("🔄 Ежедневный сброс кэша (новый цикл игр)...", flush=True)
                 history = []
@@ -495,7 +478,6 @@ def main():
                 print("✅ Кэш сброшен, начинаем новый цикл", flush=True)
                 continue
             
-            # Очистка кэша раз в час (только история)
             if current_time - last_cleanup_time > CLEANUP_INTERVAL:
                 print("🧹 Запуск плановой очистки кэша...", flush=True)
                 history = clean_memory(history)
@@ -503,7 +485,6 @@ def main():
                 print(f"🧹 Кэш очищен. Записей в истории: {len(history)}", flush=True)
                 last_cleanup_time = current_time
             
-            # Отправка статистики раз в час
             if current_time - last_stats_time > 3600:
                 print("📊 Отправка статистики...", flush=True)
                 send_stats_report()
@@ -559,7 +540,7 @@ def main():
                 
                 prognoz = predict(game_data)
                 if prognoz:
-                    msg = f"🔮 <b>ПРОГНОЗ</b>\n"
+                    msg = f"🔮 <b>ПРОГНОЗ (РАНГ)</b>\n"
                     msg += f"📊 От игры: #N{game_data['number']}\n"
                     msg += f"🃏 Ранг: {prognoz['rank']}\n"
                     msg += f"🎯 Целевая игра: #N{prognoz['target']}\n"
