@@ -17,13 +17,13 @@ MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 2 - ПО РАНГУ (ЦИФРЫ СТАРШЕ)", flush=True)
+print("🃏 ПРОГНОЗИСТ 2 - ПО РАНГУ (ИГРОК + ДИЛЕР)", flush=True)
 print("=" * 60, flush=True)
 
 print("🔮 ОБНОВЛЕНИЕ УСПЕШНО УСТАНОВЛЕНО!")
-print("📦 Версия: 05v1.4")
+print("📦 Версия: 05v1.5")
 print("✅ Статус: Завершено")
-print("📌 Исправлено: цифры теперь старше картинок (7 > Q)")
+print("📌 Исправлено: проверка теперь идёт по игроку и дилеру")
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -61,7 +61,7 @@ PREDICT_INTERVAL = 10
 CLEANUP_INTERVAL = 3600
 
 # =====================================================================
-# ТВОЯ ТАБЛИЦА ОЧКОВ (цифры старше картинок, 10 не трогаем)
+# ТВОЯ ТАБЛИЦА ОЧКОВ
 # =====================================================================
 RANK_VALUES = {
     'A': 1,   # Туз = 1 (самый младший)
@@ -306,7 +306,7 @@ def predict(game_data):
     }
 
 def check_results(history, all_messages):
-    """Проверяет результаты прогнозов — ТОЛЬКО ИГРОК"""
+    """Проверяет результаты прогнозов — ИГРОК + ДИЛЕР"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -329,16 +329,21 @@ def check_results(history, all_messages):
                 if f"#N{game_to_check}" in msg:
                     game_data = parse_game(msg)
                     if game_data:
+                        # Проверяем игрока
                         for card in game_data["player_cards"]:
-                            for card in game_data["player_cards"]:
-    if card.get("rank") == predicted_rank:
-        found = True
-        break
-if not found:
-    for card in game_data["dealer_cards"]:
-        if card.get("rank") == predicted_rank:
-            found = True
-            break
+                            if card.get("rank") == predicted_rank:
+                                found = True
+                                found_game = game_to_check
+                                found_dogon = i + 1
+                                break
+                        # Если не нашли у игрока - проверяем дилера
+                        if not found:
+                            for card in game_data["dealer_cards"]:
+                                if card.get("rank") == predicted_rank:
+                                    found = True
+                                    found_game = game_to_check
+                                    found_dogon = i + 1
+                                    break
                     if found:
                         break
             if found:
@@ -450,6 +455,7 @@ def main():
     print("   - Если несколько старших рангов - пропускаем", flush=True)
     print("   - Если есть 10 у игрока - пропускаем", flush=True)
     print("   - Прогноз на 4 игры (целевая + 3 догона)", flush=True)
+    print("   - Проверка: ИГРОК + ДИЛЕР", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
