@@ -330,11 +330,15 @@ def check_results(history, all_messages):
                     game_data = parse_game(msg)
                     if game_data:
                         for card in game_data["player_cards"]:
-                            if card.get("rank") == predicted_rank:
-                                found = True
-                                found_game = game_to_check
-                                found_dogon = i + 1
-                                break
+                            for card in game_data["player_cards"]:
+    if card.get("rank") == predicted_rank:
+        found = True
+        break
+if not found:
+    for card in game_data["dealer_cards"]:
+        if card.get("rank") == predicted_rank:
+            found = True
+            break
                     if found:
                         break
             if found:
