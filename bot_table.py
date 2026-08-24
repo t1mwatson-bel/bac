@@ -80,8 +80,8 @@ def load_stats():
             with open(STATS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            return {"total": 0, "win": 0, "lose": 0, "by_dogon": {1: 0, 2: 0, 3: 0, 4: 0}}
-    return {"total": 0, "win": 0, "lose": 0, "by_dogon": {1: 0, 2: 0, 3: 0, 4: 0}}
+            return {"total": 0, "win": 0, "lose": 0, "by_dogon": {0:0, 1: 0, 2: 0, 3: 0, 4: 0}}
+    return {"total": 0, "win": 0, "lose": 0, "by_dogon": {0:0, 1: 0, 2: 0, 3: 0, 4: 0}}
 
 def save_stats(stats):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
@@ -121,10 +121,10 @@ def send_stats_report():
     msg += f"❌ <b>Не зашло:</b> {stats['lose']} ({100 - win_rate:.1f}%)\n\n"
     msg += f"{'=' * 30}\n"
     msg += f"<b>По догонам:</b>\n"
-    msg += f"🎯 Целевая игра: {stats['by_dogon'].get(1, 0)}\n"
-    msg += f"🔄 Догон 1: {stats['by_dogon'].get(2, 0)}\n"
-    msg += f"🔄 Догон 2: {stats['by_dogon'].get(3, 0)}\n"
-    msg += f"🔄 Догон 3: {stats['by_dogon'].get(4, 0)}\n"
+    msg += f"🎯 Целевая игра: {stats['by_dogon'].get(0, 0)}\n"
+    msg += f"🔄 Догон 1: {stats['by_dogon'].get(1, 0)}\n"
+    msg += f"🔄 Догон 2: {stats['by_dogon'].get(2, 0)}\n"
+    msg += f"🔄 Догон 3: {stats['by_dogon'].get(3, 0)}\n"
     msg += f"{'=' * 30}\n"
     msg += f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}"
     
