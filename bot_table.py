@@ -17,13 +17,14 @@ MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ПРОГНОЗИСТ 2 - ПО РАНГУ (ИГРОК + ДИЛЕР)", flush=True)
+print("🃏 ПРОГНОЗИСТ 2 - ПО РАНГУ (ИСПРАВЛЕННАЯ НУМЕРАЦИЯ)", flush=True)
 print("=" * 60, flush=True)
 
 print("🔮 ОБНОВЛЕНИЕ УСПЕШНО УСТАНОВЛЕНО!")
-print("📦 Версия: 05v1.6")
+print("📦 Версия: 05v2.0")
 print("✅ Статус: Завершено")
-print("📌 Исправлено: проверка всех игр (игрок + дилер)")
+print("📌 Целевая игра = 0, догоны = 1,2,3")
+print("📌 Проверка: ИГРОК + ДИЛЕР")
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -80,8 +81,8 @@ def load_stats():
             with open(STATS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            return {"total": 0, "win": 0, "lose": 0, "by_dogon": {0:0, 1: 0, 2: 0, 3: 0, 4: 0}}
-    return {"total": 0, "win": 0, "lose": 0, "by_dogon": {0:0, 1: 0, 2: 0, 3: 0, 4: 0}}
+            return {"total": 0, "win": 0, "lose": 0, "by_dogon": {0: 0, 1: 0, 2: 0, 3: 0}}
+    return {"total": 0, "win": 0, "lose": 0, "by_dogon": {0: 0, 1: 0, 2: 0, 3: 0}}
 
 def save_stats(stats):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
@@ -231,19 +232,16 @@ def is_valid_game(game_data):
     player_cards = game_data.get("player_cards", [])
     dealer_cards = game_data.get("dealer_cards", [])
     
-    # 1. Если у игрока 1, 2 или 5+ карт → пропускаем
     if len(player_cards) in [1, 2] or len(player_cards) >= 5:
         print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока {len(player_cards)} карт (нужно 3 или 4)", flush=True)
         return False
     
-    # 2. Если у игрока 3 карты → нужна 1-я карта дилера
     if len(player_cards) == 3:
         if len(dealer_cards) == 0:
             print(f"⏭️ Пропускаем #N{game_data['number']}: у игрока 3 карты, но у дилера 0", flush=True)
             return False
         return True
     
-    # 3. Если у игрока 4 карты → проверяем на 10
     if len(player_cards) == 4:
         if has_ten(player_cards):
             print(f"⏭️ Пропускаем #N{game_data['number']}: есть 10 у игрока", flush=True)
@@ -257,7 +255,6 @@ def predict(game_data):
     player_cards = game_data["player_cards"]
     dealer_cards = game_data.get("dealer_cards", [])
     
-    # Формируем список для анализа (4 карты)
     if len(player_cards) == 3:
         if dealer_cards:
             four_cards = player_cards + [dealer_cards[0]]
@@ -270,13 +267,11 @@ def predict(game_data):
         print(f"⚠️ Игра #{game_num}: {len(player_cards)} карт — не подходит", flush=True)
         return None
     
-    # Проверяем повторяющиеся ранги
     ranks = [c["rank"] for c in four_cards]
     if len(ranks) != len(set(ranks)):
         print(f"⏭️ Пропускаем #N{game_num}: повторяющиеся ранги", flush=True)
         return None
     
-    # Находим старшую карту по ТВОЕЙ ТАБЛИЦЕ
     highest_rank = None
     highest_position = None
     highest_value = -1
@@ -306,7 +301,7 @@ def predict(game_data):
     }
 
 def check_results(history, all_messages):
-    """Проверяет результаты прогнозов — ИГРОК + ДИЛЕР"""
+    """Проверяет результаты прогнозов — ИГРОК + ДИЛЕР, мгновенно"""
     for entry in history:
         if entry.get("status") != "pending":
             continue
@@ -325,29 +320,57 @@ def check_results(history, all_messages):
         
         for i in range(4):
             game_to_check = target + i
+            game_msg = None
+            
             for msg in all_messages:
                 if f"#N{game_to_check}" in msg:
-                    game_data = parse_game(msg)
-                    if game_data:
-                        # Проверяем игрока
-                        for card in game_data["player_cards"]:
-                            if card.get("rank") == predicted_rank:
-                                found = True
-                                found_game = game_to_check
-                                found_dogon = i + 1
-                                break
-                        # Если не нашли у игрока - проверяем дилера
-                        if not found:
-                            for card in game_data["dealer_cards"]:
-                                if card.get("rank") == predicted_rank:
-                                    found = True
-                                    found_game = game_to_check
-                                    found_dogon = i + 1
-                                    break
-                    if found:
+                    game_msg = msg
+                    break
+            
+            if not game_msg:
+                break
+            
+            game_data = parse_game(game_msg)
+            
+            if game_data:
+                # Проверяем игрока
+                for card in game_data["player_cards"]:
+                    if card.get("rank") == predicted_rank:
+                        found = True
+                        found_game = game_to_check
+                        found_dogon = i  # 0 = целевая, 1,2,3 = догоны
                         break
+                
+                # Если не нашли у игрока — проверяем дилера
+                if not found:
+                    for card in game_data["dealer_cards"]:
+                        if card.get("rank") == predicted_rank:
+                            found = True
+                            found_game = game_to_check
+                            found_dogon = i
+                            break
+            
             if found:
                 break
+        
+        if found:
+            update_stats(found_dogon, "win")
+            
+            original_text = f"🔮 <b>ПРОГНОЗ (РАНГ)</b>\n"
+            original_text += f"📊 От игры: #N{from_game}\n"
+            original_text += f"🃏 Ранг: {predicted_rank}\n"
+            original_text += f"🎯 Целевая игра: #N{target}\n"
+            original_text += f"📈 3 игры догон\n"
+            original_text += f"⏰ {entry.get('time', '')[:16]}"
+            
+            if found_dogon == 0:
+                result_text = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{found_game}"
+            else:
+                result_text = f"\n\n✅ <b>ЗАШЛО</b> на догоне {found_dogon}: #N{found_game}"
+            
+            edit_message(message_id, original_text + result_text)
+            entry["status"] = "win"
+            continue
         
         all_games_present = True
         for i in range(4):
@@ -361,31 +384,19 @@ def check_results(history, all_messages):
                 all_games_present = False
                 break
         
-        if not all_games_present:
-            continue
-        
-        if found:
-            update_stats(found_dogon, "win")
-        else:
+        if all_games_present:
             update_stats(0, "lose")
-        
-        original_text = f"🔮 <b>ПРОГНОЗ (РАНГ)</b>\n"
-        original_text += f"📊 От игры: #N{from_game}\n"
-        original_text += f"🃏 Ранг: {predicted_rank}\n"
-        original_text += f"🎯 Целевая игра: #N{target}\n"
-        original_text += f"📈 3 игры догон\n"
-        original_text += f"⏰ {entry.get('time', '')[:16]}"
-        
-        if found:
-            if found_dogon == 1:
-                result_text = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{found_game}"
-            else:
-                result_text = f"\n\n✅ <b>ЗАШЛО</b> на догоне {found_dogon-1}: #N{found_game}"
-        else:
+            
+            original_text = f"🔮 <b>ПРОГНОЗ (РАНГ)</b>\n"
+            original_text += f"📊 От игры: #N{from_game}\n"
+            original_text += f"🃏 Ранг: {predicted_rank}\n"
+            original_text += f"🎯 Целевая игра: #N{target}\n"
+            original_text += f"📈 3 игры догон\n"
+            original_text += f"⏰ {entry.get('time', '')[:16]}"
             result_text = f"\n\n❌ <b>НЕ ЗАШЛО</b> (3 догона проверены до #N{target+3})"
-        
-        edit_message(message_id, original_text + result_text)
-        entry["status"] = "win" if found else "loss"
+            
+            edit_message(message_id, original_text + result_text)
+            entry["status"] = "lose"
 
 def save_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -456,6 +467,7 @@ def main():
     print("   - Если есть 10 у игрока - пропускаем", flush=True)
     print("   - Прогноз на 4 игры (целевая + 3 догона)", flush=True)
     print("   - Проверка: ИГРОК + ДИЛЕР", flush=True)
+    print("   - Целевая = 0, догоны = 1,2,3", flush=True)
     print("=" * 60, flush=True)
     
     offset = get_offset()
