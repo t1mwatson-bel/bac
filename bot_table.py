@@ -11,7 +11,7 @@ import pytz
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🕐 АНАЛИЗАТОР ВРЕМЕНИ И КАРТ (ЧИСТЫЙ)", flush=True)
+print("🕐 АНАЛИЗАТОР ВРЕМЕНИ И КАРТ (С СОХРАНЕНИЕМ)", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -21,14 +21,12 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 
-# ❌ УБИРАЕМ ЛИШНИЕ ПЕРЕМЕННЫЕ КАНАЛОВ
+# Каналы не нужны, но для совместимости оставим (не используются)
 # CHANNEL_STATS = os.getenv('CHANNEL_STATS_ID')
 # CHANNEL_PROGNOZ = os.getenv('CHANNEL_PROGNOZ_ID')
 
 print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
 print(f"BOT_TOKEN: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
-# print(f"CHANNEL_STATS_ID: {CHANNEL_STATS if CHANNEL_STATS else 'НЕ ЗАДАН'}", flush=True)
-# print(f"CHANNEL_PROGNOZ_ID: {CHANNEL_PROGNOZ if CHANNEL_PROGNOZ else 'НЕ ЗАДАН'}", flush=True)
 print("=" * 60, flush=True)
 
 if not BOT_TOKEN:
@@ -41,6 +39,8 @@ print("✅ BOT_TOKEN задан!", flush=True)
 # НАСТРОЙКИ
 # =====================================================================
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
+DATA_FILE = "timing_data.json"
+MAX_RECORDS = 10000  # Ограничим количество записей, чтобы файл не раздувался
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -55,10 +55,57 @@ RANKS = {1: "A", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9",
 processed_games = set()
 
 # =====================================================================
-# ФУНКЦИИ
+# ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛОМ
+# =====================================================================
+def load_timing_data():
+    """Загружает существующие данные из файла"""
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_timing_data(game_id, timestamp_msk, timestamp_utc, latency, cards, player_score, dealer_score, state):
+    """Сохраняет данные в файл"""
+    data = load_timing_data()
+    
+    # Форматируем карты для хранения
+    cards_list = []
+    for card in cards:
+        cs = card.get("CS", 0)
+        cv = card.get("CV", 0)
+        suit = SUITS_NAMES.get(cs, "?")
+        rank = RANKS.get(cv, "?")
+        cards_list.append(f"{rank}{suit}")
+    
+    record = {
+        "game_id": game_id,
+        "timestamp_msk": timestamp_msk,
+        "timestamp_utc": timestamp_utc,
+        "latency_ms": round(latency, 2),
+        "cards": cards_list,
+        "player_score": player_score,
+        "dealer_score": dealer_score,
+        "state": state
+    }
+    
+    data.append(record)
+    
+    # Ограничиваем количество записей
+    if len(data) > MAX_RECORDS:
+        data = data[-MAX_RECORDS:]
+    
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    
+    print(f"💾 Данные сохранены в {DATA_FILE} (всего записей: {len(data)})", flush=True)
+
+# =====================================================================
+# ФУНКЦИИ ДЛЯ РАБОТЫ С API
 # =====================================================================
 def get_active_games():
-    """Получает список активных игр 21 Classics через API"""
     try:
         url = "https://1xlite-36553.pro/service-api/main-live-feed/v3/games1x2?cfView=3&count=40&fcountry=1&gr=415&grMode=4&lng=ru&ref=7&selectedMs=1.146.2092323,2.146.2092323,10.146.2092323"
         print(f"🔍 Запрос к API V3...", flush=True)
@@ -97,7 +144,6 @@ def get_active_games():
         return []
 
 def get_game_data(game_id):
-    """Получает данные конкретной игры и засекает время"""
     url = f"https://1xlite-36553.pro/service-api/LiveFeed/GetGameZip?id={game_id}&isSubGames=true&GroupEvents=true&countevents=250&grMode=4&partner=7&topGroups=&country=190&marketType=1&isNewBuilder=true"
     try:
         start_time = time.time()
@@ -114,11 +160,12 @@ def get_game_data(game_id):
         print(f"❌ Ошибка игры {game_id}: {e}", flush=True)
         return None, None, None, None
 
-def parse_cards(data):
-    """Извлекает карты игрока и дилера из JSON"""
+def parse_cards_and_score(data):
     sc = data.get("Value", {}).get("SC", {})
     player_cards = []
     dealer_cards = []
+    state = None
+    
     for item in sc.get("S", []):
         if item.get("Key") == "P1":
             try:
@@ -130,18 +177,53 @@ def parse_cards(data):
                 dealer_cards = json.loads(item.get("Value", "[]"))
             except:
                 dealer_cards = []
-    return player_cards, dealer_cards
+        if item.get("Key") == "STATE":
+            state = item.get("Value")
+    
+    # Считаем очки (для сохранения)
+    player_score = 0
+    dealer_score = 0
+    for card in player_cards:
+        cv = card.get("CV", 0)
+        if cv == 14:      # Туз = 11
+            player_score += 11
+        elif cv == 13:    # Король = 4
+            player_score += 4
+        elif cv == 12:    # Дама = 3
+            player_score += 3
+        elif cv == 11:    # Валет = 2
+            player_score += 2
+        elif 6 <= cv <= 10:
+            player_score += cv
+    
+    for card in dealer_cards:
+        cv = card.get("CV", 0)
+        if cv == 14:
+            dealer_score += 11
+        elif cv == 13:
+            dealer_score += 4
+        elif cv == 12:
+            dealer_score += 3
+        elif cv == 11:
+            dealer_score += 2
+        elif 6 <= cv <= 10:
+            dealer_score += cv
+    
+    return player_cards, dealer_cards, state, player_score, dealer_score
 
-def analyze_timing(game_id, player_cards, latency, start_time, end_time):
-    """Анализирует время и карты"""
+def analyze_timing(game_id, player_cards, latency, start_time, end_time, player_score, dealer_score, state):
     if not player_cards:
         return
     timestamp = datetime.fromtimestamp(start_time, MOSCOW_TZ)
     utc_timestamp = datetime.fromtimestamp(start_time, pytz.UTC)
+    
+    timestamp_msk_str = timestamp.strftime('%H:%M:%S.%f')[:-3]
+    timestamp_utc_str = utc_timestamp.strftime('%H:%M:%S.%f')[:-3]
+    
     print("=" * 60)
     print(f"🎮 Игра: {game_id}")
-    print(f"🕐 МСК: {timestamp.strftime('%H:%M:%S.%f')[:-3]}")
-    print(f"🕐 UTC: {utc_timestamp.strftime('%H:%M:%S.%f')[:-3]}")
+    print(f"🕐 МСК: {timestamp_msk_str}")
+    print(f"🕐 UTC: {timestamp_utc_str}")
     print(f"⏱️ Задержка API: {latency:.2f} мс")
     print(f"🃏 Карт игрока: {len(player_cards)}")
     for card in player_cards:
@@ -150,14 +232,33 @@ def analyze_timing(game_id, player_cards, latency, start_time, end_time):
         suit = SUITS_NAMES.get(cs, "?")
         rank = RANKS.get(cv, "?")
         print(f"   {rank}{suit}")
+    print(f"📊 Очки игрока: {player_score}, дилера: {dealer_score}, state: {state}")
     print("=" * 60)
+    
+    # Сохраняем в файл
+    save_timing_data(
+        game_id=game_id,
+        timestamp_msk=timestamp_msk_str,
+        timestamp_utc=timestamp_utc_str,
+        latency=latency,
+        cards=player_cards,
+        player_score=player_score,
+        dealer_score=dealer_score,
+        state=state
+    )
 
 # =====================================================================
 # ОСНОВНОЙ ЦИКЛ
 # =====================================================================
 def main():
-    print("🔄 АНАЛИЗАТОР ЗАПУЩЕН (ТОЛЬКО СБОР ДАННЫХ)", flush=True)
+    print("🔄 АНАЛИЗАТОР ЗАПУЩЕН (СБОР ДАННЫХ + СОХРАНЕНИЕ)", flush=True)
+    print(f"📁 Данные сохраняются в {DATA_FILE}", flush=True)
     print("📌 Для выхода нажми Ctrl+C", flush=True)
+    print("=" * 60, flush=True)
+    
+    # Показываем, сколько уже собрано данных
+    existing_data = load_timing_data()
+    print(f"📊 Уже собрано записей: {len(existing_data)}", flush=True)
     print("=" * 60, flush=True)
     
     while True:
@@ -179,10 +280,10 @@ def main():
                 if not data:
                     continue
                 
-                player_cards, dealer_cards = parse_cards(data)
+                player_cards, dealer_cards, state, player_score, dealer_score = parse_cards_and_score(data)
                 
                 if player_cards:
-                    analyze_timing(game_id, player_cards, latency, start_time, end_time)
+                    analyze_timing(game_id, player_cards, latency, start_time, end_time, player_score, dealer_score, state)
                     processed_games.add(game_id)
                 else:
                     print(f"⏳ Игра {game_id}: карт игрока ещё нет", flush=True)
@@ -197,6 +298,8 @@ def main():
             
         except KeyboardInterrupt:
             print("🛑 Анализатор остановлен", flush=True)
+            data_count = len(load_timing_data())
+            print(f"📊 Всего собрано записей: {data_count}", flush=True)
             break
         except Exception as e:
             print(f"❌ Ошибка: {e}", flush=True)
