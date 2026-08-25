@@ -115,4 +115,189 @@ def save_timing_data(game_id, timestamp_msk, timestamp_utc, latency, cards, play
 # =====================================================================
 def get_active_games():
     try:
-        url = "https://1xlite-36553.pro/service-api/main-live-feed/v3/games1x2?cf
+        url = "https://1xlite-36553.pro/service-api/main-live-feed/v3/games1x2?cfView=3&count=40&fcountry=1&gr=415&grMode=4&lng=ru&ref=7&selectedMs=1.146.2092323,2.146.2092323,10.146.2092323"
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and "Value" in data:
+                games = data.get("Value", [])
+            elif isinstance(data, list):
+                games = data
+            else:
+                return []
+            
+            active_games = []
+            for game in games:
+                if game.get("liga", {}).get("id") == 2092323:
+                    game_id = game.get("id")
+                    if game_id:
+                        active_games.append(game)
+            return active_games
+        else:
+            print(f"⚠️ Статус API: {response.status_code}", flush=True)
+            return []
+    except requests.exceptions.ConnectionError:
+        print(f"❌ Ошибка подключения к API! Проверь зеркало.", flush=True)
+        return []
+    except Exception as e:
+        print(f"❌ Ошибка: {e}", flush=True)
+        return []
+
+def get_game_data(game_id):
+    url = f"https://1xlite-36553.pro/service-api/LiveFeed/GetGameZip?id={game_id}&isSubGames=true&GroupEvents=true&countevents=250&grMode=4&partner=7&topGroups=&country=190&marketType=1&isNewBuilder=true"
+    try:
+        start_time = time.time()
+        response = requests.get(url, headers=HEADERS, timeout=5)
+        end_time = time.time()
+        latency = (end_time - start_time) * 1000
+        
+        if response.status_code == 200:
+            return response.json(), latency, start_time, end_time
+        else:
+            print(f"⚠️ Статус игры {game_id}: {response.status_code}", flush=True)
+            return None, None, None, None
+    except Exception as e:
+        print(f"❌ Ошибка игры {game_id}: {e}", flush=True)
+        return None, None, None, None
+
+def parse_cards_and_score(data):
+    sc = data.get("Value", {}).get("SC", {})
+    player_cards = []
+    dealer_cards = []
+    state = None
+    
+    for item in sc.get("S", []):
+        if item.get("Key") == "P1":
+            try:
+                player_cards = json.loads(item.get("Value", "[]"))
+            except:
+                player_cards = []
+        if item.get("Key") == "P2":
+            try:
+                dealer_cards = json.loads(item.get("Value", "[]"))
+            except:
+                dealer_cards = []
+        if item.get("Key") == "STATE":
+            state = item.get("Value")
+    
+    player_score = 0
+    dealer_score = 0
+    for card in player_cards:
+        cv = card.get("CV", 0)
+        if cv == 14:
+            player_score += 11
+        elif cv == 13:
+            player_score += 4
+        elif cv == 12:
+            player_score += 3
+        elif cv == 11:
+            player_score += 2
+        elif 6 <= cv <= 10:
+            player_score += cv
+    
+    for card in dealer_cards:
+        cv = card.get("CV", 0)
+        if cv == 14:
+            dealer_score += 11
+        elif cv == 13:
+            dealer_score += 4
+        elif cv == 12:
+            dealer_score += 3
+        elif cv == 11:
+            dealer_score += 2
+        elif 6 <= cv <= 10:
+            dealer_score += cv
+    
+    return player_cards, dealer_cards, state, player_score, dealer_score
+
+def analyze_timing(game_id, player_cards, latency, start_time, end_time, player_score, dealer_score, state):
+    if not player_cards:
+        return
+    
+    timestamp = datetime.fromtimestamp(start_time, MOSCOW_TZ)
+    utc_timestamp = datetime.fromtimestamp(start_time, pytz.UTC)
+    
+    timestamp_msk_str = timestamp.strftime('%H:%M:%S.%f')[:-3]
+    timestamp_utc_str = utc_timestamp.strftime('%H:%M:%S.%f')[:-3]
+    
+    print(f"🃏 Игра {game_id}: {len(player_cards)} карт, state={state}, задержка={latency:.2f}мс", flush=True)
+    
+    # Сохраняем всегда, даже если игра ещё не завершена (обновляем запись)
+    save_timing_data(
+        game_id=game_id,
+        timestamp_msk=timestamp_msk_str,
+        timestamp_utc=timestamp_utc_str,
+        latency=latency,
+        cards=player_cards,
+        player_score=player_score,
+        dealer_score=dealer_score,
+        state=state
+    )
+
+# =====================================================================
+# ОСНОВНОЙ ЦИКЛ
+# =====================================================================
+def main():
+    print("🔄 АНАЛИЗАТОР ЗАПУЩЕН (ОПРОС КАЖДЫЕ 10 СЕК)", flush=True)
+    print(f"📁 Данные сохраняются в {DATA_FILE}", flush=True)
+    print(f"⏱️ Интервал опроса: {CHECK_INTERVAL} сек", flush=True)
+    print("📌 Для выхода нажми Ctrl+C", flush=True)
+    print("=" * 60, flush=True)
+    
+    existing_data = load_timing_data()
+    print(f"📊 Уже собрано записей: {len(existing_data)}", flush=True)
+    print("=" * 60, flush=True)
+    
+    while True:
+        try:
+            active_games = get_active_games()
+            
+            if not active_games:
+                print("💤 Нет активных игр", flush=True)
+                time.sleep(CHECK_INTERVAL)
+                continue
+            
+            for game in active_games:
+                game_id = str(game.get("id"))
+                
+                # Если игра уже завершена и сохранена — пропускаем
+                if game_id in finished_games:
+                    continue
+                
+                data, latency, start_time, end_time = get_game_data(game_id)
+                if not data:
+                    continue
+                
+                player_cards, dealer_cards, state, player_score, dealer_score = parse_cards_and_score(data)
+                
+                if player_cards:
+                    analyze_timing(game_id, player_cards, latency, start_time, end_time, player_score, dealer_score, state)
+                    
+                    # Если игра завершена — добавляем в finished_games
+                    if state in ["4", "5"]:
+                        finished_games.add(game_id)
+                        print(f"🏁 Игра {game_id} завершена (state={state}), сохранена финальная запись", flush=True)
+                else:
+                    print(f"⏳ Игра {game_id}: карт игрока ещё нет", flush=True)
+                
+                time.sleep(0.5)  # Небольшая задержка между играми
+            
+            # Очистка кэша
+            if len(finished_games) > 500:
+                finished_games.clear()
+                print("🗑️ Кэш завершённых игр очищен", flush=True)
+            
+            time.sleep(CHECK_INTERVAL)
+            
+        except KeyboardInterrupt:
+            print("🛑 Анализатор остановлен", flush=True)
+            data_count = len(load_timing_data())
+            print(f"📊 Всего собрано записей: {data_count}", flush=True)
+            break
+        except Exception as e:
+            print(f"❌ Ошибка: {e}", flush=True)
+            time.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    main()
