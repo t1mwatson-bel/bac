@@ -21,20 +21,21 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 
-CHANNEL_STATS = os.getenv('CHANNEL_STATS_ID')
-CHANNEL_PROGNOZ = os.getenv('CHANNEL_PROGNOZ_ID')
+# ❌ УБИРАЕМ ЛИШНИЕ ПЕРЕМЕННЫЕ КАНАЛОВ
+# CHANNEL_STATS = os.getenv('CHANNEL_STATS_ID')
+# CHANNEL_PROGNOZ = os.getenv('CHANNEL_PROGNOZ_ID')
 
 print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
 print(f"BOT_TOKEN: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
-print(f"CHANNEL_STATS_ID: {CHANNEL_STATS if CHANNEL_STATS else 'НЕ ЗАДАН'}", flush=True)
-print(f"CHANNEL_PROGNOZ_ID: {CHANNEL_PROGNOZ if CHANNEL_PROGNOZ else 'НЕ ЗАДАН'}", flush=True)
+# print(f"CHANNEL_STATS_ID: {CHANNEL_STATS if CHANNEL_STATS else 'НЕ ЗАДАН'}", flush=True)
+# print(f"CHANNEL_PROGNOZ_ID: {CHANNEL_PROGNOZ if CHANNEL_PROGNOZ else 'НЕ ЗАДАН'}", flush=True)
 print("=" * 60, flush=True)
 
-if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
-    print("❌ ОШИБКА: переменные окружения не заданы!", flush=True)
+if not BOT_TOKEN:
+    print("❌ ОШИБКА: BOT_TOKEN не задан!", flush=True)
     exit(1)
 
-print("✅ Все переменные заданы!", flush=True)
+print("✅ BOT_TOKEN задан!", flush=True)
 
 # =====================================================================
 # НАСТРОЙКИ
@@ -57,46 +58,64 @@ processed_games = set()
 # ФУНКЦИИ
 # =====================================================================
 def get_active_games():
+    """Получает список активных игр 21 Classics через API"""
     try:
         url = "https://1xlite-36553.pro/service-api/main-live-feed/v3/games1x2?cfView=3&count=40&fcountry=1&gr=415&grMode=4&lng=ru&ref=7&selectedMs=1.146.2092323,2.146.2092323,10.146.2092323"
+        print(f"🔍 Запрос к API V3...", flush=True)
         response = requests.get(url, headers=HEADERS, timeout=10)
+        
         if response.status_code == 200:
             data = response.json()
+            print(f"✅ API ответил успешно", flush=True)
+            
             if isinstance(data, dict) and "Value" in data:
                 games = data.get("Value", [])
             elif isinstance(data, list):
                 games = data
             else:
+                print(f"⚠️ Неизвестный формат ответа", flush=True)
                 return []
+            
+            print(f"📊 Найдено игр в ответе: {len(games)}", flush=True)
+            
             active_games = []
             for game in games:
                 if game.get("liga", {}).get("id") == 2092323:
                     game_id = game.get("id")
                     if game_id and str(game_id) not in processed_games:
                         active_games.append(game)
+            
             return active_games
         else:
             print(f"⚠️ Статус API: {response.status_code}", flush=True)
+            return []
+    except requests.exceptions.ConnectionError:
+        print(f"❌ Ошибка подключения к API! Проверь зеркало.", flush=True)
+        return []
     except Exception as e:
         print(f"❌ Ошибка: {e}", flush=True)
-    return []
+        return []
 
 def get_game_data(game_id):
+    """Получает данные конкретной игры и засекает время"""
     url = f"https://1xlite-36553.pro/service-api/LiveFeed/GetGameZip?id={game_id}&isSubGames=true&GroupEvents=true&countevents=250&grMode=4&partner=7&topGroups=&country=190&marketType=1&isNewBuilder=true"
     try:
         start_time = time.time()
         response = requests.get(url, headers=HEADERS, timeout=5)
         end_time = time.time()
         latency = (end_time - start_time) * 1000
+        
         if response.status_code == 200:
             return response.json(), latency, start_time, end_time
         else:
+            print(f"⚠️ Статус игры {game_id}: {response.status_code}", flush=True)
             return None, None, None, None
     except Exception as e:
         print(f"❌ Ошибка игры {game_id}: {e}", flush=True)
         return None, None, None, None
 
 def parse_cards(data):
+    """Извлекает карты игрока и дилера из JSON"""
     sc = data.get("Value", {}).get("SC", {})
     player_cards = []
     dealer_cards = []
@@ -114,11 +133,11 @@ def parse_cards(data):
     return player_cards, dealer_cards
 
 def analyze_timing(game_id, player_cards, latency, start_time, end_time):
+    """Анализирует время и карты"""
     if not player_cards:
         return
     timestamp = datetime.fromtimestamp(start_time, MOSCOW_TZ)
     utc_timestamp = datetime.fromtimestamp(start_time, pytz.UTC)
-    ms = int((start_time % 1) * 1000)
     print("=" * 60)
     print(f"🎮 Игра: {game_id}")
     print(f"🕐 МСК: {timestamp.strftime('%H:%M:%S.%f')[:-3]}")
@@ -138,28 +157,47 @@ def analyze_timing(game_id, player_cards, latency, start_time, end_time):
 # =====================================================================
 def main():
     print("🔄 АНАЛИЗАТОР ЗАПУЩЕН (ТОЛЬКО СБОР ДАННЫХ)", flush=True)
+    print("📌 Для выхода нажми Ctrl+C", flush=True)
     print("=" * 60, flush=True)
+    
     while True:
         try:
             active_games = get_active_games()
+            
             if not active_games:
+                print("💤 Нет активных игр, ждём 2 секунды...", flush=True)
                 time.sleep(2)
                 continue
+            
             for game in active_games:
                 game_id = str(game.get("id"))
+                
                 if game_id in processed_games:
                     continue
+                
                 data, latency, start_time, end_time = get_game_data(game_id)
                 if not data:
                     continue
+                
                 player_cards, dealer_cards = parse_cards(data)
+                
                 if player_cards:
                     analyze_timing(game_id, player_cards, latency, start_time, end_time)
                     processed_games.add(game_id)
+                else:
+                    print(f"⏳ Игра {game_id}: карт игрока ещё нет", flush=True)
+                
                 time.sleep(0.3)
+            
             if len(processed_games) > 200:
                 processed_games.clear()
-            time.sleep(1)
+                print("🗑️ Кэш очищен", flush=True)
+            
+            time.sleep(2)
+            
+        except KeyboardInterrupt:
+            print("🛑 Анализатор остановлен", flush=True)
+            break
         except Exception as e:
             print(f"❌ Ошибка: {e}", flush=True)
             time.sleep(5)
