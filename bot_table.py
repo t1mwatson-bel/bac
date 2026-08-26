@@ -11,7 +11,7 @@ import pytz
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🕐 АНАЛИЗАТОР ВРЕМЕНИ И КАРТ (ЧАСТЫЙ ОПРОС)", flush=True)
+print("🕐 АНАЛИЗАТОР ВРЕМЕНИ + РАНГИ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -21,6 +21,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 
+# Каналы не нужны, оставляем только для совместимости
 print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
 print(f"BOT_TOKEN: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
 print("=" * 60, flush=True)
@@ -49,8 +50,8 @@ HEADERS = {
 SUITS_NAMES = {0: "♠️", 1: "♣️", 2: "♦️", 3: "♥️"}
 RANKS = {1: "A", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "J", 12: "Q", 13: "K"}
 
-finished_games = set()  # Завершённые игры (уже сохранены)
-active_games_cache = {}  # {game_id: {"state": state, "cards_count": count, "last_update": time}}
+finished_games = set()
+active_games_cache = {}
 
 # =====================================================================
 # ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛОМ
@@ -64,11 +65,11 @@ def load_timing_data():
             return []
     return []
 
-def save_timing_data(game_id, timestamp_msk, timestamp_utc, latency, cards, player_score, dealer_score, state):
+def save_timing_data(game_id, timestamp_msk, timestamp_utc, latency, cards, suits, ranks, player_score, dealer_score, state):
     data = load_timing_data()
     
     cards_list = []
-    for card in cards:
+    for i, card in enumerate(cards):
         cs = card.get("CS", 0)
         cv = card.get("CV", 0)
         suit = SUITS_NAMES.get(cs, "?")
@@ -81,6 +82,8 @@ def save_timing_data(game_id, timestamp_msk, timestamp_utc, latency, cards, play
         "timestamp_utc": timestamp_utc,
         "latency_ms": round(latency, 2),
         "cards": cards_list,
+        "suits": suits,
+        "ranks": ranks,
         "player_score": player_score,
         "dealer_score": dealer_score,
         "state": state
@@ -94,7 +97,6 @@ def save_timing_data(game_id, timestamp_msk, timestamp_utc, latency, cards, play
             break
     
     if existing_index is not None:
-        # Обновляем существующую запись (если карт больше)
         if len(cards_list) > len(data[existing_index].get("cards", [])):
             data[existing_index] = record
             print(f"🔄 Обновлена запись для игры {game_id} ({len(cards_list)} карт)", flush=True)
@@ -221,15 +223,26 @@ def analyze_timing(game_id, player_cards, latency, start_time, end_time, player_
     timestamp_msk_str = timestamp.strftime('%H:%M:%S.%f')[:-3]
     timestamp_utc_str = utc_timestamp.strftime('%H:%M:%S.%f')[:-3]
     
+    suits = []
+    ranks = []
+    for card in player_cards:
+        cs = card.get("CS", 0)
+        cv = card.get("CV", 0)
+        suit = SUITS_NAMES.get(cs, "?")
+        rank = RANKS.get(cv, "?")
+        suits.append(suit)
+        ranks.append(rank)
+    
     print(f"🃏 Игра {game_id}: {len(player_cards)} карт, state={state}, задержка={latency:.2f}мс", flush=True)
     
-    # Сохраняем всегда, даже если игра ещё не завершена (обновляем запись)
     save_timing_data(
         game_id=game_id,
         timestamp_msk=timestamp_msk_str,
         timestamp_utc=timestamp_utc_str,
         latency=latency,
         cards=player_cards,
+        suits=suits,
+        ranks=ranks,
         player_score=player_score,
         dealer_score=dealer_score,
         state=state
@@ -239,7 +252,7 @@ def analyze_timing(game_id, player_cards, latency, start_time, end_time, player_
 # ОСНОВНОЙ ЦИКЛ
 # =====================================================================
 def main():
-    print("🔄 АНАЛИЗАТОР ЗАПУЩЕН (ОПРОС КАЖДЫЕ 10 СЕК)", flush=True)
+    print("🔄 АНАЛИЗАТОР ЗАПУЩЕН (СБОР РАНГОВ)", flush=True)
     print(f"📁 Данные сохраняются в {DATA_FILE}", flush=True)
     print(f"⏱️ Интервал опроса: {CHECK_INTERVAL} сек", flush=True)
     print("📌 Для выхода нажми Ctrl+C", flush=True)
@@ -261,7 +274,6 @@ def main():
             for game in active_games:
                 game_id = str(game.get("id"))
                 
-                # Если игра уже завершена и сохранена — пропускаем
                 if game_id in finished_games:
                     continue
                 
@@ -274,16 +286,14 @@ def main():
                 if player_cards:
                     analyze_timing(game_id, player_cards, latency, start_time, end_time, player_score, dealer_score, state)
                     
-                    # Если игра завершена — добавляем в finished_games
                     if state in ["4", "5"]:
                         finished_games.add(game_id)
                         print(f"🏁 Игра {game_id} завершена (state={state}), сохранена финальная запись", flush=True)
                 else:
                     print(f"⏳ Игра {game_id}: карт игрока ещё нет", flush=True)
                 
-                time.sleep(0.5)  # Небольшая задержка между играми
+                time.sleep(0.5)
             
-            # Очистка кэша
             if len(finished_games) > 500:
                 finished_games.clear()
                 print("🗑️ Кэш завершённых игр очищен", flush=True)
