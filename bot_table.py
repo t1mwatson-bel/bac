@@ -21,7 +21,6 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv('BOT_TOKEN_PROGNOZ')
 
-# Каналы не нужны, оставляем только для совместимости
 print("🔍 ДИАГНОСТИКА ПЕРЕМЕННЫХ:", flush=True)
 print(f"BOT_TOKEN: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕ ЗАДАН'}", flush=True)
 print("=" * 60, flush=True)
@@ -36,9 +35,9 @@ print("✅ BOT_TOKEN задан!", flush=True)
 # НАСТРОЙКИ
 # =====================================================================
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
-DATA_FILE = "timing_data_full.json"  # новый файл
+DATA_FILE = "timing_data_full.json"
 MAX_RECORDS = 10000
-CHECK_INTERVAL = 10  # Проверяем каждые 10 секунд
+CHECK_INTERVAL = 10
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -67,7 +66,6 @@ def load_full_data():
 def save_full_data(record):
     data = load_full_data()
     
-    # Проверяем, есть ли уже запись для этой игры
     existing_index = None
     for i, r in enumerate(data):
         if r.get("game_id") == record["game_id"]:
@@ -75,7 +73,6 @@ def save_full_data(record):
             break
     
     if existing_index is not None:
-        # Если запись уже есть, обновляем (чтобы сохранить финальное состояние)
         data[existing_index] = record
         print(f"🔄 Обновлена запись для игры {record['game_id']}", flush=True)
     else:
@@ -165,8 +162,6 @@ def analyze_full(game_id, player_cards, dealer_cards, latency, start_time, end_t
     timestamp = datetime.fromtimestamp(start_time, MOSCOW_TZ)
     timestamp_msk_str = timestamp.strftime('%H:%M:%S.%f')[:-3]
     
-    # Формируем последовательность карт в порядке раздачи
-    # В блэкджеке порядок: P1, D1, P2, D2, P3, D3, ...
     sequence = []
     max_len = max(len(player_cards), len(dealer_cards))
     for i in range(max_len):
@@ -181,7 +176,6 @@ def analyze_full(game_id, player_cards, dealer_cards, latency, start_time, end_t
             suit = SUITS_NAMES.get(dc.get("CS", 0), "?")
             sequence.append({"position": i*2+2, "who": "D", "rank": rank, "suit": suit})
     
-    # Вычисляем очки
     def calc_score(cards):
         score = 0
         for card in cards:
@@ -210,11 +204,13 @@ def analyze_full(game_id, player_cards, dealer_cards, latency, start_time, end_t
         "dealer_score": dealer_score,
         "player_cards": [{"rank": RANKS.get(c.get("CV", 0), "?"), "suit": SUITS_NAMES.get(c.get("CS", 0), "?")} for c in player_cards],
         "dealer_cards": [{"rank": RANKS.get(c.get("CV", 0), "?"), "suit": SUITS_NAMES.get(c.get("CS", 0), "?")} for c in dealer_cards],
-        "sequence": sequence  # полная последовательность в порядке раздачи
+        "sequence": sequence
     }
     
+    # Исправленная строка с выводом последовательности
+    seq_str = ', '.join([f"{c['who']}{c['position']}:{c['rank']}{c['suit']}" for c in sequence])
     print(f"🃏 Игра {game_id}: {len(player_cards)} карт игрока, {len(dealer_cards)} карт дилера, задержка={latency:.2f}мс", flush=True)
-    print(f"   Последовательность: {', '.join([f'{c["who"]}{c["position"]}:{c["rank"]}{c["suit"]}' for c in sequence])}", flush=True)
+    print(f"   Последовательность: {seq_str}", flush=True)
     
     save_full_data(record)
 
