@@ -10,8 +10,7 @@ import requests
 import pytz
 
 # ================================================================
-# HYBRID BOT: сначала ТВОЯ МЕТОДИКА -> потом ML, если ML реально лучше
-# 21 Classic / прогноз МАСТИ игроку
+# HYBRID BOT: ТВОИ ПРАВИЛА + ML (ПРОВЕРКА ИЗ ТВОЕГО РАБОЧЕГО КОДА)
 # ================================================================
 
 print("=" * 70, flush=True)
@@ -23,7 +22,6 @@ print("=" * 70, flush=True)
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("BOT_TOKEN_PROGNOZ")
 CHANNEL_STATS = os.getenv("CHANNEL_STATS")
 CHANNEL_PROGNOZ = os.getenv("CHANNEL_PROGNOZ")
-
 LIVE_COOKIE = os.getenv("LIVE_COOKIE", "")
 
 if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
@@ -111,7 +109,7 @@ def save_json(path, data):
 state = load_json(STATE_FILE, default_state())
 MODELS = None
 
-# Глобальный список сообщений из канала (как в твоём рабочем коде)
+# Глобальный список сообщений (КАК В ТВОЁМ РАБОЧЕМ КОДЕ)
 all_messages = []
 
 # -------------------- TELEGRAM --------------------
@@ -175,7 +173,7 @@ def startup_message():
     )
     send_message(text)
 
-# -------------------- PARSING --------------------
+# -------------------- PARSING (ИЗ ТВОЕГО РАБОЧЕГО КОДА) --------------------
 def parse_game_from_text(text):
     try:
         m = re.search(r"#N(\d+)", text)
@@ -252,7 +250,7 @@ def parse_game_from_text(text):
 def is_finished_game(text):
     return "✅" in text or "🔰" in text
 
-# -------------------- LIVE API --------------------
+# -------------------- LIVE API (ДЛЯ ЗАДЕРЖКИ) --------------------
 def get_active_games():
     url = (
         f"{BASE_URL}/service-api/main-live-feed/v3/games1x2"
@@ -300,7 +298,7 @@ def get_fresh_latency():
             return latency
     return None
 
-# -------------------- YOUR RULES: НЕ МЕНЯЕМ --------------------
+# -------------------- ТВОИ ПРАВИЛА (НЕ МЕНЯТЬ) --------------------
 def predict_suit_by_latency(latency):
     if 93 <= latency < 95:
         return "♣️"
@@ -374,7 +372,7 @@ def rule_prediction(source_game, latency):
 
     return refine_by_sequence(p1, p2, p3, base, latency)
 
-# -------------------- FEATURES / ML --------------------
+# -------------------- ML --------------------
 def card_features(card):
     if not card:
         return [0, 0]
@@ -501,7 +499,7 @@ def ml_prediction(source_game, latency):
     )
     return SUITS[idx]
 
-# -------------------- GAME STORAGE --------------------
+# -------------------- ХРАНИЛИЩЕ ИГР --------------------
 games_by_number = {}
 
 def add_game(text):
@@ -521,7 +519,7 @@ def cleanup_games():
         for k in keys[:-MAX_MESSAGES]:
             games_by_number.pop(k, None)
 
-# -------------------- UPDATE MODE --------------------
+# -------------------- СРАВНЕНИЕ ML И ПРАВИЛ --------------------
 def update_mode():
     preds = state.get("predictions", [])
     if len(preds) < RECENT_COMPARE:
@@ -564,120 +562,130 @@ def update_mode():
 
     save_json(STATE_FILE, state)
 
-# -------------------- EVALUATE PREDICTION (НОВАЯ ВЕРСИЯ) --------------------
-def evaluate_prediction(entry):
-    """Проверяет попадание масти в целевой игре и догонах (как в твоём рабочем коде)."""
+# =====================================================================
+# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЧНО КАК В ТВОЁМ РАБОЧЕМ КОДЕ)
+# =====================================================================
+def check_results():
+    """Проверяет все ожидающие прогнозы — ТОЧНО КАК В ТВОЁМ СТАРОМ БОТЕ."""
     global all_messages, state
-    
-    if entry.get("evaluated"):
-        return
 
-    target = entry.get("target")
-    predicted = entry.get("selected_prediction")
-    rule_pred = entry.get("rule_prediction")
-    ml_pred = entry.get("ml_prediction")
-    message_id = entry.get("message_id")
-    original_text = entry.get("message_text", "")
-
-    if not predicted or not message_id:
-        return
-
-    max_games_to_check = DOGON_GAMES
-
-    for i in range(max_games_to_check):
-        game_to_check = target + i
-
-        game_msg = None
-        for msg in all_messages:
-            if f"#N{game_to_check}" in msg and ('✅' in msg or '🔰' in msg):
-                game_msg = msg
-                break
-
-        if not game_msg:
-            print(f"⏳ Ждём игру #N{game_to_check} для проверки масти {predicted}", flush=True)
-            continue
-
-        game_data = parse_game_from_text(game_msg)
-        if not game_data:
-            continue
-
-        player_cards = game_data.get("player_cards", [])
-        suit_found = any(card.get("suit") == predicted for card in player_cards)
-
-        if suit_found:
-            print(f"🎯 МАСТЬ {predicted} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
-            
-            entry["selected_result"] = True
-            entry["rule_result"] = True if rule_pred and rule_pred == predicted else False
-            entry["ml_result"] = True if ml_pred and ml_pred == predicted else False
-            entry["evaluated"] = True
-            entry["result_game"] = game_to_check
-            entry["dogon"] = i
-
-            if rule_pred:
-                state["rule_wins" if entry["rule_result"] else "rule_losses"] += 1
-            if ml_pred:
-                state["ml_wins" if entry["ml_result"] else "ml_losses"] += 1
-            state["total_predictions"] += 1
-
-            if i == 0:
-                suffix = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{game_to_check}"
-            else:
-                suffix = f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}"
-            
-            edit_message(message_id, original_text + suffix)
-            entry["message_text"] = original_text + suffix
-
-            source = find_game(entry.get("source"))
-            latency = entry.get("latency")
-            if source and latency is not None:
-                target_game_data = parse_game_from_text(game_msg)
-                if target_game_data:
-                    state["training_samples"].append({
-                        "x": make_features(source, float(latency)),
-                        "y": target_labels(target_game_data),
-                    })
-
-            if len(state["training_samples"]) > 5000:
-                state["training_samples"] = state["training_samples"][-5000:]
-
-            update_mode()
-            save_json(STATE_FILE, state)
-            return
-
-    print(f"❌ Масть {predicted} НЕ НАЙДЕНА за {max_games_to_check} игр", flush=True)
-    
-    entry["selected_result"] = False
-    entry["rule_result"] = False if rule_pred else None
-    entry["ml_result"] = False if ml_pred else None
-    entry["evaluated"] = True
-    entry["dogon"] = None
-
-    if rule_pred:
-        state["rule_losses"] += 1
-    if ml_pred:
-        state["ml_losses"] += 1
-    state["total_predictions"] += 1
-
-    suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
-    edit_message(message_id, original_text + suffix)
-    entry["message_text"] = original_text + suffix
-
-    save_json(STATE_FILE, state)
-
-# -------------------- CHECK PENDING --------------------
-def check_pending():
     for entry in state.get("predictions", []):
-        if entry.get("evaluated"):
+        if entry.get("status") != "pending":
             continue
-        evaluate_prediction(entry)
 
-# -------------------- PREDICTION SCHEDULER --------------------
+        target = entry.get("target")
+        predicted_suit = entry.get("selected_prediction")
+        message_id = entry.get("message_id")
+        original_text = entry.get("message_text", "")
+
+        if not predicted_suit or not message_id:
+            continue
+
+        max_games_to_check = DOGON_GAMES
+
+        for i in range(max_games_to_check):
+            game_to_check = target + i
+
+            game_msg = None
+            for msg in all_messages:
+                if f"#N{game_to_check}" in msg and ('✅' in msg or '🔰' in msg):
+                    game_msg = msg
+                    break
+
+            if not game_msg:
+                print(f"⏳ Ждём игру #N{game_to_check} для проверки масти {predicted_suit}", flush=True)
+                continue
+
+            game_data = parse_game_from_text(game_msg)
+            if not game_data:
+                continue
+
+            suit_found = False
+            player_cards = game_data.get("player_cards", [])
+            for card in player_cards:
+                if card.get("suit") == predicted_suit:
+                    suit_found = True
+                    break
+
+            if suit_found:
+                print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
+                dogon_number = i
+
+                # Обновляем entry
+                entry["selected_result"] = True
+                entry["rule_result"] = True if entry.get("rule_prediction") == predicted_suit else False
+                entry["ml_result"] = True if entry.get("ml_prediction") == predicted_suit else False
+                entry["evaluated"] = True
+                entry["result_game"] = game_to_check
+                entry["dogon"] = dogon_number
+                entry["status"] = "win"
+
+                # Обновляем статистику
+                if entry.get("rule_prediction"):
+                    state["rule_wins" if entry["rule_result"] else "rule_losses"] += 1
+                if entry.get("ml_prediction"):
+                    state["ml_wins" if entry["ml_result"] else "ml_losses"] += 1
+                state["total_predictions"] += 1
+
+                # Редактируем сообщение
+                if dogon_number == 0:
+                    suffix = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{game_to_check}"
+                else:
+                    suffix = f"\n\n✅ <b>ЗАШЛО</b> на догоне {dogon_number}: #N{game_to_check}"
+
+                edit_message(message_id, original_text + suffix)
+                entry["message_text"] = original_text + suffix
+
+                # Сохраняем обучающий пример для ML
+                source = find_game(entry.get("source"))
+                latency = entry.get("latency")
+                if source and latency is not None:
+                    target_game_data = parse_game_from_text(game_msg)
+                    if target_game_data:
+                        state["training_samples"].append({
+                            "x": make_features(source, float(latency)),
+                            "y": target_labels(target_game_data),
+                        })
+
+                if len(state["training_samples"]) > 5000:
+                    state["training_samples"] = state["training_samples"][-5000:]
+
+                update_mode()
+                save_json(STATE_FILE, state)
+                return
+
+            # Если дошли до последней игры и она завершена, но масти нет
+            if i == max_games_to_check - 1:
+                print(f"❌ Масть {predicted_suit} НЕ НАЙДЕНА за {max_games_to_check} игр", flush=True)
+
+                entry["selected_result"] = False
+                entry["rule_result"] = False if entry.get("rule_prediction") else None
+                entry["ml_result"] = False if entry.get("ml_prediction") else None
+                entry["evaluated"] = True
+                entry["status"] = "lose"
+
+                if entry.get("rule_prediction"):
+                    state["rule_losses"] += 1
+                if entry.get("ml_prediction"):
+                    state["ml_losses"] += 1
+                state["total_predictions"] += 1
+
+                suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
+                edit_message(message_id, original_text + suffix)
+                entry["message_text"] = original_text + suffix
+
+                save_json(STATE_FILE, state)
+                return
+
+        # Если ни одна игра не завершена — ждём
+        print(f"⏳ Ни одна из игр #{target}-#{target + DOGON_GAMES - 1} ещё не завершена, ждём...", flush=True)
+
+# -------------------- ПЛАНИРОВЩИК ПРОГНОЗОВ --------------------
 def schedule_for_game(game_number):
     target = game_number + OFFSET
 
     for e in state.get("predictions", []):
-        if e.get("target") == target and not e.get("evaluated"):
+        if e.get("target") == target and e.get("status") in ("scheduled", "pending"):
             return
 
     source = target - 1
@@ -692,6 +700,8 @@ def schedule_for_game(game_number):
         "status": "scheduled",
         "evaluated": False,
         "created": datetime.now(MOSCOW_TZ).isoformat(),
+        "message_id": None,
+        "message_text": "",
     })
     if len(state["predictions"]) > MAX_STATE_PREDICTIONS:
         state["predictions"] = state["predictions"][-MAX_STATE_PREDICTIONS:]
@@ -713,7 +723,7 @@ def process_scheduled():
 
         latency = get_fresh_latency()
         if latency is None:
-            print("⏳ Нет свежей задержки — правила остаются в очереди", flush=True)
+            print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
         rule_pred = rule_prediction(source, latency)
@@ -752,7 +762,6 @@ def process_scheduled():
             entry["status"] = "scheduled"
             save_json(STATE_FILE, state)
 
-# -------------------- PREDICTION TEXT --------------------
 def prediction_text(entry, prediction, source_game, mode):
     msg = "🔮 <b>HYBRID 21 CLASSIC</b>\n"
     msg += f"🃏 Масть: {prediction}\n"
@@ -772,7 +781,7 @@ def prediction_text(entry, prediction, source_game, mode):
     msg += "⏰ " + datetime.now(MOSCOW_TZ).strftime("%H:%M:%S")
     return msg
 
-# -------------------- STATS --------------------
+# -------------------- СТАТИСТИКА --------------------
 def stats_text():
     samples = len(state.get("training_samples", []))
     total = state.get("total_predictions", 0)
@@ -802,7 +811,7 @@ def stats_text():
         f"🔄 Переключений: {state.get('switches', 0)}"
     )
 
-# -------------------- TELEGRAM OFFSET --------------------
+# -------------------- ОФФСЕТ --------------------
 def load_offset():
     try:
         return int(OFFSET_FILE.read_text().strip())
@@ -815,7 +824,7 @@ def save_offset(v):
 # -------------------- MAIN --------------------
 def main():
     global all_messages
-    
+
     load_models()
 
     if SKLEARN_OK and len(state.get("training_samples", [])) >= MIN_TRAIN_SAMPLES:
@@ -833,7 +842,10 @@ def main():
         try:
             now = time.time()
 
-            check_pending()
+            # Проверяем результаты
+            check_results()
+
+            # Отправляем новые прогнозы
             process_scheduled()
 
             if now - last_stats > 3600:
@@ -860,7 +872,7 @@ def main():
                 if "#N" not in text:
                     continue
 
-                # СОХРАНЯЕМ ВСЕ СООБЩЕНИЯ В all_messages (как в твоём рабочем коде)
+                # Сохраняем все сообщения (как в твоём рабочем коде)
                 if text not in all_messages:
                     all_messages.append(text)
                     if len(all_messages) > 500:
@@ -876,12 +888,14 @@ def main():
                     flush=True,
                 )
 
+                # Планируем прогноз для каждой новой игры
                 if not is_finished_game(text):
                     schedule_for_game(n)
 
                 cleanup_games()
 
-            check_pending()
+            # После обработки сообщений проверяем результаты
+            check_results()
             process_scheduled()
 
             time.sleep(1)
