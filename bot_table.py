@@ -1006,7 +1006,7 @@ def send_stats_report():
     
     msg += f"\n📈 История в памяти: {len(game_history)} игр"
     
-    send_message(CHANNEL_STATS, msg)
+    send_message(CHANNEL_PROGNOZ, msg)
 
 # =====================================================================
 # СБОР ДАННЫХ
