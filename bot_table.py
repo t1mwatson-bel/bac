@@ -1,23 +1,4 @@
-# =====================================================================
-# АВТОУСТАНОВКА ЗАВИСИМОСТЕЙ
-# =====================================================================
-import subprocess
-import sys
-import importlib
-import os
-
-REQUIRED_PACKAGES = [
-    'numpy',
-    'catboost',
-    'scikit-learn',
-    'requests',
-    'pytz'
-]
-
-def install_package(package):
-    print(f"📦 Устанавливаю: {package}...", flush=True)
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package, "--quiet"])
+([sys.executable, "-m", "pip", "install", package, "--quiet"])
         print(f"✅ {package} установлен!", flush=True)
         return True
     except Exception as e:
@@ -130,7 +111,7 @@ GAME_HISTORY_FILE = "game_history.json"
 MAX_RECORDS = 10000
 CHECK_INTERVAL = 3
 OFFSET = 10
-TRAIN_EVERY = 30
+TRAIN_EVERY = 60
 MIN_TRAIN_SAMPLES = 200
 MAX_HISTORY = 3000
 MAX_GAME_HISTORY = 20  # Храним последние 20 игр для истории
@@ -502,268 +483,177 @@ def update_game_history(latency, suit, rank, game_num):
     
     save_game_history()
 
-def get_history_features():
-    """Извлекает признаки из истории для ML"""
+def get_history_features(history_source=None):
+    source = list(history_source) if history_source is not None else list(game_history)
     features = {}
-    
-    if len(game_history) >= 2:
-        # Задержки
-        latencies = [g["latency"] for g in game_history]
+    latencies = [g.get("latency", 0) for g in source if isinstance(g.get("latency", 0), (int, float))]
+    if len(latencies) >= 2:
         features["prev_latency"] = latencies[-2]
         features["latency_delta"] = latencies[-1] - latencies[-2]
-        
         if len(latencies) >= 5:
             recent = latencies[-5:]
             features["latency_trend"] = (recent[-1] - recent[0]) / 5
-            features["latency_volatility"] = np.std(recent) if len(recent) > 1 else 0
-    
-    if len(game_history) >= 2:
-        # Масти
-        suits = [g["suit"] for g in game_history if g["suit"] in SUITS]
-        if len(suits) >= 2:
-            features["prev_suit"] = SUITS.index(suits[-2]) if suits[-2] in SUITS else -1
-            
-            # Сколько раз подряд была эта масть
-            if len(suits) >= 2:
-                last_suit = suits[-1]
-                run = 0
-                for s in reversed(suits):
-                    if s == last_suit:
-                        run += 1
-                    else:
-                        break
-                features["suit_run"] = run
-    
-    if len(game_history) >= 2:
-        # Ранги
-        ranks = [g["rank"] for g in game_history if g["rank"] in RANK_VALUES]
-        if len(ranks) >= 2:
-            features["prev_rank"] = RANK_VALUES.get(ranks[-2], 0)
-    
-    # Время суток и день недели
+            features["latency_volatility"] = float(np.std(recent))
+    suits = [g.get("suit") for g in source if g.get("suit") in SUITS]
+    if len(suits) >= 2:
+        features["prev_suit"] = SUITS.index(suits[-2])
+        last = suits[-1]
+        run = 0
+        for s in reversed(suits):
+            if s == last: run += 1
+            else: break
+        features["suit_run"] = run
+    ranks = [g.get("rank") for g in source if g.get("rank") in RANK_VALUES]
+    if len(ranks) >= 2:
+        features["prev_rank"] = RANK_VALUES.get(ranks[-2], 0)
     now = datetime.now(MOSCOW_TZ)
-    features["hour"] = now.hour
-    features["minute"] = now.minute
-    features["day_of_week"] = now.weekday()
-    features["is_weekend"] = 1 if now.weekday() >= 5 else 0
-    
+    features.update({
+        "hour": now.hour, "minute": now.minute,
+        "day_of_week": now.weekday(),
+        "is_weekend": 1 if now.weekday() >= 5 else 0
+    })
     return features
 
 # =====================================================================
 # ML-ФУНКЦИИ
 # =====================================================================
-def extract_features_from_game(game_data, latency, game_num):
-    """Извлекает признаки из игры для ML"""
+def extract_features_from_game(game_data, latency, game_num, history_source=None):
     if not game_data:
         return None
-    
     player_cards = game_data.get("player_cards", [])
     dealer_cards = game_data.get("dealer_cards", [])
-    
     features = {
-        "latency": latency,
-        "game_num": game_num % 100,
-        
-        # Карты игрока (до 3-х)
-        "p1_rank_val": 0, "p1_suit": -1,
-        "p2_rank_val": 0, "p2_suit": -1,
-        "p3_rank_val": 0, "p3_suit": -1,
-        
-        # Карты дилера (до 2-х первых)
-        "d1_rank_val": 0, "d1_suit": -1,
-        "d2_rank_val": 0, "d2_suit": -1,
-        
-        # Суммы
-        "player_total": 0,
-        "dealer_total": 0,
-        "player_count": len(player_cards),
-        "dealer_count": len(dealer_cards),
-        
-        # Признаки из истории
-        "prev_latency": 0,
-        "latency_delta": 0,
-        "latency_trend": 0,
-        "latency_volatility": 0,
-        "prev_suit": -1,
-        "suit_run": 0,
-        "prev_rank": 0,
-        "hour": 0,
-        "minute": 0,
-        "day_of_week": 0,
-        "is_weekend": 0,
+        "latency": float(latency or 0), "game_num": int(game_num or 0) % 100,
+        "p1_rank_val": 0, "p1_suit": -1, "p2_rank_val": 0, "p2_suit": -1,
+        "p3_rank_val": 0, "p3_suit": -1, "d1_rank_val": 0, "d1_suit": -1,
+        "d2_rank_val": 0, "d2_suit": -1, "player_total": 0, "dealer_total": 0,
+        "player_count": len(player_cards), "dealer_count": len(dealer_cards),
+        "prev_latency": 0, "latency_delta": 0, "latency_trend": 0,
+        "latency_volatility": 0, "prev_suit": -1, "suit_run": 0, "prev_rank": 0,
+        "hour": 0, "minute": 0, "day_of_week": 0, "is_weekend": 0
     }
-    
-    # Заполняем карты игрока
     for i, card in enumerate(player_cards[:3]):
-        rank = card.get("rank", "")
-        suit = card.get("suit", "")
-        if rank in RANK_VALUES:
-            features[f"p{i+1}_rank_val"] = RANK_VALUES[rank]
-        if suit in SUITS:
-            features[f"p{i+1}_suit"] = SUITS.index(suit)
-    
-    # Заполняем карты дилера
+        r, s = card.get("rank", ""), card.get("suit", "")
+        if r in RANK_VALUES: features[f"p{i+1}_rank_val"] = RANK_VALUES[r]
+        if s in SUITS: features[f"p{i+1}_suit"] = SUITS.index(s)
     for i, card in enumerate(dealer_cards[:2]):
-        rank = card.get("rank", "")
-        suit = card.get("suit", "")
-        if rank in RANK_VALUES:
-            features[f"d{i+1}_rank_val"] = RANK_VALUES[rank]
-        if suit in SUITS:
-            features[f"d{i+1}_suit"] = SUITS.index(suit)
-    
-    # Считаем очки
-    player_total = 0
-    for card in player_cards:
-        rank = card.get("rank", "")
-        if rank in RANK_VALUES:
-            val = RANK_VALUES[rank]
-            if val >= 11:
-                player_total += 10
-            else:
-                player_total += val
-    features["player_total"] = player_total
-    
-    dealer_total = 0
-    for card in dealer_cards:
-        rank = card.get("rank", "")
-        if rank in RANK_VALUES:
-            val = RANK_VALUES[rank]
-            if val >= 11:
-                dealer_total += 10
-            else:
-                dealer_total += val
-    features["dealer_total"] = dealer_total
-    
-    # Добавляем исторические признаки
-    history_features = get_history_features()
-    for key, value in history_features.items():
-        if key in features:
-            features[key] = value
-    
+        r, s = card.get("rank", ""), card.get("suit", "")
+        if r in RANK_VALUES: features[f"d{i+1}_rank_val"] = RANK_VALUES[r]
+        if s in SUITS: features[f"d{i+1}_suit"] = SUITS.index(s)
+    def score(cards):
+        return sum(10 if RANK_VALUES.get(c.get("rank",""), 0) >= 11 else RANK_VALUES.get(c.get("rank",""), 0) for c in cards)
+    features["player_total"] = score(player_cards)
+    features["dealer_total"] = score(dealer_cards)
+    for k, v in get_history_features(history_source).items():
+        if k in features: features[k] = v
     return features
 
 def train_ml_model():
     global ml_model, ml_initialized
-    
     if not ML_AVAILABLE:
         return False
-    
     data = load_data()
-    if len(data) < MIN_TRAIN_SAMPLES:
-        print(f"⚠️ ML: недостаточно данных ({len(data)}/{MIN_TRAIN_SAMPLES})", flush=True)
+    if len(data) < MIN_TRAIN_SAMPLES + 1:
+        print(f"⏳ ML: данных {len(data)}/{MIN_TRAIN_SAMPLES + 1}", flush=True)
         return False
-    
-    X = []
-    y = []
-    feature_names = None
-    
-    for game in data:
-        player_cards = game.get("player_cards", [])
-        if not player_cards:
+
+    X, y, feature_names = [], [], None
+
+    # Обучаемся честно: признаки берём из ПРЕДЫДУЩЕЙ игры,
+    # а правильный ответ — масть первой карты СЛЕДУЮЩЕЙ игры.
+    # Карты целевой игры в признаки не попадают.
+    for i in range(1, len(data)):
+        prev_game, target_game = data[i-1], data[i]
+        target_cards = target_game.get("player_cards", [])
+        if not target_cards or target_cards[0].get("suit") not in SUITS:
             continue
-        
-        features = extract_features_from_game(game, game.get("latency_ms", 0), 0)
-        if not features:
-            continue
-        
-        # Целевая масть — первая карта игрока
-        target_suit = player_cards[0].get("suit")
-        if not target_suit or target_suit not in SUITS:
-            continue
-        
-        # Преобразуем в вектор
-        feature_vector = []
-        sorted_keys = sorted(features.keys())
-        if not feature_names:
-            feature_names = sorted_keys
-        for key in sorted_keys:
-            feature_vector.append(features[key])
-        
-        X.append(feature_vector)
-        y.append(SUITS.index(target_suit))
-    
-    if len(X) < MIN_TRAIN_SAMPLES:
-        print(f"⚠️ ML: недостаточно качественных данных ({len(X)}/{MIN_TRAIN_SAMPLES})", flush=True)
-        return False
-    
-    if len(set(y)) < 2:
-        print("⚠️ ML: только один класс, обучение невозможно", flush=True)
-        return False
-    
-    print(f"🧠 ML: обучение на {len(X)} примерах...", flush=True)
-    print(f"📊 Признаков: {len(feature_names)}", flush=True)
-    
-    X = np.array(X)
-    y = np.array(y)
-    
-    if ML_LIB == "catboost":
-        model = CatBoostClassifier(
-            iterations=200,
-            depth=6,
-            learning_rate=0.08,
-            random_seed=42,
-            verbose=False,
-            loss_function='MultiClass'
+
+        history_source = []
+        for old in data[:i]:
+            cards = old.get("player_cards", [])
+            if cards:
+                history_source.append({
+                    "latency": float(old.get("latency_ms", 0) or 0),
+                    "suit": cards[0].get("suit"),
+                    "rank": cards[0].get("rank"),
+                    "game_num": int(old.get("game_id", 0) or 0)
+                })
+
+        features = extract_features_from_game(
+            prev_game,
+            float(prev_game.get("latency_ms", 0) or 0),
+            int(prev_game.get("game_id", 0) or 0),
+            history_source=history_source
         )
-    else:
+        keys = sorted(features.keys())
+        if feature_names is None: feature_names = keys
+        X.append([features[k] for k in feature_names])
+        y.append(SUITS.index(target_cards[0]["suit"]))
+
+    if len(X) < MIN_TRAIN_SAMPLES:
+        print(f"⏳ ML: качественных примеров {len(X)}/{MIN_TRAIN_SAMPLES}", flush=True)
         return False
-    
-    model.fit(X, y)
-    ml_model = model
-    ml_initialized = True
-    
+    if len(set(y)) < 2:
+        print("⚠️ ML: нужен минимум 2 класса масти", flush=True)
+        return False
+    if ML_LIB != "catboost":
+        print(f"⚠️ ML: библиотека {ML_LIB} не поддержана этим кодом", flush=True)
+        return False
+
+    print(f"🧠 ML: обучение на {len(X)} примерах...", flush=True)
+    model = CatBoostClassifier(
+        iterations=300, depth=6, learning_rate=0.05,
+        random_seed=42, verbose=False,
+        loss_function="MultiClass", allow_writing_files=False
+    )
     try:
-        with open(ML_MODEL_FILE, 'wb') as f:
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=int)
+        model.fit(X, y)
+        with open(ML_MODEL_FILE, "wb") as f:
             pickle.dump({
-                'model': model,
-                'feature_count': len(X[0]),
-                'train_samples': len(X),
-                'feature_names': feature_names
+                "model": model, "feature_count": X.shape[1],
+                "train_samples": len(X), "feature_names": feature_names,
+                "version": 2
             }, f)
-        print(f"✅ ML модель сохранена ({len(X)} примеров)", flush=True)
+        ml_model = model
+        ml_initialized = True
+        print(f"✅ ML ОБУЧЕНА И АКТИВНА: {len(X)} примеров", flush=True)
         return True
     except Exception as e:
-        print(f"⚠️ Не удалось сохранить ML модель: {e}", flush=True)
+        print(f"❌ Ошибка обучения ML: {e}", flush=True)
         return False
 
 def load_ml_model():
     global ml_model, ml_initialized
-    
-    if not ML_AVAILABLE:
+    if not ML_AVAILABLE or not os.path.exists(ML_MODEL_FILE):
         return False
-    
-    if not os.path.exists(ML_MODEL_FILE):
-        return False
-    
     try:
-        with open(ML_MODEL_FILE, 'rb') as f:
-            data = pickle.load(f)
-            ml_model = data['model']
-            ml_initialized = True
-            print(f"✅ ML модель загружена ({data.get('train_samples', 0)} примеров)", flush=True)
-            return True
+        with open(ML_MODEL_FILE, "rb") as f:
+            saved = pickle.load(f)
+        ml_model = saved["model"]
+        ml_initialized = True
+        print(f"✅ ML модель загружена ({saved.get('train_samples', 0)} примеров)", flush=True)
+        return True
     except Exception as e:
+        ml_model = None
+        ml_initialized = False
         print(f"⚠️ Не удалось загрузить ML модель: {e}", flush=True)
         return False
 
 def predict_ml(features):
-    global ml_model, ml_initialized
-    
-    if not ml_initialized or not ml_model:
+    if not ml_initialized or ml_model is None:
         return None, None
-    
     try:
-        feature_vector = []
-        for key in sorted(features.keys()):
-            feature_vector.append(features[key])
-        
-        feature_vector = np.array([feature_vector])
-        probs = ml_model.predict_proba(feature_vector)[0]
-        pred_class = np.argmax(probs)
-        pred_suit = SUITS[pred_class]
-        confidence = probs[pred_class]
-        
-        return pred_suit, confidence
+        keys = sorted(features.keys())
+        vector = np.asarray([[features[k] for k in keys]], dtype=float)
+        expected = getattr(ml_model, "n_features_in_", vector.shape[1])
+        if vector.shape[1] != expected:
+            print(f"⚠️ ML: несовпадение признаков {vector.shape[1]} != {expected}", flush=True)
+            return None, None
+        probs = ml_model.predict_proba(vector)[0]
+        cls = int(np.argmax(probs))
+        return SUITS[cls], float(probs[cls])
     except Exception as e:
         print(f"⚠️ Ошибка ML-прогноза: {e}", flush=True)
         return None, None
@@ -1150,7 +1040,7 @@ def check_and_predict():
             update_game_history(latency, first_card.get("suit", "?"), first_card.get("rank", "?"), current_num)
     
     # Формируем сообщение
-    msg = f"🔮 <b>ТЕСТ: ГИБРИД (+{OFFSET})</b>\n"
+    msg = (f"🔮 <b>ГИБРИД (+{OFFSET})</b>\n" if ml_initialized else f"🔮 <b>ТЕСТ: ГИБРИД (+{OFFSET})</b>\n")
     msg += f"🃏 Масть: {predicted_suit}\n"
     
     if method == "ml":
@@ -1237,6 +1127,9 @@ def main():
     
     # Загружаем ML модель
     load_ml_model()
+    if not ml_initialized:
+        print("🧠 ML: запускаю первичное обучение сразу после старта...", flush=True)
+        train_ml_model()
     
     stats["games_collected"] = len(existing_data)
     
@@ -1322,11 +1215,17 @@ def main():
                 if entry.get("status") == "pending":
                     check_results(history)
             
-            # Обучение ML
-            if current_time - last_train_time > 300:
+            # Обучение / переобучение ML
+            if current_time - last_train_time >= TRAIN_EVERY:
                 data_count = len(load_data())
-                if data_count >= MIN_TRAIN_SAMPLES and not ml_initialized:
+                if data_count >= MIN_TRAIN_SAMPLES + 1:
                     train_ml_model()
+                else:
+                    print(
+                        f"⏳ ML: собираем данные "
+                        f"{data_count}/{MIN_TRAIN_SAMPLES + 1}",
+                        flush=True
+                    )
                 last_train_time = current_time
             
             # Статистика
