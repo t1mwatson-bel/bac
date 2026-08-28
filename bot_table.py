@@ -1,13 +1,31 @@
-try:
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", package, "--quiet"],
-        check=True
-    )
-    print(f"✅ {package} установлен!", flush=True)
-    return True
-except Exception as e:
-    print(f"❌ Ошибка установки {package}: {e}", flush=True)
-    return False
+import os
+import sys
+import subprocess
+import importlib
+
+# =====================================================================
+# ЗАВИСИМОСТИ
+# =====================================================================
+
+REQUIRED_PACKAGES = [
+    "requests",
+    "numpy",
+    "pytz",
+    "catboost"
+]
+
+
+def install_package(package):
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", package, "--quiet"],
+            check=True
+        )
+        print(f"✅ {package} установлен!", flush=True)
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка установки {package}: {e}", flush=True)
+        return False
 
 
 def check_and_install_dependencies():
@@ -19,36 +37,52 @@ def check_and_install_dependencies():
 
     for package in REQUIRED_PACKAGES:
         try:
-            importlib.import_module(package.replace('-', '_'))
+            importlib.import_module(package.replace("-", "_"))
             print(f"✅ {package} - уже установлен", flush=True)
         except ImportError:
-            # здесь дальше твой код обработки отсутствующей библиотеки
-            ...
             print(f"⚠️ {package} - НЕ НАЙДЕН", flush=True)
             missing.append(package)
-    
+
     if missing:
-        print(f"\n📦 Нужно установить: {', '.join(missing)}", flush=True)
+        print(
+            f"\n📦 Нужно установить: {', '.join(missing)}",
+            flush=True
+        )
+
         for package in missing:
             if not install_package(package):
-                print(f"❌ Не удалось установить {package}", flush=True)
+                print(
+                    f"❌ Не удалось установить {package}",
+                    flush=True
+                )
                 return False
-        print("\n✅ ВСЕ ЗАВИСИМОСТИ УСТАНОВЛЕНЫ!", flush=True)
+
+        print(
+            "\n✅ ВСЕ ЗАВИСИМОСТИ УСТАНОВЛЕНЫ!",
+            flush=True
+        )
     else:
-        print("\n✅ ВСЕ ЗАВИСИМОСТИ УСТАНОВЛЕНЫ!", flush=True)
-    
+        print(
+            "\n✅ ВСЕ ЗАВИСИМОСТИ УСТАНОВЛЕНЫ!",
+            flush=True
+        )
+
     print("=" * 60, flush=True)
     return True
 
+
 if not check_and_install_dependencies():
-    print("❌ ОШИБКА: Невозможно продолжить работу", flush=True)
+    print(
+        "❌ ОШИБКА: Невозможно продолжить работу",
+        flush=True
+    )
     sys.exit(1)
+
 
 # =====================================================================
 # ИМПОРТЫ
 # =====================================================================
-import os
-import sys
+
 import requests
 import json
 import re
@@ -59,7 +93,8 @@ from datetime import datetime, timedelta
 import pytz
 from collections import defaultdict, deque
 import warnings
-warnings.filterwarnings('ignore')
+
+warnings.filterwarnings("ignore")
 
 # =====================================================================
 # ML-БИБЛИОТЕКА
