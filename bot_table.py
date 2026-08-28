@@ -1,21 +1,29 @@
-([sys.executable, "-m", "pip", "install", package, "--quiet"])
-        print(f"✅ {package} установлен!", flush=True)
-        return True
-    except Exception as e:
-        print(f"❌ Ошибка установки {package}: {e}", flush=True)
-        return False
+try:
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", package, "--quiet"],
+        check=True
+    )
+    print(f"✅ {package} установлен!", flush=True)
+    return True
+except Exception as e:
+    print(f"❌ Ошибка установки {package}: {e}", flush=True)
+    return False
+
 
 def check_and_install_dependencies():
     print("=" * 60, flush=True)
     print("🔍 ПРОВЕРКА ЗАВИСИМОСТЕЙ...", flush=True)
     print("=" * 60, flush=True)
-    
+
     missing = []
+
     for package in REQUIRED_PACKAGES:
         try:
             importlib.import_module(package.replace('-', '_'))
             print(f"✅ {package} - уже установлен", flush=True)
         except ImportError:
+            # здесь дальше твой код обработки отсутствующей библиотеки
+            ...
             print(f"⚠️ {package} - НЕ НАЙДЕН", flush=True)
             missing.append(package)
     
