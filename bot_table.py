@@ -12,7 +12,7 @@ import pytz
 # =====================================================================
 sys.stdout.flush()
 print("=" * 60, flush=True)
-print("🃏 ТЕСТ: ПОСЛЕДОВАТЕЛЬНОСТЬ + ОБУЧЕНИЕ", flush=True)
+print("🃏 ТЕСТ: ПОСЛЕДОВАТЕЛЬНОСТЬ + ОБУЧЕНИЕ + ПОРОГ", flush=True)
 print("=" * 60, flush=True)
 
 # =====================================================================
@@ -44,13 +44,16 @@ MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 BASE_URL = "https://1xlite-36553.pro"
 OFFSET_FILE = "offset_seq_no_timeout.txt"
 HISTORY_FILE = "history_seq_no_timeout.json"
-LEARNED_FILE = "learned_probs.json"  # Новый файл для выученных вероятностей
+LEARNED_FILE = "learned_probs.json"
 MAX_HISTORY = 500
 PROCESSED_GAMES = set()
 LAST_PREDICT_TIME = 0
 PREDICT_INTERVAL = 2
-TIMEOUT_SECONDS = 1800  # 30 минут
+TIMEOUT_SECONDS = 1800
 OFFSET = 10
+
+# ⭐ ПОРОГ УВЕРЕННОСТИ (29%)
+MIN_CONFIDENCE = 29.0
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -99,21 +102,20 @@ def send_stats_report():
     for i in range(4):
         msg += f"  Догон {i}: {stats['by_dogon'].get(i, 0)}\n"
     
-    # Добавляем информацию об обучении
     learned = load_learned_probs()
     if learned:
         msg += f"{'=' * 30}\n"
         msg += f"🧠 Выучено комбинаций: {len(learned)}\n"
         total_samples = sum(learned[key]["total"] for key in learned if "total" in learned[key])
         msg += f"📊 Всего примеров: {total_samples}\n"
+        msg += f"🎯 Минимальный порог: {MIN_CONFIDENCE:.0f}%\n"
     
     send_message(msg)
 
 # =====================================================================
-# ОБУЧЕНИЕ: СОХРАНЕНИЕ И ПЕРЕСЧЁТ ВЕРОЯТНОСТЕЙ
+# ОБУЧЕНИЕ
 # =====================================================================
 def load_learned_probs():
-    """Загружает выученные вероятности из файла"""
     if os.path.exists(LEARNED_FILE):
         try:
             with open(LEARNED_FILE, "r", encoding="utf-8") as f:
@@ -123,112 +125,13 @@ def load_learned_probs():
     return {}
 
 def save_learned_probs(learned):
-    """Сохраняет выученные вероятности в файл"""
     with open(LEARNED_FILE, "w", encoding="utf-8") as f:
         json.dump(learned, f, indent=2, ensure_ascii=False)
 
-def collect_training_data(latency, predicted_suit, actual_suit, result, p1=None, p2=None, p3=None):
-    """
-    Сохраняет данные для обучения.
-    Ключ: (диапазон_задержки, ранг_первой_карты, масть_первой_карты)
-    """
+def get_confidence(latency, p1):
+    """Возвращает уверенность в процентах на основе истории"""
     learned = load_learned_probs()
     
-    # Определяем диапазон задержки
-    range_key = None
-    if 93 <= latency < 95:
-        range_key = "93-95"
-    elif 95 <= latency < 97:
-        range_key = "95-97"
-    elif 97 <= latency < 99:
-        range_key = "97-99"
-    elif 99 <= latency < 101:
-        range_key = "99-101"
-    elif 101 <= latency < 103:
-        range_key = "101-103"
-    elif 103 <= latency < 105:
-        range_key = "103-105"
-    elif latency >= 105:
-        range_key = "105+"
-    else:
-        return
-    
-    # Определяем ключ с учётом ранга и масти первой карты
-    if p1:
-        rank_key = f"{p1['rank']}_{p1['suit']}"
-    else:
-        rank_key = "unknown"
-    
-    full_key = f"{range_key}_{rank_key}"
-    
-    # Инициализируем структуру
-    if full_key not in learned:
-        learned[full_key] = {
-            "total": 0,
-            "wins": 0,
-            "last_update": datetime.now(MOSCOW_TZ).isoformat()
-        }
-    
-    # Обновляем статистику
-    learned[full_key]["total"] += 1
-    if result:
-        learned[full_key]["wins"] += 1
-    learned[full_key]["last_update"] = datetime.now(MOSCOW_TZ).isoformat()
-    
-    save_learned_probs(learned)
-    print(f"📊 Сохранён результат: {predicted_suit} → {actual_suit} ({'✅' if result else '❌'}) для {full_key}", flush=True)
-    
-    # Каждые 10 прогнозов пересчитываем таблицу
-    total_samples = sum(learned[key]["total"] for key in learned)
-    if total_samples % 10 == 0 and total_samples >= 10:
-        retrain_confidence_table()
-
-def retrain_confidence_table():
-    """
-    Пересчитывает проценты на основе выученных данных и сохраняет в файл.
-    """
-    learned = load_learned_probs()
-    if not learned:
-        return
-    
-    total_samples = sum(learned[key]["total"] for key in learned)
-    if total_samples < 10:
-        return
-    
-    print(f"🧠 Пересчитываю вероятности на основе {total_samples} реальных результатов...", flush=True)
-    
-    # Группируем по диапазонам задержки
-    ranges = {}
-    for key, data in learned.items():
-        range_part = key.split("_")[0]
-        if range_part not in ranges:
-            ranges[range_part] = {"total": 0, "wins": 0}
-        ranges[range_part]["total"] += data["total"]
-        ranges[range_part]["wins"] += data["wins"]
-    
-    # Выводим обновлённые проценты для каждого диапазона
-    print("📊 Обновлённые проценты по диапазонам:", flush=True)
-    for range_name, data in ranges.items():
-        if data["total"] > 0:
-            win_rate = (data["wins"] / data["total"]) * 100
-            print(f"  {range_name}: {win_rate:.1f}% ({data['wins']}/{data['total']})", flush=True)
-    
-    # Сохраняем обновлённую статистику в файл
-    learned["_meta"] = {
-        "last_retrain": datetime.now(MOSCOW_TZ).isoformat(),
-        "total_samples": total_samples
-    }
-    save_learned_probs(learned)
-    print(f"✅ Таблица вероятностей обновлена!", flush=True)
-
-def get_learned_confidence(latency, p1):
-    """
-    Возвращает выученную уверенность для данной задержки и первой карты.
-    Если данных нет — возвращает None.
-    """
-    learned = load_learned_probs()
-    
-    # Определяем диапазон задержки
     if 93 <= latency < 95:
         range_key = "93-95"
     elif 95 <= latency < 97:
@@ -258,6 +161,84 @@ def get_learned_confidence(latency, p1):
         if data["total"] > 0:
             return (data["wins"] / data["total"]) * 100
     return None
+
+def collect_training_data(latency, predicted_suit, actual_suit, result, p1=None):
+    learned = load_learned_probs()
+    
+    if 93 <= latency < 95:
+        range_key = "93-95"
+    elif 95 <= latency < 97:
+        range_key = "95-97"
+    elif 97 <= latency < 99:
+        range_key = "97-99"
+    elif 99 <= latency < 101:
+        range_key = "99-101"
+    elif 101 <= latency < 103:
+        range_key = "101-103"
+    elif 103 <= latency < 105:
+        range_key = "103-105"
+    elif latency >= 105:
+        range_key = "105+"
+    else:
+        return
+    
+    if p1:
+        rank_key = f"{p1['rank']}_{p1['suit']}"
+    else:
+        rank_key = "unknown"
+    
+    full_key = f"{range_key}_{rank_key}"
+    
+    if full_key not in learned:
+        learned[full_key] = {
+            "total": 0,
+            "wins": 0,
+            "last_update": datetime.now(MOSCOW_TZ).isoformat()
+        }
+    
+    learned[full_key]["total"] += 1
+    if result:
+        learned[full_key]["wins"] += 1
+    learned[full_key]["last_update"] = datetime.now(MOSCOW_TZ).isoformat()
+    
+    save_learned_probs(learned)
+    print(f"📊 Сохранён результат: {predicted_suit} → {actual_suit} ({'✅' if result else '❌'}) для {full_key}", flush=True)
+    
+    total_samples = sum(learned[key]["total"] for key in learned)
+    if total_samples % 10 == 0 and total_samples >= 10:
+        retrain_confidence_table()
+
+def retrain_confidence_table():
+    learned = load_learned_probs()
+    if not learned:
+        return
+    
+    total_samples = sum(learned[key]["total"] for key in learned)
+    if total_samples < 10:
+        return
+    
+    print(f"🧠 Пересчитываю вероятности на основе {total_samples} реальных результатов...", flush=True)
+    
+    ranges = {}
+    for key, data in learned.items():
+        range_part = key.split("_")[0]
+        if range_part not in ranges:
+            ranges[range_part] = {"total": 0, "wins": 0}
+        ranges[range_part]["total"] += data["total"]
+        ranges[range_part]["wins"] += data["wins"]
+    
+    print("📊 Обновлённые проценты по диапазонам:", flush=True)
+    for range_name, data in ranges.items():
+        if data["total"] > 0:
+            win_rate = (data["wins"] / data["total"]) * 100
+            print(f"  {range_name}: {win_rate:.1f}% ({data['wins']}/{data['total']})", flush=True)
+    
+    learned["_meta"] = {
+        "last_retrain": datetime.now(MOSCOW_TZ).isoformat(),
+        "total_samples": total_samples
+    }
+    save_learned_probs(learned)
+    print(f"✅ Таблица вероятностей обновлена!", flush=True)
 
 # =====================================================================
 # ФУНКЦИИ ТЕЛЕГРАМ
@@ -302,11 +283,12 @@ def edit_message(message_id, text):
 
 def send_startup_message():
     now = datetime.now(MOSCOW_TZ)
-    msg = f"🚀 <b>ТЕСТ: ПОСЛЕДОВАТЕЛЬНОСТЬ (+10) + ОБУЧЕНИЕ</b>\n"
+    msg = f"🚀 <b>ТЕСТ: ПОСЛЕДОВАТЕЛЬНОСТЬ (+10) + ПОРОГ {MIN_CONFIDENCE:.0f}%</b>\n"
     msg += f"⏰ Время: {now.strftime('%d.%m.%Y %H:%M:%S')} (МСК)\n"
     msg += f"📌 Прогноз: примерно за 2 минуты до целевой игры\n"
     msg += f"🧠 Бот учится на своих ошибках\n"
-    msg += f"🔄 Версия: 11.0 (с обучением)"
+    msg += f"🎯 Минимальная уверенность: {MIN_CONFIDENCE:.0f}%\n"
+    msg += f"🔄 Версия: 11.0 (с порогом)"
     send_message(msg)
     print(f"📤 Приветствие отправлено в канал", flush=True)
 
@@ -614,19 +596,15 @@ def check_results(history, all_messages):
                     actual_suit = predicted_suit
                     break
             
-            # Если масть не найдена, берём первую карту игрока как фактическую
             if not actual_suit and player_cards:
                 actual_suit = player_cards[0].get("suit", "♠️")
             
-            # Получаем первую карту для обучения
             p1 = player_cards[0] if player_cards else None
             
             if suit_found:
                 print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
                 dogon_number = i
                 update_stats(dogon_number, "win")
-                
-                # ⭐ СОХРАНЯЕМ ДЛЯ ОБУЧЕНИЯ
                 collect_training_data(latency, predicted_suit, actual_suit, True, p1)
                 
                 original_text = f"🔮 <b>ТЕСТ: ПОСЛЕДОВАТЕЛЬНОСТЬ (+10)</b>\n"
@@ -650,8 +628,6 @@ def check_results(history, all_messages):
             if i == max_games_to_check - 1:
                 print(f"❌ Масть {predicted_suit} НЕ НАЙДЕНА за {max_games_to_check} игр", flush=True)
                 update_stats(0, "lose")
-                
-                # ⭐ СОХРАНЯЕМ ДЛЯ ОБУЧЕНИЯ
                 collect_training_data(latency, predicted_suit, actual_suit, False, p1)
                 
                 original_text = f"🔮 <b>ТЕСТ: ПОСЛЕДОВАТЕЛЬНОСТЬ (+10)</b>\n"
@@ -672,7 +648,7 @@ def check_results(history, all_messages):
 def main():
     global LAST_PREDICT_TIME, stats
     
-    print("🔄 ЗАПУСК ТЕСТА (ПОСЛЕДОВАТЕЛЬНОСТЬ +10, С ОБУЧЕНИЕМ)...", flush=True)
+    print("🔄 ЗАПУСК ТЕСТА (ПОСЛЕДОВАТЕЛЬНОСТЬ +10, ПОРОГ 29%)...", flush=True)
     print("=" * 60, flush=True)
     
     send_startup_message()
@@ -769,10 +745,7 @@ def main():
                 )
 
                 if already_queued:
-                    print(
-                        f"⏳ #N{target_game} уже стоит в очереди",
-                        flush=True
-                    )
+                    print(f"⏳ #N{target_game} уже стоит в очереди", flush=True)
                     PROCESSED_GAMES.add(game_number)
                     continue
 
@@ -780,4 +753,63 @@ def main():
                     "from_game": current_game_num,
                     "target": target_game,
                     "offset": OFFSET,
-                    "created_time
+                    "created_time": datetime.now(MOSCOW_TZ).isoformat(),
+                    "status": "scheduled"
+                })
+                save_history(history)
+
+                PROCESSED_GAMES.add(game_number)
+
+                print(f"📅 Запланирован прогноз: #{current_game_num} → #{target_game} (+{OFFSET})", flush=True)
+
+                pending_count = len([h for h in history if h.get("status") in ("scheduled", "pending")])
+                print(f"📊 В очереди: {pending_count}", flush=True)
+            
+            current_num = get_game_number()
+
+            for entry in history:
+                if entry.get("status") != "scheduled":
+                    continue
+
+                target = entry.get("target")
+                if not isinstance(target, int):
+                    continue
+
+                games_left = target - current_num
+
+                if games_left != 1:
+                    continue
+
+                print(f"🔥 Время прогноза: текущая #{current_num}, цель #{target} (+{OFFSET})", flush=True)
+
+                games = get_active_games()
+                if not games:
+                    continue
+
+                latency = None
+                for game in games:
+                    game_id = str(game.get("id"))
+                    data, measured_latency = get_game_data(game_id)
+                    if data:
+                        latency = measured_latency
+                        break
+
+                if latency is None:
+                    print("⏳ Не удалось получить свежую задержку — прогноз остаётся в очереди", flush=True)
+                    continue
+
+                current_game_data = None
+                for msg_text in all_messages:
+                    if f"#N{current_num}" in msg_text:
+                        current_game_data = parse_game_from_text(msg_text)
+                        break
+
+                base_suit = predict_suit_by_latency(latency)
+                if base_suit is None:
+                    print(f"⏭️ Задержка {latency:.2f} мс — нет прогноза", flush=True)
+                    continue
+
+                predicted_suit = base_suit
+                p1 = None
+                p2 = None
+                p3 = None
