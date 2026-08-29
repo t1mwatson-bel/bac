@@ -736,10 +736,9 @@ def prediction_text(entry, prediction, source_game, confidence, all_probs):
     msg += f"🃏 Масть: {prediction}\n"
     msg += f"🎯 Уверенность: {confidence:.1f}%\n"
     
-    # ⭐ Вывод всех мастей с процентами
+    # ⭐ ВЫВОД ВСЕХ МАСТЕЙ
     if all_probs:
         msg += "📊 <b>Раскладка:</b>\n"
-        # Сортируем по убыванию
         sorted_probs = sorted(all_probs.items(), key=lambda x: x[1], reverse=True)
         for suit, prob in sorted_probs:
             bar = "█" * int(prob / 2) if prob > 0 else "░"
