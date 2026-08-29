@@ -10,7 +10,7 @@ import requests
 import pytz
 
 # ================================================================
-# HYBRID BOT: ТВОИ ПРАВИЛА + ML (ПРОВЕРКА ИЗ ТВОЕГО РАБОЧЕГО КОДА)
+# HYBRID BOT: ТВОИ ПРАВИЛА + ML
 # ================================================================
 
 print("=" * 70, flush=True)
@@ -62,6 +62,7 @@ SUIT_TO_ID = {s: i for i, s in enumerate(SUITS)}
 RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 RANK_TO_ID = {r: i + 1 for i, r in enumerate(RANKS)}
 
+# -------------------- SKLEARN --------------------
 try:
     from sklearn.ensemble import RandomForestClassifier
     import joblib
@@ -108,8 +109,6 @@ def save_json(path, data):
 
 state = load_json(STATE_FILE, default_state())
 MODELS = None
-
-# Глобальный список сообщений (КАК В ТВОЁМ РАБОЧЕМ КОДЕ)
 all_messages = []
 
 # -------------------- TELEGRAM --------------------
@@ -162,18 +161,50 @@ def edit_message(message_id, text):
         print(f"❌ editMessageText: {e}", flush=True)
     return False
 
-def startup_message():
-    text = (
-        "🚀 <b>HYBRID RULES + ML</b>\n"
-        "🃏 В начале работает твоя методика\n"
-        f"🎯 Цель: +{OFFSET} игр\n"
-        f"🤖 ML обучается параллельно, старт после {MIN_TRAIN_SAMPLES} результатов\n"
-        "🔄 ML станет основным только если будет лучше правил\n"
-        "🛡️ Если ML ухудшится — автоматический возврат к правилам"
-    )
-    send_message(text)
+def send_ml_status():
+    """Отправляет в канал статус ML при запуске"""
+    samples = len(state.get("training_samples", []))
+    total = state.get("total_predictions", 0)
+    mode = state.get("mode", "RULES")
+    model_samples = state.get("model_samples", 0)
+    
+    msg = "🧠 <b>ML СТАТУС</b>\n"
+    msg += f"📊 Обучающих примеров: {samples}/{MIN_TRAIN_SAMPLES}\n"
+    msg += f"📈 Всего прогнозов: {total}\n"
+    msg += f"🔀 Текущий метод: {'🤖 ML' if mode == 'ML' else '📌 Правила'}\n"
+    
+    if MODELS is not None:
+        msg += f"✅ ML модель: ОБУЧЕНА ({model_samples} примеров)\n"
+    elif samples >= MIN_TRAIN_SAMPLES:
+        msg += "⚠️ ML модель: НЕ ОБУЧЕНА (попытка обучения...)\n"
+    else:
+        msg += f"⏳ ML модель: ОЖИДАЕТ ({samples}/{MIN_TRAIN_SAMPLES})\n"
+    
+    # Проверяем sklearn
+    if not SKLEARN_OK:
+        msg += "\n❌ <b>ПРОБЛЕМА:</b> sklearn не установлен!\n"
+        msg += "💡 Установи: pip install scikit-learn joblib\n"
+    elif samples >= MIN_TRAIN_SAMPLES and MODELS is None:
+        msg += "\n⚠️ <b>ВНИМАНИЕ:</b> данных достаточно, но модель не обучена.\n"
+        msg += "💡 Возможные причины:\n"
+        msg += "  - Все прогнозы одной масти (нужно разнообразие)\n"
+        msg += "  - Ошибка в обучении (смотри логи)\n"
+        msg += "  - Не хватает памяти\n"
+    elif MODELS is not None:
+        rw = state.get("rule_wins", 0)
+        rl = state.get("rule_losses", 0)
+        mw = state.get("ml_wins", 0)
+        ml = state.get("ml_losses", 0)
+        rtot = rw + rl
+        mtot = mw + ml
+        r_acc = f"{rw / rtot * 100:.1f}%" if rtot else "—"
+        m_acc = f"{mw / mtot * 100:.1f}%" if mtot else "—"
+        msg += f"\n📊 Правила: {rw}✅ / {rl}❌ ({r_acc})\n"
+        msg += f"🤖 ML: {mw}✅ / {ml}❌ ({m_acc})\n"
+    
+    send_message(msg)
 
-# -------------------- PARSING (ИЗ ТВОЕГО РАБОЧЕГО КОДА) --------------------
+# -------------------- PARSING --------------------
 def parse_game_from_text(text):
     try:
         m = re.search(r"#N(\d+)", text)
@@ -208,7 +239,6 @@ def parse_game_from_text(text):
                 if s[i].isspace():
                     i += 1
                     continue
-
                 if s.startswith("10", i):
                     rank = "10"
                     i += 2
@@ -221,18 +251,15 @@ def parse_game_from_text(text):
                 else:
                     i += 1
                     continue
-
                 suit = None
                 for sym in SUITS:
                     if s.startswith(sym, i):
                         suit = sym
                         i += len(sym)
                         break
-
                 if suit is None and i < len(s) and s[i] in "♠♣♦♥":
                     suit = s[i] + "️"
                     i += 1
-
                 if suit:
                     cards.append({"rank": rank, "suit": suit})
             return cards
@@ -250,7 +277,7 @@ def parse_game_from_text(text):
 def is_finished_game(text):
     return "✅" in text or "🔰" in text
 
-# -------------------- LIVE API (ДЛЯ ЗАДЕРЖКИ) --------------------
+# -------------------- LIVE API --------------------
 def get_active_games():
     url = (
         f"{BASE_URL}/service-api/main-live-feed/v3/games1x2"
@@ -298,24 +325,29 @@ def get_fresh_latency():
             return latency
     return None
 
-# -------------------- ТВОИ ПРАВИЛА (НЕ МЕНЯТЬ) --------------------
+# -------------------- ТВОИ ПРАВИЛА (С ПРОЦЕНТАМИ) --------------------
+LATENCY_PROBS = {
+    (93, 95): {"♣️": 28.3, "♥️": 24.5, "♠️": 23.5, "♦️": 23.7},
+    (95, 97): {"♠️": 29.1, "♥️": 28.7, "♣️": 21.5, "♦️": 20.7},
+    (97, 99): {"♦️": 26.7, "♠️": 25.9, "♣️": 24.5, "♥️": 22.9},
+    (99, 101): {"♥️": 27.4, "♦️": 25.3, "♠️": 24.2, "♣️": 23.1},
+    (101, 103): {"♣️": 26.5, "♠️": 25.1, "♥️": 24.8, "♦️": 23.6},
+    (103, 105): {"♥️": 27.8, "♦️": 24.6, "♣️": 24.2, "♠️": 23.4},
+    (105, 200): {"♠️": 27.6, "♣️": 25.9, "♥️": 24.3, "♦️": 22.2},
+}
+
+def get_suit_probs(latency):
+    for (low, high), probs in LATENCY_PROBS.items():
+        if low <= latency < high:
+            return probs
+    return None
+
 def predict_suit_by_latency(latency):
-    if 93 <= latency < 95:
-        return "♣️"
-    elif 95 <= latency < 97:
-        return "♠️"
-    elif 97 <= latency < 99:
-        return "♦️"
-    elif 99 <= latency < 101:
-        return "♥️"
-    elif 101 <= latency < 103:
-        return "♣️"
-    elif 103 <= latency < 105:
-        return "♥️"
-    elif latency >= 105:
-        return "♠️"
-    else:
+    probs = get_suit_probs(latency)
+    if not probs:
         return None
+    sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+    return sorted_probs[0][0]
 
 def refine_by_sequence(p1, p2, p3, base_suit, latency):
     if 93 <= latency < 95:
@@ -372,7 +404,7 @@ def rule_prediction(source_game, latency):
 
     return refine_by_sequence(p1, p2, p3, base, latency)
 
-# -------------------- ML --------------------
+# -------------------- FEATURES / ML --------------------
 def card_features(card):
     if not card:
         return [0, 0]
@@ -499,7 +531,7 @@ def ml_prediction(source_game, latency):
     )
     return SUITS[idx]
 
-# -------------------- ХРАНИЛИЩЕ ИГР --------------------
+# -------------------- GAME STORAGE --------------------
 games_by_number = {}
 
 def add_game(text):
@@ -519,7 +551,7 @@ def cleanup_games():
         for k in keys[:-MAX_MESSAGES]:
             games_by_number.pop(k, None)
 
-# -------------------- СРАВНЕНИЕ ML И ПРАВИЛ --------------------
+# -------------------- UPDATE MODE --------------------
 def update_mode():
     preds = state.get("predictions", [])
     if len(preds) < RECENT_COMPARE:
@@ -563,10 +595,9 @@ def update_mode():
     save_json(STATE_FILE, state)
 
 # =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЧНО КАК В ТВОЁМ РАБОЧЕМ КОДЕ)
+# ПРОВЕРКА РЕЗУЛЬТАТА (ИЗ ТВОЕГО РАБОЧЕГО КОДА)
 # =====================================================================
 def check_results():
-    """Проверяет все ожидающие прогнозы — ТОЧНО КАК В ТВОЁМ СТАРОМ БОТЕ."""
     global all_messages, state
 
     for entry in state.get("predictions", []):
@@ -611,7 +642,6 @@ def check_results():
                 print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
                 dogon_number = i
 
-                # Обновляем entry
                 entry["selected_result"] = True
                 entry["rule_result"] = True if entry.get("rule_prediction") == predicted_suit else False
                 entry["ml_result"] = True if entry.get("ml_prediction") == predicted_suit else False
@@ -620,14 +650,12 @@ def check_results():
                 entry["dogon"] = dogon_number
                 entry["status"] = "win"
 
-                # Обновляем статистику
                 if entry.get("rule_prediction"):
                     state["rule_wins" if entry["rule_result"] else "rule_losses"] += 1
                 if entry.get("ml_prediction"):
                     state["ml_wins" if entry["ml_result"] else "ml_losses"] += 1
                 state["total_predictions"] += 1
 
-                # Редактируем сообщение
                 if dogon_number == 0:
                     suffix = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{game_to_check}"
                 else:
@@ -636,7 +664,6 @@ def check_results():
                 edit_message(message_id, original_text + suffix)
                 entry["message_text"] = original_text + suffix
 
-                # Сохраняем обучающий пример для ML
                 source = find_game(entry.get("source"))
                 latency = entry.get("latency")
                 if source and latency is not None:
@@ -654,7 +681,6 @@ def check_results():
                 save_json(STATE_FILE, state)
                 return
 
-            # Если дошли до последней игры и она завершена, но масти нет
             if i == max_games_to_check - 1:
                 print(f"❌ Масть {predicted_suit} НЕ НАЙДЕНА за {max_games_to_check} игр", flush=True)
 
@@ -677,10 +703,9 @@ def check_results():
                 save_json(STATE_FILE, state)
                 return
 
-        # Если ни одна игра не завершена — ждём
         print(f"⏳ Ни одна из игр #{target}-#{target + DOGON_GAMES - 1} ещё не завершена, ждём...", flush=True)
 
-# -------------------- ПЛАНИРОВЩИК ПРОГНОЗОВ --------------------
+# -------------------- PREDICTION SCHEDULER --------------------
 def schedule_for_game(game_number):
     target = game_number + OFFSET
 
@@ -781,7 +806,7 @@ def prediction_text(entry, prediction, source_game, mode):
     msg += "⏰ " + datetime.now(MOSCOW_TZ).strftime("%H:%M:%S")
     return msg
 
-# -------------------- СТАТИСТИКА --------------------
+# -------------------- STATS --------------------
 def stats_text():
     samples = len(state.get("training_samples", []))
     total = state.get("total_predictions", 0)
@@ -811,7 +836,7 @@ def stats_text():
         f"🔄 Переключений: {state.get('switches', 0)}"
     )
 
-# -------------------- ОФФСЕТ --------------------
+# -------------------- OFFSET --------------------
 def load_offset():
     try:
         return int(OFFSET_FILE.read_text().strip())
@@ -827,11 +852,13 @@ def main():
 
     load_models()
 
+    # Если есть данные — пытаемся обучить или дообучить
     if SKLEARN_OK and len(state.get("training_samples", [])) >= MIN_TRAIN_SAMPLES:
         train_models(force=True)
 
     startup_message()
     send_message(stats_text())
+    send_ml_status()  # ← ОТПРАВЛЯЕМ СТАТУС ML
 
     offset = load_offset()
     last_stats = time.time()
@@ -842,10 +869,7 @@ def main():
         try:
             now = time.time()
 
-            # Проверяем результаты
             check_results()
-
-            # Отправляем новые прогнозы
             process_scheduled()
 
             if now - last_stats > 3600:
@@ -872,7 +896,6 @@ def main():
                 if "#N" not in text:
                     continue
 
-                # Сохраняем все сообщения (как в твоём рабочем коде)
                 if text not in all_messages:
                     all_messages.append(text)
                     if len(all_messages) > 500:
@@ -888,13 +911,11 @@ def main():
                     flush=True,
                 )
 
-                # Планируем прогноз для каждой новой игры
                 if not is_finished_game(text):
                     schedule_for_game(n)
 
                 cleanup_games()
 
-            # После обработки сообщений проверяем результаты
             check_results()
             process_scheduled()
 
