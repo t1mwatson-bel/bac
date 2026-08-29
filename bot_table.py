@@ -10,12 +10,12 @@ import requests
 import pytz
 
 # ================================================================
-# ML BOT: ПРОГНОЗ ПО ТАБЛИЦЕ ЗАДЕРЖЕК
+# ML BOT: ТАБЛИЦА + ОБУЧЕНИЕ
 # ================================================================
 
 print("=" * 70, flush=True)
-print("🃏 ML BOT (LATENCY TABLE)", flush=True)
-print("📌 Прогноз масти по задержке | Минимальная уверенность: 60%", flush=True)
+print("🃏 ML BOT (TABLE + LEARNING)", flush=True)
+print("📌 Начинает с таблицы | Учится на результатах", flush=True)
 print("=" * 70, flush=True)
 
 # -------------------- ENV --------------------
@@ -31,10 +31,10 @@ if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
-OFFSET = int(os.getenv("PREDICT_OFFSET", "1"))
+OFFSET = int(os.getenv("PREDICT_OFFSET", "1"))  # ← теперь +1
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
 
-MIN_CONFIDENCE = 0.28  # Минимальная уверенность ML для прогноза
+MIN_CONFIDENCE = 0.29  # 29%
 
 STATE_DIR = Path(os.getenv("STATE_DIR", ".")).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,7 +63,7 @@ print(f"🎯 OFFSET: +{OFFSET}", flush=True)
 print(f"🎯 Минимальная уверенность: {MIN_CONFIDENCE*100:.0f}%", flush=True)
 
 # ================================================================
-# ТАБЛИЦА ЗАДЕРЖЕК (ТВОЯ)
+# ТАБЛИЦА ЗАДЕРЖЕК (АЗБУКА)
 # ================================================================
 LATENCY_PROBS = {
     (93, 95): {"♣️": 28.3, "♥️": 24.5, "♠️": 23.5, "♦️": 23.7},
@@ -75,20 +75,31 @@ LATENCY_PROBS = {
     (105, 200): {"♠️": 27.6, "♣️": 25.9, "♥️": 24.3, "♦️": 22.2},
 }
 
-def get_suit_by_latency(latency):
-    """Возвращает масть с наибольшей вероятностью по таблице"""
-    for (low, high), probs in LATENCY_PROBS.items():
-        if low <= latency < high:
-            sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-            return sorted_probs[0][0], sorted_probs[0][1]  # масть, вероятность
-    return None, 0.0
+# Загружаем сохранённую "выученную" таблицу, если есть
+def load_learned_table():
+    learned = state.get("learned_probs", {})
+    if learned:
+        # Преобразуем ключи обратно в кортежи (из JSON они стали строками)
+        converted = {}
+        for key, value in learned.items():
+            if isinstance(key, str) and key.startswith("("):
+                try:
+                    low, high = map(int, key.strip("()").split(","))
+                    converted[(low, high)] = value
+                except:
+                    pass
+        if converted:
+            print("🧠 Загружена выученная таблица", flush=True)
+            return converted
+    return None
 
 # -------------------- STATE --------------------
 def default_state():
     return {
         "predictions": [],
         "training_samples": [],
-        "mode": "TABLE",
+        "training_history": [],
+        "learned_probs": {},
         "total_predictions": 0,
         "wins": 0,
         "losses": 0,
@@ -117,11 +128,95 @@ def save_json(path, data):
 state = load_json(STATE_FILE, default_state())
 all_messages = []
 
+# Загружаем выученную таблицу
+learned_table = load_learned_table()
+if learned_table:
+    LATENCY_PROBS.update(learned_table)
+
 # ================================================================
-# ЗАГРУЗКА ДАННЫХ С GITHUB (НЕ ОБЯЗАТЕЛЬНО)
+# ОБУЧЕНИЕ: ПЕРЕСЧЁТ ТАБЛИЦЫ
+# ================================================================
+def collect_training_data(latency, predicted_suit, actual_suit, result):
+    """Сохраняет данные для обучения"""
+    training_sample = {
+        "latency": latency,
+        "predicted_suit": predicted_suit,
+        "actual_suit": actual_suit,
+        "result": result,
+        "timestamp": datetime.now(MOSCOW_TZ).isoformat()
+    }
+    
+    if "training_history" not in state:
+        state["training_history"] = []
+    
+    state["training_history"].append(training_sample)
+    
+    if len(state["training_history"]) > 2000:
+        state["training_history"] = state["training_history"][-2000:]
+    
+    save_json(STATE_FILE, state)
+    print(f"📊 Сохранён результат: {predicted_suit} → {actual_suit} ({'✅' if result else '❌'})", flush=True)
+    
+    # Каждые 10 прогнозов пересчитываем таблицу
+    if len(state["training_history"]) % 10 == 0 and len(state["training_history"]) >= 10:
+        retrain_confidence_table()
+
+def retrain_confidence_table():
+    """Пересчитывает таблицу на основе реальных данных"""
+    history = state.get("training_history", [])
+    if len(history) < 10:
+        return
+    
+    print(f"🧠 Пересчитываю таблицу на основе {len(history)} реальных результатов...", flush=True)
+    
+    new_probs = {}
+    for (low, high), _ in LATENCY_PROBS.items():
+        range_data = [e for e in history if low <= e.get("latency", 0) < high]
+        
+        if not range_data:
+            continue
+        
+        # Считаем успешность для каждой масти
+        suit_stats = {}
+        for entry in range_data:
+            suit = entry.get("actual_suit")
+            result = entry.get("result", False)
+            if suit not in suit_stats:
+                suit_stats[suit] = {"wins": 0, "total": 0}
+            suit_stats[suit]["total"] += 1
+            if result:
+                suit_stats[suit]["wins"] += 1
+        
+        if suit_stats:
+            total = sum(s["total"] for s in suit_stats.values())
+            if total > 0:
+                new_probs[(low, high)] = {}
+                for suit, stats in suit_stats.items():
+                    # Сглаживание: (победы + 1) / (всего + количество_мастей)
+                    smoothed = (stats["wins"] + 1) / (stats["total"] + len(suit_stats))
+                    new_probs[(low, high)][suit] = round(smoothed * 100, 1)
+                
+                # Нормализуем
+                total_prob = sum(new_probs[(low, high)].values())
+                if total_prob > 0:
+                    for suit in new_probs[(low, high)]:
+                        new_probs[(low, high)][suit] = round(
+                            new_probs[(low, high)][suit] / total_prob * 100, 1
+                        )
+    
+    if new_probs:
+        global LATENCY_PROBS
+        LATENCY_PROBS.update(new_probs)
+        state["learned_probs"] = {}
+        for (low, high), probs in LATENCY_PROBS.items():
+            state["learned_probs"][f"({low},{high})"] = probs
+        save_json(STATE_FILE, state)
+        print(f"✅ Таблица уверенности обновлена!", flush=True)
+
+# ================================================================
+# ЗАГРУЗКА ДАННЫХ С GITHUB
 # ================================================================
 def sync_state_with_github():
-    """Загружает данные с GitHub (опционально)"""
     GITHUB_RAW_URL = "https://raw.githubusercontent.com/t1mwatson-bel/bac/main/hybrid_state.json"
     try:
         print("🔄 Загружаю dataset с GitHub...", flush=True)
@@ -136,12 +231,10 @@ def sync_state_with_github():
         
         print(f"📊 Загружено {len(github_data)} записей с GitHub", flush=True)
         
-        # Просто сохраняем как training_samples для статистики
         new_samples = []
         for entry in github_data:
             if any("?" in str(card) for card in entry.get("cards", [])):
                 continue
-            # Сохраняем только карты и задержку
             new_samples.append({
                 "cards": entry.get("cards", []),
                 "latency": entry.get("latency_ms", 100),
@@ -321,15 +414,21 @@ def get_fresh_latency():
     return None
 
 # -------------------- ПРОГНОЗ ПО ТАБЛИЦЕ --------------------
+def get_suit_by_latency(latency):
+    """Возвращает масть с наибольшей вероятностью по таблице"""
+    for (low, high), probs in LATENCY_PROBS.items():
+        if low <= latency < high:
+            sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+            return sorted_probs[0][0], sorted_probs[0][1]
+    return None, 0.0
+
 def predict_by_latency(latency):
-    """Основная функция прогноза"""
     suit, confidence = get_suit_by_latency(latency)
     
     if suit is None:
         print(f"⏭️ Нет данных для задержки {latency:.1f} мс", flush=True)
         return None, 0.0
     
-    # Уверенность в процентах → в долю (0.60)
     confidence_decimal = confidence / 100.0
     
     if confidence_decimal < MIN_CONFIDENCE:
@@ -373,6 +472,7 @@ def check_results():
         predicted_suit = entry.get("selected_prediction")
         message_id = entry.get("message_id")
         original_text = entry.get("message_text", "")
+        latency = entry.get("latency", 100)
 
         if not predicted_suit or not message_id:
             continue
@@ -396,11 +496,17 @@ def check_results():
                 continue
 
             suit_found = False
+            actual_suit = None
             player_cards = game_data.get("player_cards", [])
             for card in player_cards:
                 if card.get("suit") == predicted_suit:
                     suit_found = True
+                    actual_suit = predicted_suit
                     break
+            
+            # Если масть не найдена, берём первую карту игрока как фактическую
+            if not actual_suit and player_cards:
+                actual_suit = player_cards[0].get("suit", "♠️")
 
             if suit_found:
                 print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
@@ -413,6 +519,9 @@ def check_results():
 
                 state["wins"] = state.get("wins", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
+
+                # ⭐ СОХРАНЯЕМ РЕЗУЛЬТАТ ДЛЯ ОБУЧЕНИЯ
+                collect_training_data(latency, predicted_suit, actual_suit, True)
 
                 suffix = f"\n\n✅ <b>ЗАШЛО</b> в игре #N{game_to_check}" if i == 0 else f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}"
                 edit_message(message_id, original_text + suffix)
@@ -430,6 +539,9 @@ def check_results():
 
                 state["losses"] = state.get("losses", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
+
+                # ⭐ СОХРАНЯЕМ РЕЗУЛЬТАТ ДЛЯ ОБУЧЕНИЯ
+                collect_training_data(latency, predicted_suit, actual_suit, False)
 
                 suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
                 edit_message(message_id, original_text + suffix)
@@ -483,7 +595,6 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        # ⭐ ПРОГНОЗ ПО ТАБЛИЦЕ
         prediction, confidence = predict_by_latency(latency)
         
         if prediction is None:
@@ -542,15 +653,19 @@ def stats_text():
     wins = state.get("wins", 0)
     losses = state.get("losses", 0)
     acc = f"{wins / total * 100:.1f}%" if total else "—"
+    history = len(state.get("training_history", []))
+    learned = len(state.get("learned_probs", {}))
 
     return (
-        "📊 <b>СТАТИСТИКА (TABLE)</b>\n"
+        "📊 <b>СТАТИСТИКА (TABLE + LEARNING)</b>\n"
         f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n"
         "==============================\n"
         f"📈 Всего прогнозов: {total}\n"
         f"✅ Зашло: {wins}\n"
         f"❌ Не зашло: {losses}\n"
         f"🎯 Точность: {acc}\n"
+        f"🧠 Собрано данных: {history}\n"
+        f"📊 Выучено диапазонов: {learned}\n"
         f"🎯 Уверенность ≥ {MIN_CONFIDENCE*100:.0f}%"
     )
 
@@ -569,10 +684,9 @@ def main():
     global all_messages, state
 
     print("=" * 70, flush=True)
-    print("🃏 ML BOT (LATENCY TABLE)", flush=True)
+    print("🃏 ML BOT (TABLE + LEARNING)", flush=True)
     print("=" * 70, flush=True)
 
-    # Загружаем данные с GitHub (опционально)
     sync_state_with_github()
 
     send_message(stats_text())
