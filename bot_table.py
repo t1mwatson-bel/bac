@@ -5,17 +5,17 @@ import re
 import time
 import traceback
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
 import pytz
 
 # ================================================================
-# ML BOT (DATASET FROM GITHUB)
+# ML BOT: ПРОГНОЗ ПО ТАБЛИЦЕ ЗАДЕРЖЕК
 # ================================================================
 
 print("=" * 70, flush=True)
-print("🃏 ML BOT (DATASET FROM GITHUB)", flush=True)
-print("📌 Загрузка датасета с GitHub для обучения ML", flush=True)
+print("🃏 ML BOT (LATENCY TABLE)", flush=True)
+print("📌 Прогноз масти по задержке | Минимальная уверенность: 60%", flush=True)
 print("=" * 70, flush=True)
 
 # -------------------- ENV --------------------
@@ -31,18 +31,16 @@ if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
-OFFSET = int(os.getenv("PREDICT_OFFSET", "1"))
+OFFSET = int(os.getenv("PREDICT_OFFSET", "10"))
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
 
-MIN_CONFIDENCE = 0.60
-MIN_TRAIN_SAMPLES = 50
+MIN_CONFIDENCE = 0.60  # Минимальная уверенность ML для прогноза
 
 STATE_DIR = Path(os.getenv("STATE_DIR", ".")).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 STATE_FILE = STATE_DIR / "hybrid_state.json"
 OFFSET_FILE = STATE_DIR / "telegram_offset.txt"
-MODEL_FILE = STATE_DIR / "hybrid_ml_models.joblib"
 
 MAX_MESSAGES = 3000
 MAX_STATE_PREDICTIONS = 3000
@@ -60,30 +58,40 @@ SUIT_TO_ID = {s: i for i, s in enumerate(SUITS)}
 RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 RANK_TO_ID = {r: i + 1 for i, r in enumerate(RANKS)}
 
-# -------------------- SKLEARN --------------------
-try:
-    from sklearn.ensemble import RandomForestClassifier
-    import joblib
-    SKLEARN_OK = True
-except Exception:
-    SKLEARN_OK = False
-
 print(f"📁 STATE_DIR: {STATE_DIR}", flush=True)
-print(f"🤖 sklearn: {'OK' if SKLEARN_OK else 'НЕ УСТАНОВЛЕН'}", flush=True)
 print(f"🎯 OFFSET: +{OFFSET}", flush=True)
-print(f"🎯 Минимальная уверенность ML: {MIN_CONFIDENCE*100:.0f}%", flush=True)
+print(f"🎯 Минимальная уверенность: {MIN_CONFIDENCE*100:.0f}%", flush=True)
+
+# ================================================================
+# ТАБЛИЦА ЗАДЕРЖЕК (ТВОЯ)
+# ================================================================
+LATENCY_PROBS = {
+    (93, 95): {"♣️": 28.3, "♥️": 24.5, "♠️": 23.5, "♦️": 23.7},
+    (95, 97): {"♠️": 29.1, "♥️": 28.7, "♣️": 21.5, "♦️": 20.7},
+    (97, 99): {"♦️": 26.7, "♠️": 25.9, "♣️": 24.5, "♥️": 22.9},
+    (99, 101): {"♥️": 27.4, "♦️": 25.3, "♠️": 24.2, "♣️": 23.1},
+    (101, 103): {"♣️": 26.5, "♠️": 25.1, "♥️": 24.8, "♦️": 23.6},
+    (103, 105): {"♥️": 27.8, "♦️": 24.6, "♣️": 24.2, "♠️": 23.4},
+    (105, 200): {"♠️": 27.6, "♣️": 25.9, "♥️": 24.3, "♦️": 22.2},
+}
+
+def get_suit_by_latency(latency):
+    """Возвращает масть с наибольшей вероятностью по таблице"""
+    for (low, high), probs in LATENCY_PROBS.items():
+        if low <= latency < high:
+            sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+            return sorted_probs[0][0], sorted_probs[0][1]  # масть, вероятность
+    return None, 0.0
 
 # -------------------- STATE --------------------
 def default_state():
     return {
         "predictions": [],
         "training_samples": [],
-        "mode": "ML",
-        "model_samples": 0,
-        "last_model_train": 0,
-        "ml_wins": 0,
-        "ml_losses": 0,
+        "mode": "TABLE",
         "total_predictions": 0,
+        "wins": 0,
+        "losses": 0,
     }
 
 def load_json(path, default):
@@ -107,18 +115,14 @@ def save_json(path, data):
     tmp.replace(path)
 
 state = load_json(STATE_FILE, default_state())
-MODELS = None
 all_messages = []
 
 # ================================================================
-# СИНХРОНИЗАЦИЯ С GITHUB (АДАПТАЦИЯ МАССИВА)
+# ЗАГРУЗКА ДАННЫХ С GITHUB (НЕ ОБЯЗАТЕЛЬНО)
 # ================================================================
 def sync_state_with_github():
-    """
-    Скачивает dataset с GitHub и преобразует массив игр в формат бота.
-    """
+    """Загружает данные с GitHub (опционально)"""
     GITHUB_RAW_URL = "https://raw.githubusercontent.com/t1mwatson-bel/bac/main/hybrid_state.json"
-    
     try:
         print("🔄 Загружаю dataset с GitHub...", flush=True)
         r = requests.get(GITHUB_RAW_URL, timeout=10)
@@ -127,77 +131,31 @@ def sync_state_with_github():
             return False
         
         github_data = r.json()
-        
         if not isinstance(github_data, list):
-            print("⚠️ Неожиданный формат данных с GitHub (ожидался массив)", flush=True)
             return False
         
         print(f"📊 Загружено {len(github_data)} записей с GitHub", flush=True)
         
-        # Создаём новый список training_samples
+        # Просто сохраняем как training_samples для статистики
         new_samples = []
         for entry in github_data:
-            # Пропускаем записи с неизвестными картами
             if any("?" in str(card) for card in entry.get("cards", [])):
                 continue
-            
-            # Создаём объект игры для make_features
-            source_game = {
-                "player_cards": [],
-                "dealer_cards": []
-            }
-            
-            cards = entry.get("cards", [])
-            # Берём первые 2 карты как "игрок", остальные как "дилер"
-            for card in cards[:2]:
-                if card and len(card) >= 2:
-                    source_game["player_cards"].append({
-                        "rank": card[:-1] if card else "",
-                        "suit": card[-1] if card else ""
-                    })
-            for card in cards[2:]:
-                if card and len(card) >= 2:
-                    source_game["dealer_cards"].append({
-                        "rank": card[:-1] if card else "",
-                        "suit": card[-1] if card else ""
-                    })
-            
-            # Целевые метки (масти, которые есть у игрока)
-            target_labels = [0, 0, 0, 0]
-            for card in cards:
-                if card and len(card) >= 2:
-                    suit = card[-1]
-                    if suit in SUITS:
-                        target_labels[SUITS.index(suit)] = 1
-            
-            # Создаём фичи
-            latency = entry.get("latency_ms", 100.0)
-            try:
-                x = make_features(source_game, float(latency))
-            except Exception as e:
-                print(f"⚠️ Ошибка создания фичей: {e}", flush=True)
-                continue
-            
+            # Сохраняем только карты и задержку
             new_samples.append({
-                "x": x,
-                "y": target_labels
+                "cards": entry.get("cards", []),
+                "latency": entry.get("latency_ms", 100),
+                "state": entry.get("state", "0")
             })
         
         if new_samples:
-            # ⭐ ДОБАВЛЯЕМ новые образцы в state
-            state["training_samples"] = state.get("training_samples", [])
-            state["training_samples"].extend(new_samples)
-            print(f"✅ Добавлено {len(new_samples)} новых обучающих примеров из GitHub", flush=True)
-            print(f"📊 Всего training_samples: {len(state['training_samples'])}", flush=True)
+            state["training_samples"] = new_samples
             save_json(STATE_FILE, state)
+            print(f"✅ Сохранено {len(new_samples)} записей в training_samples", flush=True)
             return True
-        else:
-            print("⚠️ Не удалось создать обучающие примеры из загруженных данных", flush=True)
-            return False
-        
+        return False
     except Exception as e:
-        print(f"⚠️ Ошибка загрузки dataset с GitHub: {e}", flush=True)
-        traceback.print_exc()
+        print(f"⚠️ Ошибка загрузки: {e}", flush=True)
         return False
 
 # -------------------- TELEGRAM --------------------
@@ -362,192 +320,24 @@ def get_fresh_latency():
             return latency
     return None
 
-# -------------------- FEATURES / ML --------------------
-def card_features(card):
-    if not card:
-        return [0, 0]
-    return [RANK_TO_ID.get(card.get("rank"), 0), SUIT_TO_ID.get(card.get("suit"), -1) + 1]
-
-def make_features(source_game, latency):
-    p = source_game.get("player_cards", [])
-    d = source_game.get("dealer_cards", [])
-
-    cards = []
-    for i in range(3):
-        cards.extend(card_features(p[i] if i < len(p) else None))
-    for i in range(3):
-        cards.extend(card_features(d[i] if i < len(d) else None))
-
-    suit_counts_p = [0] * 4
-    suit_counts_d = [0] * 4
-    for c in p:
-        if c.get("suit") in SUIT_TO_ID:
-            suit_counts_p[SUIT_TO_ID[c["suit"]]] += 1
-    for c in d:
-        if c.get("suit") in SUIT_TO_ID:
-            suit_counts_d[SUIT_TO_ID[c["suit"]]] += 1
-
-    rank_counts_p = [0] * 9
-    for c in p:
-        if c.get("rank") in RANK_TO_ID:
-            rank_counts_p[RANK_TO_ID[c["rank"]] - 1] += 1
-
-    latency_bin = int(max(0, min(300, latency)) // 2)
-
-    return cards + suit_counts_p + suit_counts_d + rank_counts_p + [latency_bin, round(latency, 1)]
-
-def target_labels(target_game):
-    suits_present = {c.get("suit") for c in target_game.get("player_cards", [])}
-    return [1 if s in suits_present else 0 for s in SUITS]
-
-# -------------------- ОБУЧЕНИЕ ML --------------------
-def train_models(force=False):
-    global MODELS
-    if not SKLEARN_OK:
-        print("❌ sklearn не установлен", flush=True)
-        return False
-
-    samples = state.get("training_samples", [])
-    sample_count = len(samples)
+# -------------------- ПРОГНОЗ ПО ТАБЛИЦЕ --------------------
+def predict_by_latency(latency):
+    """Основная функция прогноза"""
+    suit, confidence = get_suit_by_latency(latency)
     
-    print(f"📊 Образцов для обучения: {sample_count}", flush=True)
-    
-    if sample_count < MIN_TRAIN_SAMPLES:
-        print(f"⏳ Нужно минимум {MIN_TRAIN_SAMPLES} образцов (есть {sample_count})", flush=True)
-        return False
-
-    try:
-        X = []
-        y_all = []
-        
-        for s in samples:
-            x = s.get("x")
-            y = s.get("y")
-            if x is None or y is None:
-                continue
-            X.append(x)
-            y_all.append(y)
-        
-        if len(X) < MIN_TRAIN_SAMPLES:
-            print(f"⚠️ После фильтрации осталось {len(X)} образцов", flush=True)
-            return False
-        
-        print(f"🧠 Обучаю ML на {len(X)} образцах...", flush=True)
-        
-        models = []
-        for suit_idx in range(4):
-            y = [yy[suit_idx] for yy in y_all]
-            if len(set(y)) < 2:
-                print(f"⚠️ Масть {SUITS[suit_idx]}: недостаточно классов", flush=True)
-                models.append(None)
-                continue
-            
-            model = RandomForestClassifier(
-                n_estimators=100,
-                max_depth=8,
-                min_samples_leaf=5,
-                random_state=42 + suit_idx,
-                n_jobs=-1,
-            )
-            model.fit(X, y)
-            models.append(model)
-            print(f"✅ Масть {SUITS[suit_idx]}: обучена", flush=True)
-
-        MODELS = models
-        state["last_model_train"] = sample_count
-        state["model_samples"] = sample_count
-
-        try:
-            joblib.dump({"models": MODELS, "samples": sample_count}, MODEL_FILE)
-            print(f"💾 Модель сохранена: {MODEL_FILE}", flush=True)
-        except Exception as e:
-            print(f"⚠️ Не удалось сохранить ML-модель: {e}", flush=True)
-
-        print(f"🤖 ML ОБУЧЕН. Образцов: {sample_count}", flush=True)
-        return True
-        
-    except Exception as e:
-        print(f"❌ Ошибка обучения ML: {e}", flush=True)
-        traceback.print_exc()
-        return False
-
-def load_models():
-    global MODELS
-    if not SKLEARN_OK or not MODEL_FILE.exists():
-        print("📁 Файл модели не найден, будет создан при обучении", flush=True)
-        return
-    
-    try:
-        obj = joblib.load(MODEL_FILE)
-        MODELS = obj.get("models")
-        samples = obj.get("samples", 0)
-        print(f"🤖 ML-модель загружена из {MODEL_FILE} ({samples} образцов)", flush=True)
-    except Exception as e:
-        print(f"⚠️ Не удалось загрузить ML-модель: {e}", flush=True)
-
-def ensure_model_trained():
-    if not SKLEARN_OK:
-        return False
-    
-    samples = len(state.get("training_samples", []))
-    if samples < MIN_TRAIN_SAMPLES:
-        print(f"⏳ Нужно минимум {MIN_TRAIN_SAMPLES} образцов (есть {samples})", flush=True)
-        return False
-    
-    if MODELS is not None:
-        print("✅ Модель уже загружена", flush=True)
-        return True
-    
-    print("🧠 Обучаю модель...", flush=True)
-    return train_models(force=True)
-
-def ml_prediction_with_confidence(source_game, latency):
-    if MODELS is None:
-        print("🤖 ML: модель не загружена", flush=True)
+    if suit is None:
+        print(f"⏭️ Нет данных для задержки {latency:.1f} мс", flush=True)
         return None, 0.0
-
-    try:
-        x = [make_features(source_game, latency)]
-        
-        probs = []
-        for idx, model in enumerate(MODELS):
-            if model is None:
-                probs.append(0.0)
-                continue
-            try:
-                p = model.predict_proba(x)[0]
-                classes = list(model.classes_)
-                if 1 in classes:
-                    prob = float(p[classes.index(1)])
-                else:
-                    prob = 0.0
-                probs.append(prob)
-            except Exception:
-                probs.append(0.0)
-
-        if not probs or max(probs) <= 0:
-            print("🤖 ML: все вероятности = 0", flush=True)
-            return None, 0.0
-
-        max_prob = max(probs)
-        idx = max(range(4), key=lambda i: probs[i])
-        result = SUITS[idx]
-        
-        print(
-            f"🤖 ML: {result} с уверенностью {max_prob*100:.1f}% | " +
-            " ".join(f"{SUITS[i]}={probs[i]*100:.1f}%" for i in range(4)),
-            flush=True,
-        )
-        
-        if max_prob < MIN_CONFIDENCE:
-            print(f"⏭️ Уверенность {max_prob*100:.1f}% < {MIN_CONFIDENCE*100:.0f}% — прогноз НЕ ДАЁМ", flush=True)
-            return None, max_prob
-        
-        return result, max_prob
-        
-    except Exception as e:
-        print(f"❌ Ошибка ML прогноза: {e}", flush=True)
-        return None, 0.0
+    
+    # Уверенность в процентах → в долю (0.60)
+    confidence_decimal = confidence / 100.0
+    
+    if confidence_decimal < MIN_CONFIDENCE:
+        print(f"⏭️ Уверенность {confidence:.1f}% < {MIN_CONFIDENCE*100:.0f}% — НЕ ДАЁМ", flush=True)
+        return None, confidence_decimal
+    
+    print(f"📊 Задержка {latency:.1f} мс → {suit} ({confidence:.1f}%)", flush=True)
+    return suit, confidence_decimal
 
 # -------------------- GAME STORAGE --------------------
 games_by_number = {}
@@ -568,32 +358,6 @@ def cleanup_games():
         keys = sorted(games_by_number.keys())
         for k in keys[:-MAX_MESSAGES]:
             games_by_number.pop(k, None)
-
-# -------------------- ОЧИСТКА ЗАВИСШИХ ПРОГНОЗОВ --------------------
-def cleanup_stuck_predictions():
-    """Удаляет прогнозы, которые висят в scheduled больше 5 минут"""
-    now = datetime.now(MOSCOW_TZ)
-    to_remove = []
-    
-    for i, entry in enumerate(state.get("predictions", [])):
-        if entry.get("status") == "scheduled":
-            created = entry.get("created")
-            if created:
-                try:
-                    created_time = datetime.fromisoformat(created)
-                    if (now - created_time).total_seconds() > 300:  # 5 минут
-                        to_remove.append(i)
-                        print(f"⏰ Удаляю зависший прогноз #{entry.get('target')} (старше 5 минут)", flush=True)
-                except:
-                    pass
-    
-    if to_remove:
-        predictions = state.get("predictions", [])
-        for i in sorted(to_remove, reverse=True):
-            if i < len(predictions):
-                predictions.pop(i)
-        state["predictions"] = predictions
-        save_json(STATE_FILE, state)
 
 # =====================================================================
 # ПРОВЕРКА РЕЗУЛЬТАТА
@@ -642,31 +406,17 @@ def check_results():
                 print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
 
                 entry["selected_result"] = True
-                entry["ml_result"] = True
                 entry["evaluated"] = True
                 entry["result_game"] = game_to_check
                 entry["dogon"] = i
                 entry["status"] = "win"
 
-                state["ml_wins"] = state.get("ml_wins", 0) + 1
+                state["wins"] = state.get("wins", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
 
                 suffix = f"\n\n✅ <b>ЗАШЛО</b> в игре #N{game_to_check}" if i == 0 else f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}"
                 edit_message(message_id, original_text + suffix)
                 entry["message_text"] = original_text + suffix
-
-                source = find_game(entry.get("source"))
-                latency = entry.get("latency")
-                if source and latency is not None:
-                    target_game_data = parse_game_from_text(game_msg)
-                    if target_game_data:
-                        state["training_samples"].append({
-                            "x": make_features(source, float(latency)),
-                            "y": target_labels(target_game_data),
-                        })
-
-                if len(state["training_samples"]) > 5000:
-                    state["training_samples"] = state["training_samples"][-5000:]
 
                 save_json(STATE_FILE, state)
                 return
@@ -675,11 +425,10 @@ def check_results():
                 print(f"❌ Масть {predicted_suit} НЕ НАЙДЕНА за {max_games_to_check} игр", flush=True)
 
                 entry["selected_result"] = False
-                entry["ml_result"] = False
                 entry["evaluated"] = True
                 entry["status"] = "lose"
 
-                state["ml_losses"] = state.get("ml_losses", 0) + 1
+                state["losses"] = state.get("losses", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
 
                 suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
@@ -702,7 +451,6 @@ def schedule_for_game(game_number):
     state["predictions"].append({
         "source": source,
         "target": target,
-        "ml_prediction": None,
         "selected_prediction": None,
         "latency": None,
         "confidence": 0.0,
@@ -735,23 +483,18 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        if MODELS is None:
-            print("⏳ ML модель не загружена, ждём...", flush=True)
-            continue
-
-        prediction, confidence = ml_prediction_with_confidence(source, latency)
+        # ⭐ ПРОГНОЗ ПО ТАБЛИЦЕ
+        prediction, confidence = predict_by_latency(latency)
         
         if prediction is None:
-            print(f"⏭️ Прогноз НЕ ДАН (уверенность {confidence*100:.1f}% < {MIN_CONFIDENCE*100:.0f}%)", flush=True)
+            print(f"⏭️ Прогноз НЕ ДАН (уверенность {confidence*100:.1f}%)", flush=True)
             entry["status"] = "skipped"
-            entry["ml_prediction"] = None
             entry["selected_prediction"] = None
             entry["confidence"] = confidence
             entry["latency"] = latency
             save_json(STATE_FILE, state)
             continue
 
-        entry["ml_prediction"] = prediction
         entry["selected_prediction"] = prediction
         entry["latency"] = latency
         entry["confidence"] = confidence
@@ -795,22 +538,20 @@ def prediction_text(entry, prediction, source_game, confidence):
 
 # -------------------- STATS --------------------
 def stats_text():
-    samples = len(state.get("training_samples", []))
     total = state.get("total_predictions", 0)
-    mw = state.get("ml_wins", 0)
-    ml = state.get("ml_losses", 0)
-
-    mtot = mw + ml
-    m_acc = f"{mw / mtot * 100:.1f}%" if mtot else "—"
+    wins = state.get("wins", 0)
+    losses = state.get("losses", 0)
+    acc = f"{wins / total * 100:.1f}%" if total else "—"
 
     return (
-        "📊 <b>СТАТИСТИКА (ML ONLY)</b>\n"
+        "📊 <b>СТАТИСТИКА (TABLE)</b>\n"
         f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n"
         "==============================\n"
         f"📈 Всего прогнозов: {total}\n"
-        f"🧠 Обучающих примеров: {samples}\n"
-        f"🤖 ML: {mw}✅ / {ml}❌ ({m_acc})\n"
-        f"🎯 Минимальная уверенность: {MIN_CONFIDENCE*100:.0f}%"
+        f"✅ Зашло: {wins}\n"
+        f"❌ Не зашло: {losses}\n"
+        f"🎯 Точность: {acc}\n"
+        f"🎯 Уверенность ≥ {MIN_CONFIDENCE*100:.0f}%"
     )
 
 # -------------------- OFFSET --------------------
@@ -828,36 +569,22 @@ def main():
     global all_messages, state
 
     print("=" * 70, flush=True)
-    print("🃏 ML BOT (DATASET FROM GITHUB)", flush=True)
+    print("🃏 ML BOT (LATENCY TABLE)", flush=True)
     print("=" * 70, flush=True)
 
-    # Синхронизация с GitHub
+    # Загружаем данные с GitHub (опционально)
     sync_state_with_github()
-
-    load_models()
-    
-    if SKLEARN_OK:
-        ensure_model_trained()
-
-    # Очистка зависших прогнозов при старте
-    cleanup_stuck_predictions()
 
     send_message(stats_text())
 
     offset = load_offset()
     last_stats = time.time()
-    last_cleanup = time.time()
 
     print("🚀 БОТ ГОТОВ.", flush=True)
 
     while True:
         try:
             now = time.time()
-
-            # Очистка зависших прогнозов каждые 60 секунд
-            if now - last_cleanup > 60:
-                cleanup_stuck_predictions()
-                last_cleanup = now
 
             check_results()
             process_scheduled()
