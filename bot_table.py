@@ -37,7 +37,7 @@ print("✅ Все переменные заданы!", flush=True)
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
-OFFSET = int(os.getenv("PREDICT_OFFSET", "10"))
+OFFSET = int(os.getenv("PREDICT_OFFSET", "1"))
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
 MIN_CONFIDENCE = 29.0  # Минимальная уверенность в процентах
 
