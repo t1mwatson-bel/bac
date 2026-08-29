@@ -115,7 +115,7 @@ all_messages = []
 # ================================================================
 def sync_state_with_github():
     """
-    Скачивает dataset с GitHub и преобразует массив игр в формат training_samples.
+    Скачивает dataset с GitHub и преобразует массив игр в формат бота.
     """
     GITHUB_RAW_URL = "https://raw.githubusercontent.com/t1mwatson-bel/bac/main/hybrid_state.json"
     
@@ -134,30 +134,35 @@ def sync_state_with_github():
         
         print(f"📊 Загружено {len(github_data)} записей с GitHub", flush=True)
         
+        # Создаём новый список training_samples
         new_samples = []
         for entry in github_data:
+            # Пропускаем записи с неизвестными картами
             if any("?" in str(card) for card in entry.get("cards", [])):
                 continue
             
+            # Создаём объект игры для make_features
             source_game = {
                 "player_cards": [],
                 "dealer_cards": []
             }
             
             cards = entry.get("cards", [])
+            # Берём первые 2 карты как "игрок", остальные как "дилер"
             for card in cards[:2]:
                 if card and len(card) >= 2:
                     source_game["player_cards"].append({
-                        "rank": card[:-1],
-                        "suit": card[-1]
+                        "rank": card[:-1] if card else "",
+                        "suit": card[-1] if card else ""
                     })
             for card in cards[2:]:
                 if card and len(card) >= 2:
                     source_game["dealer_cards"].append({
-                        "rank": card[:-1],
-                        "suit": card[-1]
+                        "rank": card[:-1] if card else "",
+                        "suit": card[-1] if card else ""
                     })
             
+            # Целевые метки (масти, которые есть у игрока)
             target_labels = [0, 0, 0, 0]
             for card in cards:
                 if card and len(card) >= 2:
@@ -165,20 +170,30 @@ def sync_state_with_github():
                     if suit in SUITS:
                         target_labels[SUITS.index(suit)] = 1
             
-            if any(target_labels):
-                new_samples.append({
-                    "x": make_features(source_game, entry.get("latency_ms", 100)),
-                    "y": target_labels
-                })
+            # Создаём фичи
+            latency = entry.get("latency_ms", 100.0)
+            try:
+                x = make_features(source_game, float(latency))
+            except Exception as e:
+                print(f"⚠️ Ошибка создания фичей: {e}", flush=True)
+                continue
+            
+            new_samples.append({
+                "x": x,
+                "y": target_labels
+            })
         
         if new_samples:
-            existing_count = len(state.get("training_samples", []))
+            # ⭐ ДОБАВЛЯЕМ новые образцы в state
+            state["training_samples"] = state.get("training_samples", [])
             state["training_samples"].extend(new_samples)
-            added = len(state["training_samples"]) - existing_count
-            print(f"✅ Добавлено {added} новых обучающих примеров из GitHub", flush=True)
+            print(f"✅ Добавлено {len(new_samples)} новых обучающих примеров из GitHub", flush=True)
+            print(f"📊 Всего training_samples: {len(state['training_samples'])}", flush=True)
             save_json(STATE_FILE, state)
-        
-        return True
+            return True
+        else:
+            print("⚠️ Не удалось создать обучающие примеры из загруженных данных", flush=True)
+            return False
         
     except Exception as e:
         print(f"⚠️ Ошибка загрузки dataset с GitHub: {e}", flush=True)
