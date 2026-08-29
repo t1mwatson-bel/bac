@@ -10,12 +10,12 @@ import requests
 import pytz
 
 # ================================================================
-# HYBRID BOT: ТВОИ ПРАВИЛА + ML (БЕЗ ПЕРЕЗАПИСИ STATE)
+# HYBRID BOT: ТОЛЬКО ML (БЕЗ ПРАВИЛ)
 # ================================================================
 
 print("=" * 70, flush=True)
-print("🃏 HYBRID RULES + ML BOT", flush=True)
-print("📌 Сначала: ТВОЯ МЕТОДИКА | Потом: ML, если он лучше", flush=True)
+print("🃏 ML ONLY BOT", flush=True)
+print("📌 Только ML прогнозы | Минимальная уверенность: 60%", flush=True)
 print("=" * 70, flush=True)
 
 # -------------------- ENV --------------------
@@ -34,10 +34,7 @@ BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 OFFSET = int(os.getenv("PREDICT_OFFSET", "10"))
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
 
-MIN_TRAIN_SAMPLES = int(os.getenv("ML_MIN_SAMPLES", "200"))
-RECENT_COMPARE = int(os.getenv("ML_RECENT_COMPARE", "50"))
-SWITCH_MARGIN = float(os.getenv("ML_SWITCH_MARGIN", "0.02"))
-MODEL_REFRESH_EVERY = int(os.getenv("ML_REFRESH_EVERY", "20"))
+MIN_CONFIDENCE = 0.60  # Минимальная уверенность ML для прогноза
 
 STATE_DIR = Path(os.getenv("STATE_DIR", ".")).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,24 +68,21 @@ except Exception:
     SKLEARN_OK = False
 
 print(f"📁 STATE_DIR: {STATE_DIR}", flush=True)
-print(f"🤖 sklearn: {'OK' if SKLEARN_OK else 'НЕ УСТАНОВЛЕН — работают правила'}", flush=True)
+print(f"🤖 sklearn: {'OK' if SKLEARN_OK else 'НЕ УСТАНОВЛЕН'}", flush=True)
 print(f"🎯 OFFSET: +{OFFSET}", flush=True)
-print(f"🧠 ML стартует после: {MIN_TRAIN_SAMPLES} размеченных прогнозов", flush=True)
+print(f"🎯 Минимальная уверенность ML: {MIN_CONFIDENCE*100:.0f}%", flush=True)
 
 # -------------------- STATE --------------------
 def default_state():
     return {
         "predictions": [],
         "training_samples": [],
-        "mode": "RULES",
+        "mode": "ML",
         "model_samples": 0,
         "last_model_train": 0,
-        "rule_wins": 0,
-        "rule_losses": 0,
         "ml_wins": 0,
         "ml_losses": 0,
         "total_predictions": 0,
-        "switches": 0,
     }
 
 def load_json(path, default):
@@ -111,8 +105,13 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
     tmp.replace(path)
 
+# Загружаем state ДО использования
+state = load_json(STATE_FILE, default_state())
+MODELS = None
+all_messages = []
+
 # ================================================================
-# СИНХРОНИЗАЦИЯ С GITHUB (ТОЛЬКО ДОБАВЛЯЕТ)
+# СИНХРОНИЗАЦИЯ С GITHUB
 # ================================================================
 def sync_state_with_github():
     """
@@ -143,7 +142,7 @@ def sync_state_with_github():
                     added += 1
             print(f"✅ Добавлено {added} новых обучающих примеров из GitHub", flush=True)
         
-        # Мержим predictions (только новые, которых ещё нет)
+        # Мержим predictions
         if "predictions" in github_data and isinstance(github_data["predictions"], list):
             existing_targets = {p.get("target") for p in local_state.get("predictions", []) if p.get("target")}
             added = 0
@@ -155,27 +154,22 @@ def sync_state_with_github():
                     added += 1
             print(f"✅ Добавлено {added} новых прогнозов из GitHub", flush=True)
         
-        # Обновляем статистику (только если она больше текущей)
-        for key in ["rule_wins", "rule_losses", "ml_wins", "ml_losses", "total_predictions", "switches"]:
+        # Обновляем статистику
+        for key in ["ml_wins", "ml_losses", "total_predictions"]:
             if key in github_data and github_data[key] > local_state.get(key, 0):
-                old = local_state.get(key, 0)
                 local_state[key] = github_data[key]
-                print(f"📊 {key}: {old} → {local_state[key]}", flush=True)
         
-        # Обновляем model_samples и last_model_train если они больше
         if github_data.get("model_samples", 0) > local_state.get("model_samples", 0):
             local_state["model_samples"] = github_data["model_samples"]
         if github_data.get("last_model_train", 0) > local_state.get("last_model_train", 0):
             local_state["last_model_train"] = github_data["last_model_train"]
         
-        # Сохраняем обновлённый state
         save_json(STATE_FILE, local_state)
-        print(f"✅ State синхронизирован с GitHub (всего {len(local_state.get('training_samples', []))} примеров)", flush=True)
+        print(f"✅ State синхронизирован с GitHub", flush=True)
         return True
         
     except Exception as e:
         print(f"⚠️ Ошибка синхронизации с GitHub: {e}", flush=True)
-        traceback.print_exc()
         return False
 
 # -------------------- TELEGRAM --------------------
@@ -184,11 +178,9 @@ def telegram_get_updates(offset):
     try:
         r = requests.get(url, params={"offset": offset, "timeout": 30}, timeout=35)
         if r.status_code != 200:
-            print(f"❌ Telegram getUpdates: {r.status_code} {r.text[:300]}", flush=True)
             return {}
         return r.json()
-    except Exception as e:
-        print(f"❌ getUpdates: {e}", flush=True)
+    except Exception:
         return {}
 
 def send_message(text):
@@ -201,9 +193,8 @@ def send_message(text):
         )
         if r.status_code == 200:
             return r.json()["result"]["message_id"]
-        print(f"❌ sendMessage: {r.status_code} {r.text[:300]}", flush=True)
-    except Exception as e:
-        print(f"❌ sendMessage: {e}", flush=True)
+    except Exception:
+        pass
     return None
 
 def edit_message(message_id, text):
@@ -221,64 +212,18 @@ def edit_message(message_id, text):
             },
             timeout=10,
         )
-        if r.status_code == 200:
-            return True
-        print(f"❌ editMessageText: {r.status_code} {r.text[:300]}", flush=True)
-    except Exception as e:
-        print(f"❌ editMessageText: {e}", flush=True)
-    return False
+        return r.status_code == 200
+    except Exception:
+        return False
 
 def send_startup_message():
     text = (
-        "🚀 <b>HYBRID RULES + ML</b>\n"
-        "🃏 В начале работает твоя методика\n"
+        "🚀 <b>ML ONLY BOT</b>\n"
+        f"🎯 Минимальная уверенность: {MIN_CONFIDENCE*100:.0f}%\n"
         f"🎯 Цель: +{OFFSET} игр\n"
-        f"🤖 ML обучается параллельно, старт после {MIN_TRAIN_SAMPLES} результатов\n"
-        "🔄 ML станет основным только если будет лучше правил\n"
-        "🛡️ Если ML ухудшится — автоматический возврат к правилам"
+        "📊 ML обучается на твоих данных"
     )
     send_message(text)
-
-def send_ml_status():
-    samples = len(state.get("training_samples", []))
-    total = state.get("total_predictions", 0)
-    mode = state.get("mode", "RULES")
-    model_samples = state.get("model_samples", 0)
-    
-    msg = "🧠 <b>ML СТАТУС</b>\n"
-    msg += f"📊 Обучающих примеров: {samples}/{MIN_TRAIN_SAMPLES}\n"
-    msg += f"📈 Всего прогнозов: {total}\n"
-    msg += f"🔀 Текущий метод: {'🤖 ML' if mode == 'ML' else '📌 Правила'}\n"
-    
-    if MODELS is not None:
-        msg += f"✅ ML модель: ОБУЧЕНА ({model_samples} примеров)\n"
-    elif samples >= MIN_TRAIN_SAMPLES:
-        msg += "⚠️ ML модель: НЕ ОБУЧЕНА (попытка обучения...)\n"
-    else:
-        msg += f"⏳ ML модель: ОЖИДАЕТ ({samples}/{MIN_TRAIN_SAMPLES})\n"
-    
-    if not SKLEARN_OK:
-        msg += "\n❌ <b>ПРОБЛЕМА:</b> sklearn не установлен!\n"
-        msg += "💡 Установи: pip install scikit-learn joblib\n"
-    elif samples >= MIN_TRAIN_SAMPLES and MODELS is None:
-        msg += "\n⚠️ <b>ВНИМАНИЕ:</b> данных достаточно, но модель не обучена.\n"
-        msg += "💡 Возможные причины:\n"
-        msg += "  - Все прогнозы одной масти (нужно разнообразие)\n"
-        msg += "  - Ошибка в обучении (смотри логи)\n"
-        msg += "  - Не хватает памяти\n"
-    elif MODELS is not None:
-        rw = state.get("rule_wins", 0)
-        rl = state.get("rule_losses", 0)
-        mw = state.get("ml_wins", 0)
-        ml = state.get("ml_losses", 0)
-        rtot = rw + rl
-        mtot = mw + ml
-        r_acc = f"{rw / rtot * 100:.1f}%" if rtot else "—"
-        m_acc = f"{mw / mtot * 100:.1f}%" if mtot else "—"
-        msg += f"\n📊 Правила: {rw}✅ / {rl}❌ ({r_acc})\n"
-        msg += f"🤖 ML: {mw}✅ / {ml}❌ ({m_acc})\n"
-    
-    send_message(msg)
 
 # -------------------- PARSING --------------------
 def parse_game_from_text(text):
@@ -346,8 +291,7 @@ def parse_game_from_text(text):
             "dealer_cards": parse_cards(parts[1]),
             "text": text,
         }
-    except Exception as e:
-        print(f"❌ parse_game: {e}", flush=True)
+    except Exception:
         return None
 
 def is_finished_game(text):
@@ -363,7 +307,6 @@ def get_active_games():
     try:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
-            print(f"⚠️ active games HTTP {r.status_code}", flush=True)
             return []
         data = r.json()
         games = data.get("Value", []) if isinstance(data, dict) else data
@@ -371,8 +314,7 @@ def get_active_games():
             g for g in games
             if g.get("liga", {}).get("id") == 2092323 and g.get("id")
         ]
-    except Exception as e:
-        print(f"❌ get_active_games: {e}", flush=True)
+    except Exception:
         return []
 
 def get_game_data(game_id):
@@ -387,8 +329,8 @@ def get_game_data(game_id):
         latency = (time.perf_counter() - t0) * 1000
         if r.status_code == 200:
             return r.json(), latency
-    except Exception as e:
-        print(f"⚠️ get_game_data {game_id}: {e}", flush=True)
+    except Exception:
+        pass
     return None, None
 
 def get_fresh_latency():
@@ -400,85 +342,6 @@ def get_fresh_latency():
         if data is not None and latency is not None:
             return latency
     return None
-
-# -------------------- ТВОИ ПРАВИЛА (С ПРОЦЕНТАМИ) --------------------
-LATENCY_PROBS = {
-    (93, 95): {"♣️": 28.3, "♥️": 24.5, "♠️": 23.5, "♦️": 23.7},
-    (95, 97): {"♠️": 29.1, "♥️": 28.7, "♣️": 21.5, "♦️": 20.7},
-    (97, 99): {"♦️": 26.7, "♠️": 25.9, "♣️": 24.5, "♥️": 22.9},
-    (99, 101): {"♥️": 27.4, "♦️": 25.3, "♠️": 24.2, "♣️": 23.1},
-    (101, 103): {"♣️": 26.5, "♠️": 25.1, "♥️": 24.8, "♦️": 23.6},
-    (103, 105): {"♥️": 27.8, "♦️": 24.6, "♣️": 24.2, "♠️": 23.4},
-    (105, 200): {"♠️": 27.6, "♣️": 25.9, "♥️": 24.3, "♦️": 22.2},
-}
-
-def get_suit_probs(latency):
-    for (low, high), probs in LATENCY_PROBS.items():
-        if low <= latency < high:
-            return probs
-    return None
-
-def predict_suit_by_latency(latency):
-    probs = get_suit_probs(latency)
-    if not probs:
-        return None
-    sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-    return sorted_probs[0][0]
-
-def refine_by_sequence(p1, p2, p3, base_suit, latency):
-    if 93 <= latency < 95:
-        if p1 and p1.get("rank") == "7" and p1.get("suit") == "♣️":
-            return "♥️"
-        elif p1 and p1.get("rank") == "8" and p1.get("suit") == "♠️":
-            return "♣️"
-        elif p1 and p1.get("rank") == "9" and p1.get("suit") == "♥️":
-            return "♦️"
-        elif p1 and p1.get("rank") in ["J", "Q", "K"] and p1.get("suit") == "♣️":
-            return "♥️"
-        elif p1 and p1.get("rank") in ["J", "Q", "K"] and p1.get("suit") == "♠️":
-            return "♣️"
-
-    if 95 <= latency < 97:
-        if p1 and p1.get("rank") == "7" and p1.get("suit") == "♠️":
-            return "♣️"
-        elif p1 and p1.get("rank") == "8" and p1.get("suit") == "♣️":
-            return "♥️"
-        elif p1 and p1.get("rank") == "9" and p1.get("suit") == "♦️":
-            return "♠️"
-
-    if 97 <= latency < 99:
-        if p1 and p1.get("rank") == "9" and p1.get("suit") == "♦️":
-            return "♠️"
-        elif p1 and p1.get("rank") == "8" and p1.get("suit") == "♠️":
-            return "♦️"
-        elif p1 and p1.get("rank") == "7" and p1.get("suit") == "♥️":
-            return "♣️"
-
-    if p1 and p2 and p1.get("suit") == p2.get("suit"):
-        if p1.get("suit") == "♣️":
-            return "♥️"
-        elif p1.get("suit") == "♠️":
-            return "♦️"
-        elif p1.get("suit") == "♦️":
-            return "♣️"
-        elif p1.get("suit") == "♥️":
-            return "♠️"
-
-    return base_suit
-
-def rule_prediction(source_game, latency):
-    base = predict_suit_by_latency(latency)
-    if base is None:
-        return None
-
-    p = source_game.get("player_cards", [])
-    d = source_game.get("dealer_cards", [])
-
-    p1 = p[0] if len(p) > 0 else None
-    p3 = p[1] if len(p) > 1 else None
-    p2 = d[0] if len(d) > 0 else None
-
-    return refine_by_sequence(p1, p2, p3, base, latency)
 
 # -------------------- FEATURES / ML --------------------
 def card_features(card):
@@ -518,7 +381,7 @@ def target_labels(target_game):
     suits_present = {c.get("suit") for c in target_game.get("player_cards", [])}
     return [1 if s in suits_present else 0 for s in SUITS]
 
-# -------------------- ОБУЧЕНИЕ ML (БЕЗ ПЕРЕЗАПИСИ) --------------------
+# -------------------- ОБУЧЕНИЕ ML --------------------
 def train_models(force=False):
     global MODELS
     if not SKLEARN_OK:
@@ -530,14 +393,9 @@ def train_models(force=False):
     
     print(f"📊 Образцов для обучения: {sample_count}", flush=True)
     
-    if sample_count < MIN_TRAIN_SAMPLES:
-        print(f"⏳ Нужно ещё {MIN_TRAIN_SAMPLES - sample_count} образцов", flush=True)
+    if sample_count < 10:
+        print(f"⏳ Нужно минимум 10 образцов (есть {sample_count})", flush=True)
         return False
-
-    last = int(state.get("last_model_train", 0))
-    if not force and sample_count - last < MODEL_REFRESH_EVERY:
-        print(f"⏳ Дообучение через {MODEL_REFRESH_EVERY - (sample_count - last)} прогнозов", flush=True)
-        return MODELS is not None
 
     try:
         X = []
@@ -551,7 +409,7 @@ def train_models(force=False):
             X.append(x)
             y_all.append(y)
         
-        if len(X) < MIN_TRAIN_SAMPLES:
+        if len(X) < 10:
             print(f"⚠️ После фильтрации осталось {len(X)} образцов", flush=True)
             return False
         
@@ -561,17 +419,16 @@ def train_models(force=False):
         for suit_idx in range(4):
             y = [yy[suit_idx] for yy in y_all]
             if len(set(y)) < 2:
-                print(f"⚠️ Масть {SUITS[suit_idx]}: недостаточно классов ({len(set(y))})", flush=True)
+                print(f"⚠️ Масть {SUITS[suit_idx]}: недостаточно классов", flush=True)
                 models.append(None)
                 continue
             
             model = RandomForestClassifier(
-                n_estimators=300,
-                max_depth=10,
-                min_samples_leaf=3,
+                n_estimators=100,
+                max_depth=8,
+                min_samples_leaf=5,
                 random_state=42 + suit_idx,
                 n_jobs=-1,
-                class_weight="balanced_subsample",
             )
             model.fit(X, y)
             models.append(model)
@@ -608,30 +465,30 @@ def load_models():
         print(f"🤖 ML-модель загружена из {MODEL_FILE} ({samples} образцов)", flush=True)
     except Exception as e:
         print(f"⚠️ Не удалось загрузить ML-модель: {e}", flush=True)
-        if len(state.get("training_samples", [])) >= MIN_TRAIN_SAMPLES:
-            print("🔄 Попытка переобучения...", flush=True)
-            train_models(force=True)
 
 def ensure_model_trained():
     if not SKLEARN_OK:
         return False
     
     samples = len(state.get("training_samples", []))
-    if samples < MIN_TRAIN_SAMPLES:
-        print(f"⏳ Ждём {MIN_TRAIN_SAMPLES} образцов (есть {samples})", flush=True)
+    if samples < 10:
+        print(f"⏳ Нужно минимум 10 образцов (есть {samples})", flush=True)
         return False
     
     if MODELS is not None:
         print("✅ Модель уже загружена", flush=True)
         return True
     
-    print("🧠 Данных достаточно, обучаю модель...", flush=True)
+    print("🧠 Обучаю модель...", flush=True)
     return train_models(force=True)
 
-def ml_prediction(source_game, latency):
+def ml_prediction_with_confidence(source_game, latency):
+    """
+    Возвращает (масть, уверенность) или (None, 0) если уверенность < 60%
+    """
     if MODELS is None:
         print("🤖 ML: модель не загружена", flush=True)
-        return None
+        return None, 0.0
 
     try:
         x = [make_features(source_game, latency)]
@@ -649,29 +506,32 @@ def ml_prediction(source_game, latency):
                 else:
                     prob = 0.0
                 probs.append(prob)
-            except Exception as e:
-                print(f"⚠️ Ошибка предсказания для масти {SUITS[idx]}: {e}", flush=True)
+            except Exception:
                 probs.append(0.0)
 
         if not probs or max(probs) <= 0:
             print("🤖 ML: все вероятности = 0", flush=True)
-            return None
+            return None, 0.0
 
+        max_prob = max(probs)
         idx = max(range(4), key=lambda i: probs[i])
         result = SUITS[idx]
         
         print(
-            f"🤖 ML вероятности: " +
+            f"🤖 ML: {result} с уверенностью {max_prob*100:.1f}% | " +
             " ".join(f"{SUITS[i]}={probs[i]*100:.1f}%" for i in range(4)),
             flush=True,
         )
-        print(f"🤖 ML выбрал: {result}", flush=True)
-        return result
+        
+        if max_prob < MIN_CONFIDENCE:
+            print(f"⏭️ Уверенность {max_prob*100:.1f}% < {MIN_CONFIDENCE*100:.0f}% — прогноз НЕ ДАЁМ", flush=True)
+            return None, max_prob
+        
+        return result, max_prob
         
     except Exception as e:
         print(f"❌ Ошибка ML прогноза: {e}", flush=True)
-        traceback.print_exc()
-        return None
+        return None, 0.0
 
 # -------------------- GAME STORAGE --------------------
 games_by_number = {}
@@ -692,49 +552,6 @@ def cleanup_games():
         keys = sorted(games_by_number.keys())
         for k in keys[:-MAX_MESSAGES]:
             games_by_number.pop(k, None)
-
-# -------------------- UPDATE MODE --------------------
-def update_mode():
-    preds = state.get("predictions", [])
-    if len(preds) < RECENT_COMPARE:
-        return
-
-    recent = preds[-RECENT_COMPARE:]
-
-    rule_wins = sum(1 for p in recent if p.get("rule_result") is True)
-    rule_losses = sum(1 for p in recent if p.get("rule_result") is False)
-    ml_wins = sum(1 for p in recent if p.get("ml_result") is True)
-    ml_losses = sum(1 for p in recent if p.get("ml_result") is False)
-
-    rule_total = rule_wins + rule_losses
-    ml_total = ml_wins + ml_losses
-
-    if rule_total == 0 or ml_total == 0:
-        return
-
-    rule_acc = rule_wins / rule_total
-    ml_acc = ml_wins / ml_total
-
-    current_mode = state.get("mode", "RULES")
-
-    if ml_acc > rule_acc + SWITCH_MARGIN and current_mode != "ML":
-        state["mode"] = "ML"
-        state["switches"] = state.get("switches", 0) + 1
-        print(f"🔄 ПЕРЕКЛЮЧЕНИЕ НА ML: {ml_acc*100:.1f}% > {rule_acc*100:.1f}%", flush=True)
-        send_message(
-            f"🔄 <b>ПЕРЕКЛЮЧЕНИЕ НА ML</b>\n"
-            f"ML: {ml_acc*100:.1f}% vs Правила: {rule_acc*100:.1f}%"
-        )
-    elif rule_acc > ml_acc + SWITCH_MARGIN and current_mode != "RULES":
-        state["mode"] = "RULES"
-        state["switches"] = state.get("switches", 0) + 1
-        print(f"🔄 ВОЗВРАТ К ПРАВИЛАМ: {rule_acc*100:.1f}% > {ml_acc*100:.1f}%", flush=True)
-        send_message(
-            f"🔄 <b>ВОЗВРАТ К ПРАВИЛАМ</b>\n"
-            f"Правила: {rule_acc*100:.1f}% vs ML: {ml_acc*100:.1f}%"
-        )
-
-    save_json(STATE_FILE, state)
 
 # =====================================================================
 # ПРОВЕРКА РЕЗУЛЬТАТА
@@ -766,7 +583,6 @@ def check_results():
                     break
 
             if not game_msg:
-                print(f"⏳ Ждём игру #N{game_to_check} для проверки масти {predicted_suit}", flush=True)
                 continue
 
             game_data = parse_game_from_text(game_msg)
@@ -782,27 +598,18 @@ def check_results():
 
             if suit_found:
                 print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
-                dogon_number = i
 
                 entry["selected_result"] = True
-                entry["rule_result"] = True if entry.get("rule_prediction") == predicted_suit else False
-                entry["ml_result"] = True if entry.get("ml_prediction") == predicted_suit else False
+                entry["ml_result"] = True
                 entry["evaluated"] = True
                 entry["result_game"] = game_to_check
-                entry["dogon"] = dogon_number
+                entry["dogon"] = i
                 entry["status"] = "win"
 
-                if entry.get("rule_prediction"):
-                    state["rule_wins" if entry["rule_result"] else "rule_losses"] += 1
-                if entry.get("ml_prediction"):
-                    state["ml_wins" if entry["ml_result"] else "ml_losses"] += 1
-                state["total_predictions"] += 1
+                state["ml_wins"] = state.get("ml_wins", 0) + 1
+                state["total_predictions"] = state.get("total_predictions", 0) + 1
 
-                if dogon_number == 0:
-                    suffix = f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{game_to_check}"
-                else:
-                    suffix = f"\n\n✅ <b>ЗАШЛО</b> на догоне {dogon_number}: #N{game_to_check}"
-
+                suffix = f"\n\n✅ <b>ЗАШЛО</b> в игре #N{game_to_check}" if i == 0 else f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}"
                 edit_message(message_id, original_text + suffix)
                 entry["message_text"] = original_text + suffix
 
@@ -819,7 +626,6 @@ def check_results():
                 if len(state["training_samples"]) > 5000:
                     state["training_samples"] = state["training_samples"][-5000:]
 
-                update_mode()
                 save_json(STATE_FILE, state)
                 return
 
@@ -827,16 +633,12 @@ def check_results():
                 print(f"❌ Масть {predicted_suit} НЕ НАЙДЕНА за {max_games_to_check} игр", flush=True)
 
                 entry["selected_result"] = False
-                entry["rule_result"] = False if entry.get("rule_prediction") else None
-                entry["ml_result"] = False if entry.get("ml_prediction") else None
+                entry["ml_result"] = False
                 entry["evaluated"] = True
                 entry["status"] = "lose"
 
-                if entry.get("rule_prediction"):
-                    state["rule_losses"] += 1
-                if entry.get("ml_prediction"):
-                    state["ml_losses"] += 1
-                state["total_predictions"] += 1
+                state["ml_losses"] = state.get("ml_losses", 0) + 1
+                state["total_predictions"] = state.get("total_predictions", 0) + 1
 
                 suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
                 edit_message(message_id, original_text + suffix)
@@ -844,8 +646,6 @@ def check_results():
 
                 save_json(STATE_FILE, state)
                 return
-
-        print(f"⏳ Ни одна из игр #{target}-#{target + DOGON_GAMES - 1} ещё не завершена, ждём...", flush=True)
 
 # -------------------- PREDICTION SCHEDULER --------------------
 def schedule_for_game(game_number):
@@ -860,10 +660,10 @@ def schedule_for_game(game_number):
     state["predictions"].append({
         "source": source,
         "target": target,
-        "rule_prediction": None,
         "ml_prediction": None,
         "selected_prediction": None,
         "latency": None,
+        "confidence": 0.0,
         "status": "scheduled",
         "evaluated": False,
         "created": datetime.now(MOSCOW_TZ).isoformat(),
@@ -893,34 +693,31 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        rule_pred = rule_prediction(source, latency)
-        if rule_pred is None:
-            print(f"⏭️ Правила: latency {latency:.2f} — нет подходящего прогноза", flush=True)
+        # Только ML
+        if MODELS is None:
+            print("⏳ ML модель не загружена, ждём...", flush=True)
             continue
 
-        ml_pred = None
-        if MODELS is not None:
-            ml_pred = ml_prediction(source, latency)
-        else:
-            print("🤖 ML: модель не загружена, используем правила", flush=True)
-
-        mode = state.get("mode", "RULES")
+        prediction, confidence = ml_prediction_with_confidence(source, latency)
         
-        if mode == "ML" and ml_pred:
-            selected = ml_pred
-            selected_mode = "ML"
-        else:
-            selected = rule_pred
-            selected_mode = "RULES"
+        if prediction is None:
+            print(f"⏭️ Прогноз НЕ ДАН (уверенность {confidence*100:.1f}% < {MIN_CONFIDENCE*100:.0f}%)", flush=True)
+            # Помечаем как пропущенный, чтобы не проверять снова
+            entry["status"] = "skipped"
+            entry["ml_prediction"] = None
+            entry["selected_prediction"] = None
+            entry["confidence"] = confidence
+            entry["latency"] = latency
+            save_json(STATE_FILE, state)
+            continue
 
-        entry["rule_prediction"] = rule_pred
-        entry["ml_prediction"] = ml_pred
-        entry["selected_prediction"] = selected
+        entry["ml_prediction"] = prediction
+        entry["selected_prediction"] = prediction
         entry["latency"] = latency
+        entry["confidence"] = confidence
         entry["status"] = "pending"
-        entry["mode_used"] = selected_mode
 
-        msg = prediction_text(entry, selected, source, selected_mode)
+        msg = prediction_text(entry, prediction, source, confidence)
         mid = send_message(msg)
 
         if mid:
@@ -929,20 +726,19 @@ def process_scheduled():
             save_json(STATE_FILE, state)
 
             print(
-                f"✅ ПРОГНОЗ: #{target} → {selected} | "
-                f"метод={selected_mode} | "
-                f"правила={rule_pred} | ML={ml_pred or '—'}",
+                f"✅ ПРОГНОЗ: #{target} → {prediction} | "
+                f"уверенность={confidence*100:.1f}%",
                 flush=True,
             )
         else:
             entry["status"] = "scheduled"
             save_json(STATE_FILE, state)
 
-def prediction_text(entry, prediction, source_game, mode):
-    msg = "🔮 <b>HYBRID 21 CLASSIC</b>\n"
+def prediction_text(entry, prediction, source_game, confidence):
+    msg = "🔮 <b>ML 21 CLASSIC</b>\n"
     msg += f"🃏 Масть: {prediction}\n"
+    msg += f"🎯 Уверенность: {confidence*100:.1f}%\n"
     msg += f"🎯 Целевая игра: #N{entry['target']}\n"
-    msg += f"📌 Метод: {'🤖 ML' if mode == 'ML' else '📌 Правила'}\n"
     msg += f"📈 Догон: {DOGON_GAMES - 1} игры\n"
 
     p = source_game.get("player_cards", [])
@@ -961,30 +757,20 @@ def prediction_text(entry, prediction, source_game, mode):
 def stats_text():
     samples = len(state.get("training_samples", []))
     total = state.get("total_predictions", 0)
-    rw = state.get("rule_wins", 0)
-    rl = state.get("rule_losses", 0)
     mw = state.get("ml_wins", 0)
     ml = state.get("ml_losses", 0)
 
-    rtot = rw + rl
     mtot = mw + ml
-
-    r_acc = f"{rw / rtot * 100:.1f}%" if rtot else "—"
     m_acc = f"{mw / mtot * 100:.1f}%" if mtot else "—"
 
     return (
-        "📊 <b>СТАТИСТИКА (HYBRID)</b>\n"
+        "📊 <b>СТАТИСТИКА (ML ONLY)</b>\n"
         f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n"
         "==============================\n"
         f"📈 Всего прогнозов: {total}\n"
-        f"🧠 Обучающих результатов: {samples}/{MIN_TRAIN_SAMPLES}\n"
-        f"🤖 ML статус: {'ОБУЧЕН' if MODELS is not None else 'ОЖИДАЕТ'}\n"
-        f"🔀 Текущий метод: {'🤖 ML' if state.get('mode') == 'ML' else '📌 Правила'}\n"
-        "==============================\n"
-        f"📌 Правила: {rw}✅ / {rl}❌ ({r_acc})\n"
+        f"🧠 Обучающих примеров: {samples}\n"
         f"🤖 ML: {mw}✅ / {ml}❌ ({m_acc})\n"
-        "==============================\n"
-        f"🔄 Переключений: {state.get('switches', 0)}"
+        f"🎯 Минимальная уверенность: {MIN_CONFIDENCE*100:.0f}%"
     )
 
 # -------------------- OFFSET --------------------
@@ -999,15 +785,13 @@ def save_offset(v):
 
 # -------------------- MAIN --------------------
 def main():
-    global all_messages
+    global all_messages, state
 
     print("=" * 70, flush=True)
-    print("🃏 HYBRID RULES + ML BOT (БЕЗ ПЕРЕЗАПИСИ STATE)", flush=True)
+    print("🃏 ML ONLY BOT", flush=True)
     print("=" * 70, flush=True)
 
-    # ================================================================
-    # ЗАГРУЗКА STATE С GITHUB (ТОЛЬКО ПРИ СТАРТЕ)
-    # ================================================================
+    # Синхронизация с GitHub
     sync_state_with_github()
 
     load_models()
@@ -1017,7 +801,6 @@ def main():
 
     send_startup_message()
     send_message(stats_text())
-    send_ml_status()
 
     offset = load_offset()
     last_stats = time.time()
