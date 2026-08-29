@@ -161,6 +161,17 @@ def edit_message(message_id, text):
         print(f"❌ editMessageText: {e}", flush=True)
     return False
 
+def send_startup_message():
+    text = (
+        "🚀 <b>HYBRID RULES + ML</b>\n"
+        "🃏 В начале работает твоя методика\n"
+        f"🎯 Цель: +{OFFSET} игр\n"
+        f"🤖 ML обучается параллельно, старт после {MIN_TRAIN_SAMPLES} результатов\n"
+        "🔄 ML станет основным только если будет лучше правил\n"
+        "🛡️ Если ML ухудшится — автоматический возврат к правилам"
+    )
+    send_message(text)
+
 def send_ml_status():
     """Отправляет в канал статус ML при запуске"""
     samples = len(state.get("training_samples", []))
@@ -856,7 +867,7 @@ def main():
     if SKLEARN_OK and len(state.get("training_samples", [])) >= MIN_TRAIN_SAMPLES:
         train_models(force=True)
 
-    startup_message()
+    send_startup_message()
     send_message(stats_text())
     send_ml_status()  # ← ОТПРАВЛЯЕМ СТАТУС ML
 
