@@ -10,7 +10,7 @@ import requests
 import pytz
 
 # ================================================================
-# HYBRID BOT: ТВОИ ПРАВИЛА + ML
+# HYBRID BOT: ТВОИ ПРАВИЛА + ML (БЕЗ ПЕРЕЗАПИСИ STATE)
 # ================================================================
 
 print("=" * 70, flush=True)
@@ -96,7 +96,11 @@ def load_json(path, default):
         return default
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            for key in default:
+                if key not in data:
+                    data[key] = default[key]
+            return data
     except Exception as e:
         print(f"⚠️ Не удалось загрузить {path}: {e}", flush=True)
         return default
@@ -173,7 +177,6 @@ def send_startup_message():
     send_message(text)
 
 def send_ml_status():
-    """Отправляет в канал статус ML при запуске"""
     samples = len(state.get("training_samples", []))
     total = state.get("total_predictions", 0)
     mode = state.get("mode", "RULES")
@@ -191,7 +194,6 @@ def send_ml_status():
     else:
         msg += f"⏳ ML модель: ОЖИДАЕТ ({samples}/{MIN_TRAIN_SAMPLES})\n"
     
-    # Проверяем sklearn
     if not SKLEARN_OK:
         msg += "\n❌ <b>ПРОБЛЕМА:</b> sklearn не установлен!\n"
         msg += "💡 Установи: pip install scikit-learn joblib\n"
@@ -453,27 +455,53 @@ def target_labels(target_game):
     suits_present = {c.get("suit") for c in target_game.get("player_cards", [])}
     return [1 if s in suits_present else 0 for s in SUITS]
 
+# -------------------- ОБУЧЕНИЕ ML (БЕЗ ПЕРЕЗАПИСИ) --------------------
 def train_models(force=False):
     global MODELS
     if not SKLEARN_OK:
+        print("❌ sklearn не установлен", flush=True)
         return False
 
     samples = state.get("training_samples", [])
-    if len(samples) < MIN_TRAIN_SAMPLES:
+    sample_count = len(samples)
+    
+    print(f"📊 Образцов для обучения: {sample_count}", flush=True)
+    
+    if sample_count < MIN_TRAIN_SAMPLES:
+        print(f"⏳ Нужно ещё {MIN_TRAIN_SAMPLES - sample_count} образцов", flush=True)
         return False
 
     last = int(state.get("last_model_train", 0))
-    if not force and len(samples) - last < MODEL_REFRESH_EVERY:
+    if not force and sample_count - last < MODEL_REFRESH_EVERY:
+        print(f"⏳ Дообучение через {MODEL_REFRESH_EVERY - (sample_count - last)} прогнозов", flush=True)
         return MODELS is not None
 
     try:
-        X = [s["x"] for s in samples]
+        X = []
+        y_all = []
+        
+        for s in samples:
+            x = s.get("x")
+            y = s.get("y")
+            if x is None or y is None:
+                continue
+            X.append(x)
+            y_all.append(y)
+        
+        if len(X) < MIN_TRAIN_SAMPLES:
+            print(f"⚠️ После фильтрации осталось {len(X)} образцов", flush=True)
+            return False
+        
+        print(f"🧠 Обучаю ML на {len(X)} образцах...", flush=True)
+        
         models = []
         for suit_idx in range(4):
-            y = [s["y"][suit_idx] for s in samples]
+            y = [yy[suit_idx] for yy in y_all]
             if len(set(y)) < 2:
+                print(f"⚠️ Масть {SUITS[suit_idx]}: недостаточно классов ({len(set(y))})", flush=True)
                 models.append(None)
                 continue
+            
             model = RandomForestClassifier(
                 n_estimators=300,
                 max_depth=10,
@@ -484,18 +512,21 @@ def train_models(force=False):
             )
             model.fit(X, y)
             models.append(model)
+            print(f"✅ Масть {SUITS[suit_idx]}: обучена", flush=True)
 
         MODELS = models
-        state["last_model_train"] = len(samples)
-        state["model_samples"] = len(samples)
+        state["last_model_train"] = sample_count
+        state["model_samples"] = sample_count
 
         try:
-            joblib.dump({"models": MODELS, "samples": len(samples)}, MODEL_FILE)
+            joblib.dump({"models": MODELS, "samples": sample_count}, MODEL_FILE)
+            print(f"💾 Модель сохранена: {MODEL_FILE}", flush=True)
         except Exception as e:
             print(f"⚠️ Не удалось сохранить ML-модель: {e}", flush=True)
 
-        print(f"🤖 ML ОБУЧЕН. Образцов: {len(samples)}", flush=True)
+        print(f"🤖 ML ОБУЧЕН. Образцов: {sample_count}", flush=True)
         return True
+        
     except Exception as e:
         print(f"❌ Ошибка обучения ML: {e}", flush=True)
         traceback.print_exc()
@@ -504,43 +535,80 @@ def train_models(force=False):
 def load_models():
     global MODELS
     if not SKLEARN_OK or not MODEL_FILE.exists():
+        print("📁 Файл модели не найден, будет создан при обучении", flush=True)
         return
+    
     try:
         obj = joblib.load(MODEL_FILE)
         MODELS = obj.get("models")
-        print(f"🤖 ML-модель загружена из {MODEL_FILE}", flush=True)
+        samples = obj.get("samples", 0)
+        print(f"🤖 ML-модель загружена из {MODEL_FILE} ({samples} образцов)", flush=True)
     except Exception as e:
         print(f"⚠️ Не удалось загрузить ML-модель: {e}", flush=True)
+        if len(state.get("training_samples", [])) >= MIN_TRAIN_SAMPLES:
+            print("🔄 Попытка переобучения...", flush=True)
+            train_models(force=True)
+
+def ensure_model_trained():
+    if not SKLEARN_OK:
+        return False
+    
+    samples = len(state.get("training_samples", []))
+    if samples < MIN_TRAIN_SAMPLES:
+        print(f"⏳ Ждём {MIN_TRAIN_SAMPLES} образцов (есть {samples})", flush=True)
+        return False
+    
+    if MODELS is not None:
+        print("✅ Модель уже загружена", flush=True)
+        return True
+    
+    print("🧠 Данных достаточно, обучаю модель...", flush=True)
+    return train_models(force=True)
 
 def ml_prediction(source_game, latency):
     if MODELS is None:
+        print("🤖 ML: модель не загружена", flush=True)
         return None
 
-    x = [make_features(source_game, latency)]
-    probs = []
-    for model in MODELS:
-        if model is None:
-            probs.append(0.0)
-            continue
-        try:
-            p = model.predict_proba(x)[0]
-            if 1 in list(model.classes_):
-                probs.append(float(p[list(model.classes_).index(1)]))
-            else:
+    try:
+        x = [make_features(source_game, latency)]
+        
+        probs = []
+        for idx, model in enumerate(MODELS):
+            if model is None:
                 probs.append(0.0)
-        except Exception:
-            probs.append(0.0)
+                continue
+            try:
+                p = model.predict_proba(x)[0]
+                classes = list(model.classes_)
+                if 1 in classes:
+                    prob = float(p[classes.index(1)])
+                else:
+                    prob = 0.0
+                probs.append(prob)
+            except Exception as e:
+                print(f"⚠️ Ошибка предсказания для масти {SUITS[idx]}: {e}", flush=True)
+                probs.append(0.0)
 
-    if not probs or max(probs) <= 0:
+        if not probs or max(probs) <= 0:
+            print("🤖 ML: все вероятности = 0", flush=True)
+            return None
+
+        idx = max(range(4), key=lambda i: probs[i])
+        result = SUITS[idx]
+        
+        print(
+            f"🤖 ML вероятности: " +
+            " ".join(f"{SUITS[i]}={probs[i]*100:.1f}%" for i in range(4)),
+            flush=True,
+        )
+        print(f"🤖 ML выбрал: {result}", flush=True)
+        return result
+        
+    except Exception as e:
+        print(f"❌ Ошибка ML прогноза: {e}", flush=True)
+        traceback.print_exc()
         return None
-
-    idx = max(range(4), key=lambda i: probs[i])
-    print(
-        "🤖 ML вероятности: " +
-        " ".join(f"{SUITS[i]}={probs[i]*100:.1f}%" for i in range(4)),
-        flush=True,
-    )
-    return SUITS[idx]
 
 # -------------------- GAME STORAGE --------------------
 games_by_number = {}
@@ -606,7 +674,7 @@ def update_mode():
     save_json(STATE_FILE, state)
 
 # =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА (ИЗ ТВОЕГО РАБОЧЕГО КОДА)
+# ПРОВЕРКА РЕЗУЛЬТАТА
 # =====================================================================
 def check_results():
     global all_messages, state
@@ -767,11 +835,20 @@ def process_scheduled():
             print(f"⏭️ Правила: latency {latency:.2f} — нет подходящего прогноза", flush=True)
             continue
 
-        ml_pred = ml_prediction(source, latency)
+        ml_pred = None
+        if MODELS is not None:
+            ml_pred = ml_prediction(source, latency)
+        else:
+            print("🤖 ML: модель не загружена, используем правила", flush=True)
 
         mode = state.get("mode", "RULES")
-        selected = ml_pred if mode == "ML" and ml_pred else rule_pred
-        selected_mode = "ML" if mode == "ML" and ml_pred else "RULES"
+        
+        if mode == "ML" and ml_pred:
+            selected = ml_pred
+            selected_mode = "ML"
+        else:
+            selected = rule_pred
+            selected_mode = "RULES"
 
         entry["rule_prediction"] = rule_pred
         entry["ml_prediction"] = ml_pred
@@ -861,20 +938,23 @@ def save_offset(v):
 def main():
     global all_messages
 
-    load_models()
+    print("=" * 70, flush=True)
+    print("🃏 HYBRID RULES + ML BOT (БЕЗ ПЕРЕЗАПИСИ STATE)", flush=True)
+    print("=" * 70, flush=True)
 
-    # Если есть данные — пытаемся обучить или дообучить
-    if SKLEARN_OK and len(state.get("training_samples", [])) >= MIN_TRAIN_SAMPLES:
-        train_models(force=True)
+    load_models()
+    
+    if SKLEARN_OK:
+        ensure_model_trained()
 
     send_startup_message()
     send_message(stats_text())
-    send_ml_status()  # ← ОТПРАВЛЯЕМ СТАТУС ML
+    send_ml_status()
 
     offset = load_offset()
     last_stats = time.time()
 
-    print("🚀 БОТ ГОТОВ. ПРАВИЛА РАБОТАЮТ СРАЗУ.", flush=True)
+    print("🚀 БОТ ГОТОВ.", flush=True)
 
     while True:
         try:
