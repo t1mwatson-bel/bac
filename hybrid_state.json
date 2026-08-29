@@ -7042,5 +7042,5789 @@
     "player_score": 18,
     "dealer_score": 0,
     "state": "2"
+  },
+  {
+    "game_id": "747542856",
+    "timestamp_msk": "02:34:32.764",
+    "timestamp_utc": "23:34:32.764",
+    "latency_ms": 101.45,
+    "cards": [
+      "?♦️",
+      "Q♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "Q"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747543237",
+    "timestamp_msk": "02:36:33.091",
+    "timestamp_utc": "23:36:33.091",
+    "latency_ms": 99.59,
+    "cards": [
+      "10♠️",
+      "6♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "6"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747543545",
+    "timestamp_msk": "02:38:31.507",
+    "timestamp_utc": "23:38:31.507",
+    "latency_ms": 98.59,
+    "cards": [
+      "?♠️",
+      "9♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "9"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747543747",
+    "timestamp_msk": "02:40:41.934",
+    "timestamp_utc": "23:40:41.934",
+    "latency_ms": 97.94,
+    "cards": [
+      "9♥️",
+      "6♣️",
+      "J♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "6",
+      "J"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747544114",
+    "timestamp_msk": "02:42:29.077",
+    "timestamp_utc": "23:42:29.077",
+    "latency_ms": 94.71,
+    "cards": [
+      "8♦️",
+      "10♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "8",
+      "10"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747544417",
+    "timestamp_msk": "02:44:39.419",
+    "timestamp_utc": "23:44:39.419",
+    "latency_ms": 97.69,
+    "cards": [
+      "J♠️",
+      "9♥️",
+      "8♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "J",
+      "9",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747544744",
+    "timestamp_msk": "02:46:38.635",
+    "timestamp_utc": "23:46:38.635",
+    "latency_ms": 96.2,
+    "cards": [
+      "9♦️",
+      "6♣️",
+      "8♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "6",
+      "8"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747545092",
+    "timestamp_msk": "02:48:34.165",
+    "timestamp_utc": "23:48:34.165",
+    "latency_ms": 95.22,
+    "cards": [
+      "9♣️",
+      "9♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "9"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747545382",
+    "timestamp_msk": "02:50:33.204",
+    "timestamp_utc": "23:50:33.204",
+    "latency_ms": 98.29,
+    "cards": [
+      "K♥️",
+      "10♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "10"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747545718",
+    "timestamp_msk": "02:52:31.640",
+    "timestamp_utc": "23:52:31.640",
+    "latency_ms": 98.03,
+    "cards": [
+      "?♣️",
+      "8♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747545894",
+    "timestamp_msk": "02:54:43.831",
+    "timestamp_utc": "23:54:43.831",
+    "latency_ms": 95.2,
+    "cards": [
+      "Q♠️",
+      "J♦️",
+      "J♠️",
+      "9♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "J",
+      "J",
+      "9"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747546207",
+    "timestamp_msk": "02:56:43.008",
+    "timestamp_utc": "23:56:43.008",
+    "latency_ms": 95.08,
+    "cards": [
+      "8♦️",
+      "6♦️",
+      "K♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "6",
+      "K"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747546532",
+    "timestamp_msk": "02:58:41.408",
+    "timestamp_utc": "23:58:41.408",
+    "latency_ms": 93.93,
+    "cards": [
+      "6♠️",
+      "7♠️",
+      "9♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "7",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747546789",
+    "timestamp_msk": "03:00:37.490",
+    "timestamp_utc": "00:00:37.490",
+    "latency_ms": 103.8,
+    "cards": [
+      "7♣️",
+      "Q♦️",
+      "8♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "7",
+      "Q",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747547163",
+    "timestamp_msk": "03:02:36.536",
+    "timestamp_utc": "00:02:36.536",
+    "latency_ms": 94.77,
+    "cards": [
+      "9♠️",
+      "?♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747547443",
+    "timestamp_msk": "03:04:37.412",
+    "timestamp_utc": "00:04:37.412",
+    "latency_ms": 94.9,
+    "cards": [
+      "10♣️",
+      "8♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747547767",
+    "timestamp_msk": "03:06:37.664",
+    "timestamp_utc": "00:06:37.664",
+    "latency_ms": 95.25,
+    "cards": [
+      "K♣️",
+      "?♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "?"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747548031",
+    "timestamp_msk": "03:08:36.703",
+    "timestamp_utc": "00:08:36.703",
+    "latency_ms": 97.74,
+    "cards": [
+      "7♣️",
+      "?♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "7",
+      "?"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747548354",
+    "timestamp_msk": "03:10:47.669",
+    "timestamp_utc": "00:10:47.669",
+    "latency_ms": 96.85,
+    "cards": [
+      "7♦️",
+      "J♣️",
+      "Q♥️",
+      "K♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "7",
+      "J",
+      "Q",
+      "K"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747548728",
+    "timestamp_msk": "03:12:37.329",
+    "timestamp_utc": "00:12:37.329",
+    "latency_ms": 94.9,
+    "cards": [
+      "8♠️",
+      "K♥️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "K",
+      "Q"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747548966",
+    "timestamp_msk": "03:14:36.380",
+    "timestamp_utc": "00:14:36.380",
+    "latency_ms": 98.36,
+    "cards": [
+      "6♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747549260",
+    "timestamp_msk": "03:16:35.439",
+    "timestamp_utc": "00:16:35.439",
+    "latency_ms": 95.14,
+    "cards": [
+      "Q♥️",
+      "6♣️",
+      "?♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "6",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747549576",
+    "timestamp_msk": "03:18:36.963",
+    "timestamp_utc": "00:18:36.963",
+    "latency_ms": 95.62,
+    "cards": [
+      "10♥️",
+      "Q♦️",
+      "8♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "Q",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747549795",
+    "timestamp_msk": "03:20:35.389",
+    "timestamp_utc": "00:20:35.389",
+    "latency_ms": 95.74,
+    "cards": [
+      "K♥️",
+      "6♥️",
+      "8♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "6",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747550209",
+    "timestamp_msk": "03:23:00.906",
+    "timestamp_utc": "00:23:00.906",
+    "latency_ms": 94.27,
+    "cards": [
+      "Q♣️",
+      "6♠️",
+      "J♠️",
+      "J♣️",
+      "6♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♠️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "Q",
+      "6",
+      "J",
+      "J",
+      "6"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747550425",
+    "timestamp_msk": "03:24:36.189",
+    "timestamp_utc": "00:24:36.189",
+    "latency_ms": 98.22,
+    "cards": [
+      "10♦️",
+      "8♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747550763",
+    "timestamp_msk": "03:26:34.704",
+    "timestamp_utc": "00:26:34.704",
+    "latency_ms": 96.52,
+    "cards": [
+      "?♦️",
+      "10♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747551019",
+    "timestamp_msk": "03:28:44.433",
+    "timestamp_utc": "00:28:44.433",
+    "latency_ms": 95.25,
+    "cards": [
+      "7♣️",
+      "Q♣️",
+      "K♦️",
+      "6♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "7",
+      "Q",
+      "K",
+      "6"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747551226",
+    "timestamp_msk": "03:30:45.925",
+    "timestamp_utc": "00:30:45.925",
+    "latency_ms": 99.87,
+    "cards": [
+      "J♠️",
+      "?♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "?",
+      "?"
+    ],
+    "player_score": 24,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747551681",
+    "timestamp_msk": "03:32:42.059",
+    "timestamp_utc": "00:32:42.059",
+    "latency_ms": 95.47,
+    "cards": [
+      "K♣️",
+      "K♠️",
+      "7♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "K",
+      "7"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747552048",
+    "timestamp_msk": "03:34:29.836",
+    "timestamp_utc": "00:34:29.836",
+    "latency_ms": 93.83,
+    "cards": [
+      "9♣️",
+      "?♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747552565",
+    "timestamp_msk": "03:36:43.285",
+    "timestamp_utc": "00:36:43.285",
+    "latency_ms": 95.19,
+    "cards": [
+      "10♥️",
+      "Q♦️",
+      "8♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "Q",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747553198",
+    "timestamp_msk": "03:38:41.131",
+    "timestamp_utc": "00:38:41.131",
+    "latency_ms": 97.88,
+    "cards": [
+      "?♦️",
+      "10♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747553451",
+    "timestamp_msk": "03:40:50.911",
+    "timestamp_utc": "00:40:50.911",
+    "latency_ms": 103.66,
+    "cards": [
+      "J♣️",
+      "Q♣️",
+      "K♣️",
+      "Q♠️",
+      "8♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♣️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "Q",
+      "K",
+      "Q",
+      "8"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747553784",
+    "timestamp_msk": "03:42:41.086",
+    "timestamp_utc": "00:42:41.086",
+    "latency_ms": 98.53,
+    "cards": [
+      "7♣️",
+      "6♦️",
+      "9♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "7",
+      "6",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747554012",
+    "timestamp_msk": "03:44:37.355",
+    "timestamp_utc": "00:44:37.355",
+    "latency_ms": 97.65,
+    "cards": [
+      "Q♦️",
+      "8♥️",
+      "9♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "8",
+      "9"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747554297",
+    "timestamp_msk": "03:46:38.853",
+    "timestamp_utc": "00:46:38.853",
+    "latency_ms": 95.85,
+    "cards": [
+      "9♣️",
+      "?♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747554566",
+    "timestamp_msk": "03:48:40.280",
+    "timestamp_utc": "00:48:40.280",
+    "latency_ms": 100.11,
+    "cards": [
+      "8♦️",
+      "8♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "8",
+      "8"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747554849",
+    "timestamp_msk": "03:50:41.091",
+    "timestamp_utc": "00:50:41.091",
+    "latency_ms": 93.47,
+    "cards": [
+      "9♠️",
+      "?♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747555180",
+    "timestamp_msk": "03:52:39.509",
+    "timestamp_utc": "00:52:39.509",
+    "latency_ms": 96.65,
+    "cards": [
+      "6♥️",
+      "8♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "6",
+      "8"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747555421",
+    "timestamp_msk": "03:54:38.601",
+    "timestamp_utc": "00:54:38.601",
+    "latency_ms": 98.2,
+    "cards": [
+      "8♣️",
+      "7♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "7"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747555743",
+    "timestamp_msk": "03:56:48.919",
+    "timestamp_utc": "00:56:48.919",
+    "latency_ms": 94.89,
+    "cards": [
+      "J♠️",
+      "7♥️",
+      "K♥️",
+      "K♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "7",
+      "K",
+      "K"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747556039",
+    "timestamp_msk": "03:58:36.099",
+    "timestamp_utc": "00:58:36.099",
+    "latency_ms": 94.63,
+    "cards": [
+      "8♦️",
+      "?♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "8",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747556250",
+    "timestamp_msk": "04:00:36.933",
+    "timestamp_utc": "01:00:36.933",
+    "latency_ms": 95.33,
+    "cards": [
+      "?♣️",
+      "10♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747556705",
+    "timestamp_msk": "04:02:34.286",
+    "timestamp_utc": "01:02:34.286",
+    "latency_ms": 97.71,
+    "cards": [
+      "6♠️",
+      "9♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "9"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747556962",
+    "timestamp_msk": "04:04:34.068",
+    "timestamp_utc": "01:04:34.068",
+    "latency_ms": 94.95,
+    "cards": [
+      "6♦️",
+      "?♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "6",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747557349",
+    "timestamp_msk": "04:06:33.137",
+    "timestamp_utc": "01:06:33.137",
+    "latency_ms": 102.12,
+    "cards": [
+      "7♥️",
+      "7♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "7",
+      "7"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747557598",
+    "timestamp_msk": "04:08:43.557",
+    "timestamp_utc": "01:08:43.557",
+    "latency_ms": 98.22,
+    "cards": [
+      "K♦️",
+      "10♥️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "10",
+      "Q"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747557844",
+    "timestamp_msk": "04:10:42.600",
+    "timestamp_utc": "01:10:42.600",
+    "latency_ms": 94.3,
+    "cards": [
+      "Q♣️",
+      "7♣️",
+      "9♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "7",
+      "9"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747558156",
+    "timestamp_msk": "04:12:31.568",
+    "timestamp_utc": "01:12:31.568",
+    "latency_ms": 96.95,
+    "cards": [
+      "?♠️",
+      "8♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747558365",
+    "timestamp_msk": "04:14:32.470",
+    "timestamp_utc": "01:14:32.470",
+    "latency_ms": 95.23,
+    "cards": [
+      "6♦️",
+      "10♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "10"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747558695",
+    "timestamp_msk": "04:16:42.873",
+    "timestamp_utc": "01:16:42.873",
+    "latency_ms": 100.21,
+    "cards": [
+      "7♣️",
+      "Q♠️",
+      "6♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "7",
+      "Q",
+      "6"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747558902",
+    "timestamp_msk": "04:18:29.441",
+    "timestamp_utc": "01:18:29.441",
+    "latency_ms": 97.07,
+    "cards": [
+      "10♣️",
+      "10♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "10"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747559077",
+    "timestamp_msk": "04:20:30.353",
+    "timestamp_utc": "01:20:30.353",
+    "latency_ms": 110.53,
+    "cards": [
+      "K♥️",
+      "?♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "?"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747559521",
+    "timestamp_msk": "04:22:28.842",
+    "timestamp_utc": "01:22:28.842",
+    "latency_ms": 94.16,
+    "cards": [
+      "?♠️",
+      "8♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747559732",
+    "timestamp_msk": "04:24:39.858",
+    "timestamp_utc": "01:24:39.858",
+    "latency_ms": 97.68,
+    "cards": [
+      "8♥️",
+      "10♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "10"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747560038",
+    "timestamp_msk": "04:26:52.839",
+    "timestamp_utc": "01:26:52.839",
+    "latency_ms": 93.68,
+    "cards": [
+      "6♣️",
+      "Q♠️",
+      "Q♥️",
+      "8♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "Q",
+      "Q",
+      "8"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747560279",
+    "timestamp_msk": "04:28:42.519",
+    "timestamp_utc": "01:28:42.519",
+    "latency_ms": 117.53,
+    "cards": [
+      "6♠️",
+      "7♥️",
+      "J♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "7",
+      "J"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747560524",
+    "timestamp_msk": "04:30:31.470",
+    "timestamp_utc": "01:30:31.470",
+    "latency_ms": 94.88,
+    "cards": [
+      "10♠️",
+      "6♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "6"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747560908",
+    "timestamp_msk": "04:32:29.976",
+    "timestamp_utc": "01:32:29.976",
+    "latency_ms": 95.84,
+    "cards": [
+      "8♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747561151",
+    "timestamp_msk": "04:34:42.200",
+    "timestamp_utc": "01:34:42.200",
+    "latency_ms": 98.1,
+    "cards": [
+      "8♠️",
+      "7♠️",
+      "9♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "7",
+      "9"
+    ],
+    "player_score": 24,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747561476",
+    "timestamp_msk": "04:36:38.296",
+    "timestamp_utc": "01:36:38.296",
+    "latency_ms": 96.24,
+    "cards": [
+      "?♥️",
+      "7♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747561774",
+    "timestamp_msk": "04:38:49.474",
+    "timestamp_utc": "01:38:49.474",
+    "latency_ms": 96.15,
+    "cards": [
+      "6♥️",
+      "Q♥️",
+      "7♥️",
+      "6♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "Q",
+      "7",
+      "6"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747562081",
+    "timestamp_msk": "04:40:33.704",
+    "timestamp_utc": "01:40:33.704",
+    "latency_ms": 97.09,
+    "cards": [
+      "?♠️",
+      "8♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747562452",
+    "timestamp_msk": "04:42:34.508",
+    "timestamp_utc": "01:42:34.508",
+    "latency_ms": 100.27,
+    "cards": [
+      "9♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747562693",
+    "timestamp_msk": "04:44:46.629",
+    "timestamp_utc": "01:44:46.629",
+    "latency_ms": 97.23,
+    "cards": [
+      "6♠️",
+      "7♣️",
+      "K♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "7",
+      "K"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747563029",
+    "timestamp_msk": "04:46:34.373",
+    "timestamp_utc": "01:46:34.373",
+    "latency_ms": 94.75,
+    "cards": [
+      "?♠️",
+      "7♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747563306",
+    "timestamp_msk": "04:48:35.575",
+    "timestamp_utc": "01:48:35.575",
+    "latency_ms": 97.91,
+    "cards": [
+      "10♠️",
+      "9♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "9"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747563563",
+    "timestamp_msk": "04:50:48.966",
+    "timestamp_utc": "01:50:48.966",
+    "latency_ms": 99.49,
+    "cards": [
+      "Q♠️",
+      "?♣️",
+      "7♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "Q",
+      "?",
+      "7"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747564068",
+    "timestamp_msk": "04:52:35.691",
+    "timestamp_utc": "01:52:35.691",
+    "latency_ms": 101.17,
+    "cards": [
+      "J♦️",
+      "?♣️",
+      "7♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "J",
+      "?",
+      "7"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747564275",
+    "timestamp_msk": "04:54:49.115",
+    "timestamp_utc": "01:54:49.115",
+    "latency_ms": 96.04,
+    "cards": [
+      "9♦️",
+      "K♦️",
+      "J♣️",
+      "?♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "9",
+      "K",
+      "J",
+      "?"
+    ],
+    "player_score": 26,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747564567",
+    "timestamp_msk": "04:56:45.753",
+    "timestamp_utc": "01:56:45.753",
+    "latency_ms": 95.78,
+    "cards": [
+      "K♦️",
+      "?♦️",
+      "7♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "?",
+      "7"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747564816",
+    "timestamp_msk": "04:58:29.833",
+    "timestamp_utc": "01:58:29.833",
+    "latency_ms": 97.55,
+    "cards": [
+      "10♦️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747565053",
+    "timestamp_msk": "05:00:40.213",
+    "timestamp_utc": "02:00:40.213",
+    "latency_ms": 98.03,
+    "cards": [
+      "?♠️",
+      "J♣️",
+      "8♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "J",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747565338",
+    "timestamp_msk": "05:02:38.116",
+    "timestamp_utc": "02:02:38.116",
+    "latency_ms": 94.04,
+    "cards": [
+      "K♠️",
+      "J♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "J",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747565585",
+    "timestamp_msk": "05:04:39.508",
+    "timestamp_utc": "02:04:39.508",
+    "latency_ms": 104.42,
+    "cards": [
+      "9♠️",
+      "Q♦️",
+      "K♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "Q",
+      "K"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747565887",
+    "timestamp_msk": "05:06:38.109",
+    "timestamp_utc": "02:06:38.109",
+    "latency_ms": 95.31,
+    "cards": [
+      "?♠️",
+      "10♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747566153",
+    "timestamp_msk": "05:08:47.344",
+    "timestamp_utc": "02:08:47.344",
+    "latency_ms": 94.3,
+    "cards": [
+      "9♥️",
+      "6♥️",
+      "?♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "6",
+      "?"
+    ],
+    "player_score": 26,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747566429",
+    "timestamp_msk": "05:10:31.443",
+    "timestamp_utc": "02:10:31.443",
+    "latency_ms": 94.38,
+    "cards": [
+      "10♣️",
+      "8♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747566810",
+    "timestamp_msk": "05:12:43.654",
+    "timestamp_utc": "02:12:43.654",
+    "latency_ms": 94.25,
+    "cards": [
+      "Q♠️",
+      "8♥️",
+      "K♣️",
+      "Q♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "8",
+      "K",
+      "Q"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747567054",
+    "timestamp_msk": "05:14:45.057",
+    "timestamp_utc": "02:14:45.057",
+    "latency_ms": 94.66,
+    "cards": [
+      "K♠️",
+      "9♦️",
+      "6♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "9",
+      "6"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747567411",
+    "timestamp_msk": "05:16:45.544",
+    "timestamp_utc": "02:16:45.544",
+    "latency_ms": 94.07,
+    "cards": [
+      "?♥️",
+      "Q♦️",
+      "7♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "?",
+      "Q",
+      "7"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747567691",
+    "timestamp_msk": "05:18:43.416",
+    "timestamp_utc": "02:18:43.416",
+    "latency_ms": 94.2,
+    "cards": [
+      "K♠️",
+      "7♠️",
+      "K♦️",
+      "J♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "7",
+      "K",
+      "J"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747567932",
+    "timestamp_msk": "05:20:42.406",
+    "timestamp_utc": "02:20:42.406",
+    "latency_ms": 94.33,
+    "cards": [
+      "K♠️",
+      "8♥️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "8",
+      "Q"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747568257",
+    "timestamp_msk": "05:22:41.422",
+    "timestamp_utc": "02:22:41.422",
+    "latency_ms": 97.59,
+    "cards": [
+      "Q♠️",
+      "8♥️",
+      "7♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "8",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747568460",
+    "timestamp_msk": "05:24:52.919",
+    "timestamp_utc": "02:24:52.919",
+    "latency_ms": 95.09,
+    "cards": [
+      "Q♣️",
+      "10♠️",
+      "J♥️",
+      "6♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "Q",
+      "10",
+      "J",
+      "6"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747568818",
+    "timestamp_msk": "05:26:39.478",
+    "timestamp_utc": "02:26:39.478",
+    "latency_ms": 94.8,
+    "cards": [
+      "6♠️",
+      "Q♥️",
+      "9♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "Q",
+      "9"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747569025",
+    "timestamp_msk": "05:28:40.376",
+    "timestamp_utc": "02:28:40.376",
+    "latency_ms": 95.75,
+    "cards": [
+      "8♣️",
+      "Q♠️",
+      "10♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "Q",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747569200",
+    "timestamp_msk": "05:30:38.847",
+    "timestamp_utc": "02:30:38.847",
+    "latency_ms": 109.18,
+    "cards": [
+      "K♦️",
+      "J♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "J",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747569597",
+    "timestamp_msk": "05:32:37.859",
+    "timestamp_utc": "02:32:37.859",
+    "latency_ms": 96.42,
+    "cards": [
+      "7♥️",
+      "Q♠️",
+      "K♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "7",
+      "Q",
+      "K"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747569844",
+    "timestamp_msk": "05:34:36.919",
+    "timestamp_utc": "02:34:36.919",
+    "latency_ms": 103.78,
+    "cards": [
+      "K♠️",
+      "?♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "?"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747570205",
+    "timestamp_msk": "05:36:35.931",
+    "timestamp_utc": "02:36:35.931",
+    "latency_ms": 99.81,
+    "cards": [
+      "K♠️",
+      "8♦️",
+      "K♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "8",
+      "K"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747570488",
+    "timestamp_msk": "05:38:49.333",
+    "timestamp_utc": "02:38:49.333",
+    "latency_ms": 94.68,
+    "cards": [
+      "9♣️",
+      "Q♥️",
+      "J♥️",
+      "K♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "9",
+      "Q",
+      "J",
+      "K"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747570715",
+    "timestamp_msk": "05:40:48.437",
+    "timestamp_utc": "02:40:48.437",
+    "latency_ms": 99.02,
+    "cards": [
+      "6♦️",
+      "Q♠️",
+      "K♥️",
+      "8♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "6",
+      "Q",
+      "K",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747570982",
+    "timestamp_msk": "05:42:46.412",
+    "timestamp_utc": "02:42:46.412",
+    "latency_ms": 97.61,
+    "cards": [
+      "10♣️",
+      "K♣️",
+      "Q♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "K",
+      "Q"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747571176",
+    "timestamp_msk": "05:44:45.485",
+    "timestamp_utc": "02:44:45.485",
+    "latency_ms": 96.5,
+    "cards": [
+      "8♠️",
+      "7♣️",
+      "?♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "8",
+      "7",
+      "?"
+    ],
+    "player_score": 26,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747571462",
+    "timestamp_msk": "05:46:53.407",
+    "timestamp_utc": "02:46:53.407",
+    "latency_ms": 93.48,
+    "cards": [
+      "6♠️",
+      "J♠️",
+      "K♠️",
+      "J♣️",
+      "6♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♠️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "J",
+      "K",
+      "J",
+      "6"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747571652",
+    "timestamp_msk": "05:48:53.178",
+    "timestamp_utc": "02:48:53.178",
+    "latency_ms": 95.33,
+    "cards": [
+      "J♣️",
+      "8♦️",
+      "J♠️",
+      "7♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "J",
+      "8",
+      "J",
+      "7"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747571861",
+    "timestamp_msk": "05:50:42.727",
+    "timestamp_utc": "02:50:42.727",
+    "latency_ms": 96.56,
+    "cards": [
+      "Q♠️",
+      "6♣️",
+      "K♦️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "Q",
+      "6",
+      "K",
+      "Q"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747572206",
+    "timestamp_msk": "05:52:32.327",
+    "timestamp_utc": "02:52:32.327",
+    "latency_ms": 95.27,
+    "cards": [
+      "9♥️",
+      "?♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747572486",
+    "timestamp_msk": "05:54:44.579",
+    "timestamp_utc": "02:54:44.579",
+    "latency_ms": 94.79,
+    "cards": [
+      "K♠️",
+      "9♠️",
+      "?♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "9",
+      "?"
+    ],
+    "player_score": 24,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747572743",
+    "timestamp_msk": "05:56:51.942",
+    "timestamp_utc": "02:56:51.942",
+    "latency_ms": 95.95,
+    "cards": [
+      "K♣️",
+      "9♠️",
+      "Q♣️",
+      "?♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "9",
+      "Q",
+      "?"
+    ],
+    "player_score": 27,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747573035",
+    "timestamp_msk": "05:58:36.672",
+    "timestamp_utc": "02:58:36.672",
+    "latency_ms": 93.27,
+    "cards": [
+      "?♦️",
+      "J♣️",
+      "Q♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "J",
+      "Q"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747573295",
+    "timestamp_msk": "06:00:47.700",
+    "timestamp_utc": "03:00:47.700",
+    "latency_ms": 97.07,
+    "cards": [
+      "K♥️",
+      "J♥️",
+      "K♦️",
+      "10♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "J",
+      "K",
+      "10"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747573615",
+    "timestamp_msk": "06:02:48.691",
+    "timestamp_utc": "03:02:48.691",
+    "latency_ms": 95.22,
+    "cards": [
+      "K♦️",
+      "7♠️",
+      "K♠️",
+      "?♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "7",
+      "K",
+      "?"
+    ],
+    "player_score": 26,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747573842",
+    "timestamp_msk": "06:04:45.354",
+    "timestamp_utc": "03:04:45.354",
+    "latency_ms": 93.99,
+    "cards": [
+      "?♦️",
+      "J♣️",
+      "10♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "J",
+      "10"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747574126",
+    "timestamp_msk": "06:06:41.459",
+    "timestamp_utc": "03:06:41.459",
+    "latency_ms": 97.64,
+    "cards": [
+      "9♠️",
+      "6♦️",
+      "6♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "9",
+      "6",
+      "6"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747574396",
+    "timestamp_msk": "06:08:39.916",
+    "timestamp_utc": "03:08:39.916",
+    "latency_ms": 94.83,
+    "cards": [
+      "9♠️",
+      "9♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "9"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747574612",
+    "timestamp_msk": "06:10:39.241",
+    "timestamp_utc": "03:10:39.241",
+    "latency_ms": 97.33,
+    "cards": [
+      "K♦️",
+      "6♣️",
+      "10♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "6",
+      "10"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747574963",
+    "timestamp_msk": "06:12:52.049",
+    "timestamp_utc": "03:12:52.049",
+    "latency_ms": 95.3,
+    "cards": [
+      "J♦️",
+      "Q♥️",
+      "Q♦️",
+      "J♣️",
+      "8♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♦️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "Q",
+      "Q",
+      "J",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747575235",
+    "timestamp_msk": "06:14:39.171",
+    "timestamp_utc": "03:14:39.171",
+    "latency_ms": 105.88,
+    "cards": [
+      "?♦️",
+      "J♣️",
+      "9♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "J",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747575510",
+    "timestamp_msk": "06:16:47.171",
+    "timestamp_utc": "03:16:47.171",
+    "latency_ms": 96.63,
+    "cards": [
+      "J♠️",
+      "?♥️",
+      "Q♣️",
+      "6♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "J",
+      "?",
+      "Q",
+      "6"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747575761",
+    "timestamp_msk": "06:18:31.276",
+    "timestamp_utc": "03:18:31.276",
+    "latency_ms": 105.86,
+    "cards": [
+      "7♥️",
+      "9♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "7",
+      "9"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747575992",
+    "timestamp_msk": "06:20:29.701",
+    "timestamp_utc": "03:20:29.701",
+    "latency_ms": 94.51,
+    "cards": [
+      "10♦️",
+      "8♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747576317",
+    "timestamp_msk": "06:22:29.945",
+    "timestamp_utc": "03:22:29.945",
+    "latency_ms": 95.99,
+    "cards": [
+      "9♠️",
+      "7♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "9",
+      "7"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747576504",
+    "timestamp_msk": "06:24:40.960",
+    "timestamp_utc": "03:24:40.960",
+    "latency_ms": 94.81,
+    "cards": [
+      "6♠️",
+      "10♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "6",
+      "10"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747576769",
+    "timestamp_msk": "06:26:39.429",
+    "timestamp_utc": "03:26:39.429",
+    "latency_ms": 93.85,
+    "cards": [
+      "6♣️",
+      "?♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "6",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747577027",
+    "timestamp_msk": "06:28:38.500",
+    "timestamp_utc": "03:28:38.500",
+    "latency_ms": 95.5,
+    "cards": [
+      "K♥️",
+      "?♠️",
+      "7♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "?",
+      "7"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747577204",
+    "timestamp_msk": "06:30:46.433",
+    "timestamp_utc": "03:30:46.433",
+    "latency_ms": 94.89,
+    "cards": [
+      "6♦️",
+      "10♥️",
+      "K♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "6",
+      "10",
+      "K"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747577548",
+    "timestamp_msk": "06:32:45.461",
+    "timestamp_utc": "03:32:45.461",
+    "latency_ms": 95.4,
+    "cards": [
+      "8♣️",
+      "J♣️",
+      "?♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "8",
+      "J",
+      "?"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747577730",
+    "timestamp_msk": "06:34:43.306",
+    "timestamp_utc": "03:34:43.306",
+    "latency_ms": 93.83,
+    "cards": [
+      "K♦️",
+      "Q♠️",
+      "Q♥️",
+      "9♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "Q",
+      "Q",
+      "9"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747578000",
+    "timestamp_msk": "06:36:42.305",
+    "timestamp_utc": "03:36:42.305",
+    "latency_ms": 140.98,
+    "cards": [
+      "Q♦️",
+      "K♦️",
+      "?♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "K",
+      "?"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747578310",
+    "timestamp_msk": "06:38:40.865",
+    "timestamp_utc": "03:38:40.865",
+    "latency_ms": 100.16,
+    "cards": [
+      "K♠️",
+      "J♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "J",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747578538",
+    "timestamp_msk": "06:40:39.917",
+    "timestamp_utc": "03:40:39.917",
+    "latency_ms": 103.83,
+    "cards": [
+      "9♦️",
+      "J♠️",
+      "K♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "J",
+      "K"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747578865",
+    "timestamp_msk": "06:42:40.791",
+    "timestamp_utc": "03:42:40.791",
+    "latency_ms": 96.71,
+    "cards": [
+      "8♦️",
+      "7♣️",
+      "7♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "8",
+      "7",
+      "7"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747579110",
+    "timestamp_msk": "06:44:36.884",
+    "timestamp_utc": "03:44:36.884",
+    "latency_ms": 96.81,
+    "cards": [
+      "9♥️",
+      "10♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "10"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747579377",
+    "timestamp_msk": "06:46:37.671",
+    "timestamp_utc": "03:46:37.671",
+    "latency_ms": 103.13,
+    "cards": [
+      "7♦️",
+      "J♠️",
+      "8♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "7",
+      "J",
+      "8"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747579764",
+    "timestamp_msk": "06:48:36.726",
+    "timestamp_utc": "03:48:36.726",
+    "latency_ms": 102.16,
+    "cards": [
+      "Q♦️",
+      "K♠️",
+      "9♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "K",
+      "9"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747579967",
+    "timestamp_msk": "06:50:35.163",
+    "timestamp_utc": "03:50:35.163",
+    "latency_ms": 102.86,
+    "cards": [
+      "10♦️",
+      "K♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "10",
+      "K"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747580307",
+    "timestamp_msk": "06:52:46.093",
+    "timestamp_utc": "03:52:46.093",
+    "latency_ms": 95.14,
+    "cards": [
+      "8♠️",
+      "Q♠️",
+      "K♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "Q",
+      "K"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747580519",
+    "timestamp_msk": "06:54:35.755",
+    "timestamp_utc": "03:54:35.755",
+    "latency_ms": 99.62,
+    "cards": [
+      "8♥️",
+      "J♠️",
+      "7♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "J",
+      "7"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747580766",
+    "timestamp_msk": "06:56:34.783",
+    "timestamp_utc": "03:56:34.783",
+    "latency_ms": 95.96,
+    "cards": [
+      "9♥️",
+      "?♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747581032",
+    "timestamp_msk": "06:58:35.609",
+    "timestamp_utc": "03:58:35.609",
+    "latency_ms": 105.4,
+    "cards": [
+      "10♣️",
+      "J♥️",
+      "?♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "J",
+      "?"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747581230",
+    "timestamp_msk": "07:00:31.124",
+    "timestamp_utc": "04:00:31.124",
+    "latency_ms": 94.08,
+    "cards": [
+      "?♣️",
+      "7♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747581572",
+    "timestamp_msk": "07:02:29.603",
+    "timestamp_utc": "04:02:29.603",
+    "latency_ms": 97.13,
+    "cards": [
+      "9♦️",
+      "8♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "9",
+      "8"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747581793",
+    "timestamp_msk": "07:04:39.963",
+    "timestamp_utc": "04:04:39.963",
+    "latency_ms": 96.18,
+    "cards": [
+      "K♦️",
+      "9♥️",
+      "6♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "9",
+      "6"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747582115",
+    "timestamp_msk": "07:06:52.806",
+    "timestamp_utc": "04:06:52.806",
+    "latency_ms": 99.97,
+    "cards": [
+      "Q♦️",
+      "K♣️",
+      "Q♥️",
+      "6♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "K",
+      "Q",
+      "6"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747582333",
+    "timestamp_msk": "07:08:39.955",
+    "timestamp_utc": "04:08:39.955",
+    "latency_ms": 96.96,
+    "cards": [
+      "Q♥️",
+      "10♠️",
+      "J♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "10",
+      "J"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747582631",
+    "timestamp_msk": "07:10:53.411",
+    "timestamp_utc": "04:10:53.411",
+    "latency_ms": 99.0,
+    "cards": [
+      "J♥️",
+      "9♦️",
+      "Q♣️",
+      "6♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "9",
+      "Q",
+      "6"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747582977",
+    "timestamp_msk": "07:12:43.164",
+    "timestamp_utc": "04:12:43.164",
+    "latency_ms": 98.84,
+    "cards": [
+      "9♣️",
+      "6♣️",
+      "9♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "9",
+      "6",
+      "9"
+    ],
+    "player_score": 24,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747583241",
+    "timestamp_msk": "07:14:39.193",
+    "timestamp_utc": "04:14:39.193",
+    "latency_ms": 101.2,
+    "cards": [
+      "10♦️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747583492",
+    "timestamp_msk": "07:16:38.213",
+    "timestamp_utc": "04:16:38.213",
+    "latency_ms": 100.15,
+    "cards": [
+      "K♠️",
+      "J♦️",
+      "?♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "J",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747583717",
+    "timestamp_msk": "07:18:49.250",
+    "timestamp_utc": "04:18:49.250",
+    "latency_ms": 103.24,
+    "cards": [
+      "J♠️",
+      "J♦️",
+      "8♠️",
+      "Q♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "J",
+      "8",
+      "Q"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747583897",
+    "timestamp_msk": "07:20:38.883",
+    "timestamp_utc": "04:20:38.883",
+    "latency_ms": 94.62,
+    "cards": [
+      "8♦️",
+      "J♠️",
+      "6♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "J",
+      "6"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747584176",
+    "timestamp_msk": "07:22:37.979",
+    "timestamp_utc": "04:22:37.979",
+    "latency_ms": 97.6,
+    "cards": [
+      "Q♠️",
+      "10♥️",
+      "9♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "Q",
+      "10",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747584381",
+    "timestamp_msk": "07:24:45.918",
+    "timestamp_utc": "04:24:45.918",
+    "latency_ms": 94.08,
+    "cards": [
+      "8♠️",
+      "J♠️",
+      "10♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "J",
+      "10"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747584611",
+    "timestamp_msk": "07:26:34.283",
+    "timestamp_utc": "04:26:34.283",
+    "latency_ms": 94.0,
+    "cards": [
+      "8♦️",
+      "10♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "8",
+      "10"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747584931",
+    "timestamp_msk": "07:28:45.212",
+    "timestamp_utc": "04:28:45.212",
+    "latency_ms": 99.77,
+    "cards": [
+      "6♦️",
+      "7♥️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "7",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747585149",
+    "timestamp_msk": "07:30:43.104",
+    "timestamp_utc": "04:30:43.104",
+    "latency_ms": 108.22,
+    "cards": [
+      "7♣️",
+      "J♠️",
+      "7♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "7",
+      "J",
+      "7"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747585498",
+    "timestamp_msk": "07:32:44.591",
+    "timestamp_utc": "04:32:44.591",
+    "latency_ms": 94.9,
+    "cards": [
+      "J♦️",
+      "K♦️",
+      "K♥️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "J",
+      "K",
+      "K",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747585740",
+    "timestamp_msk": "07:34:43.649",
+    "timestamp_utc": "04:34:43.649",
+    "latency_ms": 96.73,
+    "cards": [
+      "K♥️",
+      "7♣️",
+      "K♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "7",
+      "K"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747586023",
+    "timestamp_msk": "07:36:34.269",
+    "timestamp_utc": "04:36:34.269",
+    "latency_ms": 101.39,
+    "cards": [
+      "10♠️",
+      "8♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747586278",
+    "timestamp_msk": "07:38:45.260",
+    "timestamp_utc": "04:38:45.260",
+    "latency_ms": 94.67,
+    "cards": [
+      "Q♠️",
+      "K♥️",
+      "6♠️",
+      "K♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "K",
+      "6",
+      "K"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747586469",
+    "timestamp_msk": "07:40:44.333",
+    "timestamp_utc": "04:40:44.333",
+    "latency_ms": 96.11,
+    "cards": [
+      "K♦️",
+      "K♣️",
+      "?♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "K",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747586831",
+    "timestamp_msk": "07:42:32.667",
+    "timestamp_utc": "04:42:32.667",
+    "latency_ms": 96.24,
+    "cards": [
+      "?♥️",
+      "6♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "6"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747587044",
+    "timestamp_msk": "07:44:31.170",
+    "timestamp_utc": "04:44:31.170",
+    "latency_ms": 95.4,
+    "cards": [
+      "7♣️",
+      "?♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "7",
+      "?"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747587339",
+    "timestamp_msk": "07:46:41.478",
+    "timestamp_utc": "04:46:41.478",
+    "latency_ms": 94.55,
+    "cards": [
+      "?♠️",
+      "K♥️",
+      "J♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "K",
+      "J"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747587577",
+    "timestamp_msk": "07:48:40.551",
+    "timestamp_utc": "04:48:40.551",
+    "latency_ms": 96.21,
+    "cards": [
+      "J♠️",
+      "10♣️",
+      "9♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "J",
+      "10",
+      "9"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747587815",
+    "timestamp_msk": "07:50:39.013",
+    "timestamp_utc": "04:50:39.013",
+    "latency_ms": 95.71,
+    "cards": [
+      "9♣️",
+      "7♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "9",
+      "7"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747588144",
+    "timestamp_msk": "07:52:37.443",
+    "timestamp_utc": "04:52:37.443",
+    "latency_ms": 94.63,
+    "cards": [
+      "9♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747588348",
+    "timestamp_msk": "07:54:37.071",
+    "timestamp_utc": "04:54:37.071",
+    "latency_ms": 94.34,
+    "cards": [
+      "10♦️",
+      "Q♠️",
+      "K♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "Q",
+      "K"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747588596",
+    "timestamp_msk": "07:56:35.543",
+    "timestamp_utc": "04:56:35.543",
+    "latency_ms": 94.3,
+    "cards": [
+      "7♣️",
+      "8♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "7",
+      "8"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747588842",
+    "timestamp_msk": "07:58:34.590",
+    "timestamp_utc": "04:58:34.590",
+    "latency_ms": 100.55,
+    "cards": [
+      "?♠️",
+      "7♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747589080",
+    "timestamp_msk": "08:00:45.619",
+    "timestamp_utc": "05:00:45.619",
+    "latency_ms": 102.7,
+    "cards": [
+      "K♦️",
+      "Q♣️",
+      "7♠️",
+      "8♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "Q",
+      "7",
+      "8"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747589388",
+    "timestamp_msk": "08:02:53.581",
+    "timestamp_utc": "05:02:53.581",
+    "latency_ms": 93.53,
+    "cards": [
+      "7♥️",
+      "K♣️",
+      "K♥️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "7",
+      "K",
+      "K",
+      "Q"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747589631",
+    "timestamp_msk": "08:04:55.093",
+    "timestamp_utc": "05:04:55.093",
+    "latency_ms": 99.74,
+    "cards": [
+      "J♣️",
+      "Q♥️",
+      "J♥️",
+      "Q♦️",
+      "?♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️",
+      "♥️",
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "Q",
+      "J",
+      "Q",
+      "?"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747589941",
+    "timestamp_msk": "08:06:41.618",
+    "timestamp_utc": "05:06:41.618",
+    "latency_ms": 100.45,
+    "cards": [
+      "10♣️",
+      "K♦️",
+      "8♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "10",
+      "K",
+      "8"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747590157",
+    "timestamp_msk": "08:08:37.699",
+    "timestamp_utc": "05:08:37.699",
+    "latency_ms": 104.93,
+    "cards": [
+      "6♥️",
+      "6♠️",
+      "?♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "6",
+      "?"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747590435",
+    "timestamp_msk": "08:10:45.632",
+    "timestamp_utc": "05:10:45.632",
+    "latency_ms": 96.72,
+    "cards": [
+      "K♣️",
+      "8♣️",
+      "K♦️",
+      "7♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "8",
+      "K",
+      "7"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747590770",
+    "timestamp_msk": "08:12:41.703",
+    "timestamp_utc": "05:12:41.703",
+    "latency_ms": 93.83,
+    "cards": [
+      "Q♠️",
+      "6♣️",
+      "8♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "6",
+      "8"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747590963",
+    "timestamp_msk": "08:14:40.164",
+    "timestamp_utc": "05:14:40.164",
+    "latency_ms": 99.09,
+    "cards": [
+      "6♦️",
+      "?♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "6",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747591255",
+    "timestamp_msk": "08:16:50.585",
+    "timestamp_utc": "05:16:50.585",
+    "latency_ms": 97.51,
+    "cards": [
+      "J♠️",
+      "Q♣️",
+      "7♥️",
+      "J♦️",
+      "6♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♥️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "J",
+      "Q",
+      "7",
+      "J",
+      "6"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747591519",
+    "timestamp_msk": "08:18:52.110",
+    "timestamp_utc": "05:18:52.110",
+    "latency_ms": 95.06,
+    "cards": [
+      "8♠️",
+      "K♣️",
+      "J♥️",
+      "10♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "K",
+      "J",
+      "10"
+    ],
+    "player_score": 24,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747591755",
+    "timestamp_msk": "08:20:36.862",
+    "timestamp_utc": "05:20:36.862",
+    "latency_ms": 95.45,
+    "cards": [
+      "8♦️",
+      "9♣️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "9"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747592119",
+    "timestamp_msk": "08:22:35.932",
+    "timestamp_utc": "05:22:35.932",
+    "latency_ms": 97.13,
+    "cards": [
+      "8♣️",
+      "?♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747592393",
+    "timestamp_msk": "08:24:48.700",
+    "timestamp_utc": "05:24:48.700",
+    "latency_ms": 101.36,
+    "cards": [
+      "Q♦️",
+      "J♣️",
+      "9♠️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "Q",
+      "J",
+      "9",
+      "8"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747592742",
+    "timestamp_msk": "08:26:33.018",
+    "timestamp_utc": "05:26:33.018",
+    "latency_ms": 93.79,
+    "cards": [
+      "?♦️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747593031",
+    "timestamp_msk": "08:28:31.425",
+    "timestamp_utc": "05:28:31.425",
+    "latency_ms": 94.42,
+    "cards": [
+      "?♦️",
+      "10♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747593259",
+    "timestamp_msk": "08:30:41.137",
+    "timestamp_utc": "05:30:41.137",
+    "latency_ms": 94.75,
+    "cards": [
+      "10♦️",
+      "J♥️",
+      "6♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "J",
+      "6"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747593646",
+    "timestamp_msk": "08:32:42.041",
+    "timestamp_utc": "05:32:42.041",
+    "latency_ms": 93.4,
+    "cards": [
+      "10♠️",
+      "Q♦️",
+      "8♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "Q",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747593904",
+    "timestamp_msk": "08:34:51.832",
+    "timestamp_utc": "05:34:51.832",
+    "latency_ms": 95.75,
+    "cards": [
+      "J♣️",
+      "?♦️",
+      "Q♦️",
+      "7♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "J",
+      "?",
+      "Q",
+      "7"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747594226",
+    "timestamp_msk": "08:36:36.574",
+    "timestamp_utc": "05:36:36.574",
+    "latency_ms": 104.46,
+    "cards": [
+      "6♥️",
+      "Q♠️",
+      "9♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "Q",
+      "9"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747594548",
+    "timestamp_msk": "08:38:37.486",
+    "timestamp_utc": "05:38:37.486",
+    "latency_ms": 99.76,
+    "cards": [
+      "?♣️",
+      "7♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747594840",
+    "timestamp_msk": "08:40:36.521",
+    "timestamp_utc": "05:40:36.521",
+    "latency_ms": 95.18,
+    "cards": [
+      "8♥️",
+      "9♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "9"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747595157",
+    "timestamp_msk": "08:42:35.143",
+    "timestamp_utc": "05:42:35.143",
+    "latency_ms": 94.8,
+    "cards": [
+      "J♠️",
+      "?♥️",
+      "J♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "J",
+      "?",
+      "J"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747595433",
+    "timestamp_msk": "08:44:34.180",
+    "timestamp_utc": "05:44:34.180",
+    "latency_ms": 96.15,
+    "cards": [
+      "8♣️",
+      "?♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747595708",
+    "timestamp_msk": "08:46:46.444",
+    "timestamp_utc": "05:46:46.444",
+    "latency_ms": 95.76,
+    "cards": [
+      "Q♥️",
+      "K♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "K",
+      "?"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747595985",
+    "timestamp_msk": "08:48:33.800",
+    "timestamp_utc": "05:48:33.800",
+    "latency_ms": 96.45,
+    "cards": [
+      "?♥️",
+      "9♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "9"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747596178",
+    "timestamp_msk": "08:50:45.960",
+    "timestamp_utc": "05:50:45.960",
+    "latency_ms": 94.84,
+    "cards": [
+      "10♥️",
+      "Q♣️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "Q",
+      "Q"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747596568",
+    "timestamp_msk": "08:52:44.407",
+    "timestamp_utc": "05:52:44.407",
+    "latency_ms": 94.86,
+    "cards": [
+      "7♣️",
+      "K♥️",
+      "6♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "7",
+      "K",
+      "6"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747596829",
+    "timestamp_msk": "08:54:43.514",
+    "timestamp_utc": "05:54:43.514",
+    "latency_ms": 96.58,
+    "cards": [
+      "6♥️",
+      "8♠️",
+      "6♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "8",
+      "6"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747597167",
+    "timestamp_msk": "08:56:30.713",
+    "timestamp_utc": "05:56:30.713",
+    "latency_ms": 94.49,
+    "cards": [
+      "10♣️",
+      "K♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "K"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747597428",
+    "timestamp_msk": "08:58:41.077",
+    "timestamp_utc": "05:58:41.077",
+    "latency_ms": 96.12,
+    "cards": [
+      "J♠️",
+      "9♠️",
+      "9♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "9",
+      "9"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747597792",
+    "timestamp_msk": "09:00:42.075",
+    "timestamp_utc": "06:00:42.075",
+    "latency_ms": 96.9,
+    "cards": [
+      "K♠️",
+      "Q♣️",
+      "7♠️",
+      "J♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "Q",
+      "7",
+      "J"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747598124",
+    "timestamp_msk": "09:02:53.763",
+    "timestamp_utc": "06:02:53.763",
+    "latency_ms": 96.51,
+    "cards": [
+      "K♦️",
+      "9♦️",
+      "J♦️",
+      "Q♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "9",
+      "J",
+      "Q"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747598473",
+    "timestamp_msk": "09:04:42.133",
+    "timestamp_utc": "06:04:42.133",
+    "latency_ms": 101.65,
+    "cards": [
+      "J♣️",
+      "J♠️",
+      "K♣️",
+      "10♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "J",
+      "J",
+      "K",
+      "10"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747598945",
+    "timestamp_msk": "09:06:41.167",
+    "timestamp_utc": "06:06:41.167",
+    "latency_ms": 96.97,
+    "cards": [
+      "6♠️",
+      "9♥️",
+      "7♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "6",
+      "9",
+      "7"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747599218",
+    "timestamp_msk": "09:08:37.210",
+    "timestamp_utc": "06:08:37.210",
+    "latency_ms": 94.11,
+    "cards": [
+      "8♥️",
+      "9♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "9"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747599574",
+    "timestamp_msk": "09:10:37.519",
+    "timestamp_utc": "06:10:37.519",
+    "latency_ms": 97.04,
+    "cards": [
+      "9♠️",
+      "Q♥️",
+      "?♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "9",
+      "Q",
+      "?"
+    ],
+    "player_score": 23,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747599986",
+    "timestamp_msk": "09:12:45.482",
+    "timestamp_utc": "06:12:45.482",
+    "latency_ms": 93.63,
+    "cards": [
+      "6♣️",
+      "J♥️",
+      "Q♣️",
+      "8♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️",
+      "♣️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "J",
+      "Q",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747600261",
+    "timestamp_msk": "09:14:56.509",
+    "timestamp_utc": "06:14:56.509",
+    "latency_ms": 94.36,
+    "cards": [
+      "J♦️",
+      "Q♦️",
+      "Q♣️",
+      "Q♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️",
+      "♣️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "J",
+      "Q",
+      "Q",
+      "Q",
+      "?"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747600613",
+    "timestamp_msk": "09:16:41.270",
+    "timestamp_utc": "06:16:41.270",
+    "latency_ms": 97.37,
+    "cards": [
+      "K♣️",
+      "Q♦️",
+      "8♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "Q",
+      "8"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747600898",
+    "timestamp_msk": "09:18:40.969",
+    "timestamp_utc": "06:18:40.969",
+    "latency_ms": 97.33,
+    "cards": [
+      "10♥️",
+      "Q♦️",
+      "9♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "Q",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747601152",
+    "timestamp_msk": "09:20:37.038",
+    "timestamp_utc": "06:20:37.038",
+    "latency_ms": 97.67,
+    "cards": [
+      "10♣️",
+      "8♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747601631",
+    "timestamp_msk": "09:22:47.427",
+    "timestamp_utc": "06:22:47.427",
+    "latency_ms": 93.28,
+    "cards": [
+      "J♣️",
+      "6♥️",
+      "7♥️",
+      "7♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "J",
+      "6",
+      "7",
+      "7"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747601848",
+    "timestamp_msk": "09:24:31.876",
+    "timestamp_utc": "06:24:31.876",
+    "latency_ms": 99.04,
+    "cards": [
+      "?♣️",
+      "7♠️"
+    ],
+    "suits": [
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747602181",
+    "timestamp_msk": "09:26:30.382",
+    "timestamp_utc": "06:26:30.382",
+    "latency_ms": 96.32,
+    "cards": [
+      "10♠️",
+      "?♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "?"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747602449",
+    "timestamp_msk": "09:28:40.200",
+    "timestamp_utc": "06:28:40.200",
+    "latency_ms": 96.21,
+    "cards": [
+      "?♦️",
+      "8♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747602768",
+    "timestamp_msk": "09:30:51.243",
+    "timestamp_utc": "06:30:51.243",
+    "latency_ms": 96.98,
+    "cards": [
+      "K♦️",
+      "6♠️",
+      "Q♣️",
+      "Q♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "6",
+      "Q",
+      "Q"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747603222",
+    "timestamp_msk": "09:32:38.402",
+    "timestamp_utc": "06:32:38.402",
+    "latency_ms": 106.01,
+    "cards": [
+      "K♠️",
+      "6♣️",
+      "?♠️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "K",
+      "6",
+      "?"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747603547",
+    "timestamp_msk": "09:34:36.926",
+    "timestamp_utc": "06:34:36.926",
+    "latency_ms": 95.02,
+    "cards": [
+      "J♣️",
+      "9♦️",
+      "6♦️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "J",
+      "9",
+      "6"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747603932",
+    "timestamp_msk": "09:36:47.903",
+    "timestamp_utc": "06:36:47.903",
+    "latency_ms": 95.21,
+    "cards": [
+      "6♦️",
+      "Q♣️",
+      "Q♠️",
+      "Q♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "6",
+      "Q",
+      "Q",
+      "Q"
+    ],
+    "player_score": 15,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747604176",
+    "timestamp_msk": "09:38:35.768",
+    "timestamp_utc": "06:38:35.768",
+    "latency_ms": 99.33,
+    "cards": [
+      "?♦️",
+      "10♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️"
+    ],
+    "ranks": [
+      "?",
+      "10"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747604555",
+    "timestamp_msk": "09:40:45.504",
+    "timestamp_utc": "06:40:45.504",
+    "latency_ms": 104.58,
+    "cards": [
+      "J♥️",
+      "8♥️",
+      "Q♥️",
+      "Q♦️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♥️",
+      "♦️"
+    ],
+    "ranks": [
+      "J",
+      "8",
+      "Q",
+      "Q"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747604910",
+    "timestamp_msk": "09:42:47.000",
+    "timestamp_utc": "06:42:47.000",
+    "latency_ms": 93.4,
+    "cards": [
+      "J♣️",
+      "J♦️",
+      "K♠️",
+      "?♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♦️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "J",
+      "J",
+      "K",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747605160",
+    "timestamp_msk": "09:44:34.251",
+    "timestamp_utc": "06:44:34.251",
+    "latency_ms": 94.74,
+    "cards": [
+      "8♥️",
+      "9♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "8",
+      "9"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747605654",
+    "timestamp_msk": "09:46:33.403",
+    "timestamp_utc": "06:46:33.403",
+    "latency_ms": 101.28,
+    "cards": [
+      "10♥️",
+      "8♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747605966",
+    "timestamp_msk": "09:48:33.704",
+    "timestamp_utc": "06:48:33.704",
+    "latency_ms": 98.2,
+    "cards": [
+      "10♥️",
+      "7♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "7"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747606200",
+    "timestamp_msk": "09:50:31.603",
+    "timestamp_utc": "06:50:31.603",
+    "latency_ms": 94.87,
+    "cards": [
+      "?♥️",
+      "?♣️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "?"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747606650",
+    "timestamp_msk": "09:52:41.396",
+    "timestamp_utc": "06:52:41.396",
+    "latency_ms": 96.0,
+    "cards": [
+      "J♥️",
+      "10♥️",
+      "10♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "J",
+      "10",
+      "10"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747606940",
+    "timestamp_msk": "09:54:37.393",
+    "timestamp_utc": "06:54:37.393",
+    "latency_ms": 98.76,
+    "cards": [
+      "?♥️",
+      "J♣️",
+      "9♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "J",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747607278",
+    "timestamp_msk": "09:56:32.871",
+    "timestamp_utc": "06:56:32.871",
+    "latency_ms": 94.06,
+    "cards": [
+      "8♠️",
+      "?♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "8",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747607538",
+    "timestamp_msk": "09:58:45.694",
+    "timestamp_utc": "06:58:45.694",
+    "latency_ms": 100.92,
+    "cards": [
+      "Q♣️",
+      "9♣️",
+      "K♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "Q",
+      "9",
+      "K"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747607780",
+    "timestamp_msk": "10:00:44.226",
+    "timestamp_utc": "07:00:44.226",
+    "latency_ms": 96.57,
+    "cards": [
+      "Q♥️",
+      "8♣️",
+      "6♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "Q",
+      "8",
+      "6"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747608179",
+    "timestamp_msk": "10:02:42.784",
+    "timestamp_utc": "07:02:42.784",
+    "latency_ms": 97.0,
+    "cards": [
+      "K♠️",
+      "10♦️",
+      "K♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "K",
+      "10",
+      "K"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747608526",
+    "timestamp_msk": "10:04:31.749",
+    "timestamp_utc": "07:04:31.749",
+    "latency_ms": 96.1,
+    "cards": [
+      "9♣️",
+      "7♣️"
+    ],
+    "suits": [
+      "♣️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "7"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747608947",
+    "timestamp_msk": "10:06:30.200",
+    "timestamp_utc": "07:06:30.200",
+    "latency_ms": 94.29,
+    "cards": [
+      "8♦️",
+      "?♦️"
+    ],
+    "suits": [
+      "♦️",
+      "♦️"
+    ],
+    "ranks": [
+      "8",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747609321",
+    "timestamp_msk": "10:08:30.485",
+    "timestamp_utc": "07:08:30.485",
+    "latency_ms": 95.74,
+    "cards": [
+      "10♠️",
+      "8♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747609683",
+    "timestamp_msk": "10:10:40.946",
+    "timestamp_utc": "07:10:40.946",
+    "latency_ms": 96.81,
+    "cards": [
+      "Q♥️",
+      "6♠️",
+      "?♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "6",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747610175",
+    "timestamp_msk": "10:12:30.617",
+    "timestamp_utc": "07:12:30.617",
+    "latency_ms": 98.15,
+    "cards": [
+      "8♠️",
+      "6♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "8",
+      "6"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747610506",
+    "timestamp_msk": "10:14:29.134",
+    "timestamp_utc": "07:14:29.134",
+    "latency_ms": 98.11,
+    "cards": [
+      "9♠️",
+      "8♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "9",
+      "8"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747610859",
+    "timestamp_msk": "10:16:51.504",
+    "timestamp_utc": "07:16:51.504",
+    "latency_ms": 97.69,
+    "cards": [
+      "9♦️",
+      "J♠️",
+      "J♣️",
+      "8♠️"
+    ],
+    "suits": [
+      "♦️",
+      "♠️",
+      "♣️",
+      "♠️"
+    ],
+    "ranks": [
+      "9",
+      "J",
+      "J",
+      "8"
+    ],
+    "player_score": 21,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747611235",
+    "timestamp_msk": "10:18:38.072",
+    "timestamp_utc": "07:18:38.072",
+    "latency_ms": 99.96,
+    "cards": [
+      "Q♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "Q",
+      "?"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747611615",
+    "timestamp_msk": "10:20:36.579",
+    "timestamp_utc": "07:20:36.579",
+    "latency_ms": 100.29,
+    "cards": [
+      "?♠️",
+      "8♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "8"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747612066",
+    "timestamp_msk": "10:22:37.541",
+    "timestamp_utc": "07:22:37.541",
+    "latency_ms": 95.5,
+    "cards": [
+      "?♠️",
+      "7♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747612447",
+    "timestamp_msk": "10:24:37.954",
+    "timestamp_utc": "07:24:37.954",
+    "latency_ms": 100.45,
+    "cards": [
+      "?♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "?",
+      "?"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "3"
+  },
+  {
+    "game_id": "747612790",
+    "timestamp_msk": "10:26:35.195",
+    "timestamp_utc": "07:26:35.195",
+    "latency_ms": 99.56,
+    "cards": [
+      "K♥️",
+      "10♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "K",
+      "10"
+    ],
+    "player_score": 14,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747613091",
+    "timestamp_msk": "10:28:34.272",
+    "timestamp_utc": "07:28:34.272",
+    "latency_ms": 97.89,
+    "cards": [
+      "10♠️",
+      "8♦️"
+    ],
+    "suits": [
+      "♠️",
+      "♦️"
+    ],
+    "ranks": [
+      "10",
+      "8"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747613344",
+    "timestamp_msk": "10:30:35.268",
+    "timestamp_utc": "07:30:35.268",
+    "latency_ms": 94.78,
+    "cards": [
+      "10♥️",
+      "7♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "10",
+      "7"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747613786",
+    "timestamp_msk": "10:32:36.841",
+    "timestamp_utc": "07:32:36.841",
+    "latency_ms": 100.36,
+    "cards": [
+      "10♣️",
+      "10♥️"
+    ],
+    "suits": [
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "10"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747614195",
+    "timestamp_msk": "10:34:47.374",
+    "timestamp_utc": "07:34:47.374",
+    "latency_ms": 100.57,
+    "cards": [
+      "K♠️",
+      "9♠️",
+      "9♣️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♣️"
+    ],
+    "ranks": [
+      "K",
+      "9",
+      "9"
+    ],
+    "player_score": 22,
+    "dealer_score": 0,
+    "state": "4"
+  },
+  {
+    "game_id": "747614669",
+    "timestamp_msk": "10:36:43.585",
+    "timestamp_utc": "07:36:43.585",
+    "latency_ms": 95.5,
+    "cards": [
+      "6♠️",
+      "J♠️",
+      "?♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "6",
+      "J",
+      "?"
+    ],
+    "player_score": 19,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747614986",
+    "timestamp_msk": "10:38:32.640",
+    "timestamp_utc": "07:38:32.640",
+    "latency_ms": 98.74,
+    "cards": [
+      "10♠️",
+      "6♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "10",
+      "6"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747615323",
+    "timestamp_msk": "10:40:33.591",
+    "timestamp_utc": "07:40:33.591",
+    "latency_ms": 94.24,
+    "cards": [
+      "?♠️",
+      "7♥️"
+    ],
+    "suits": [
+      "♠️",
+      "♥️"
+    ],
+    "ranks": [
+      "?",
+      "7"
+    ],
+    "player_score": 18,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747615740",
+    "timestamp_msk": "10:42:32.432",
+    "timestamp_utc": "07:42:32.432",
+    "latency_ms": 99.19,
+    "cards": [
+      "6♥️",
+      "?♠️"
+    ],
+    "suits": [
+      "♥️",
+      "♠️"
+    ],
+    "ranks": [
+      "6",
+      "?"
+    ],
+    "player_score": 17,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747615992",
+    "timestamp_msk": "10:44:43.540",
+    "timestamp_utc": "07:44:43.540",
+    "latency_ms": 96.34,
+    "cards": [
+      "J♦️",
+      "7♣️",
+      "?♥️"
+    ],
+    "suits": [
+      "♦️",
+      "♣️",
+      "♥️"
+    ],
+    "ranks": [
+      "J",
+      "7",
+      "?"
+    ],
+    "player_score": 20,
+    "dealer_score": 0,
+    "state": "2"
+  },
+  {
+    "game_id": "747616365",
+    "timestamp_msk": "10:46:32.606",
+    "timestamp_utc": "07:46:32.606",
+    "latency_ms": 94.14,
+    "cards": [
+      "6♥️",
+      "10♥️"
+    ],
+    "suits": [
+      "♥️",
+      "♥️"
+    ],
+    "ranks": [
+      "6",
+      "10"
+    ],
+    "player_score": 16,
+    "dealer_score": 0,
+    "state": "2"
   }
 ]
