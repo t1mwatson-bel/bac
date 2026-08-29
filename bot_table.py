@@ -4,6 +4,7 @@ import requests
 import json
 import re
 import time
+from pathlib import Path
 from datetime import datetime, timedelta
 import pytz
 
@@ -76,8 +77,6 @@ LATENCY_PROBS = {
 # =====================================================================
 # КЛАССЫ ДЛЯ РАБОТЫ С ФАЙЛАМИ
 # =====================================================================
-from pathlib import Path
-
 def default_state():
     return {
         "predictions": [],
