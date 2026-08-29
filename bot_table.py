@@ -13,8 +13,10 @@ import pytz
 # =====================================================================
 sys.stdout.flush()
 print("=" * 70, flush=True)
-print("🃏 ML BOT (LATENCY TABLE + LEARNING + THRESHOLD)", flush=True)
-print("📌 Прогноз по задержке и рангу | Минимальная уверенность: 29%", flush=True)
+print("🃏 ML BOT (LATENCY + RANK MATCHING)", flush=True)
+print("📌 Прогноз только при совпадении масти по задержке и рангу", flush=True)
+print("🎯 Минимальная уверенность: 28%", flush=True)
+print("🎯 OFFSET: +1", flush=True)
 print("=" * 70, flush=True)
 
 # =====================================================================
@@ -37,9 +39,9 @@ print("✅ Все переменные заданы!", flush=True)
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
-OFFSET = int(os.getenv("PREDICT_OFFSET", "1"))
+OFFSET = 1  # ⭐ Прогноз на следующую игру
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
-MIN_CONFIDENCE = 29.0  # Минимальная уверенность в процентах
+MIN_CONFIDENCE = 28.0  # Минимальная уверенность в процентах
 
 STATE_DIR = Path(os.getenv("STATE_DIR", ".")).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,7 +77,7 @@ LATENCY_PROBS = {
 }
 
 # =====================================================================
-# КЛАССЫ ДЛЯ РАБОТЫ С ФАЙЛАМИ
+# ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ
 # =====================================================================
 def default_state():
     return {
@@ -110,134 +112,6 @@ def save_json(path, data):
 
 state = load_json(STATE_FILE, default_state())
 all_messages = []
-
-# =====================================================================
-# ОБУЧЕНИЕ
-# =====================================================================
-def load_learned_probs():
-    if os.path.exists(LEARNED_FILE):
-        try:
-            with open(LEARNED_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_learned_probs(learned):
-    with open(LEARNED_FILE, "w", encoding="utf-8") as f:
-        json.dump(learned, f, indent=2, ensure_ascii=False)
-
-def get_confidence(latency, p1):
-    """Возвращает уверенность в процентах на основе истории"""
-    learned = load_learned_probs()
-    
-    if 93 <= latency < 95:
-        range_key = "93-95"
-    elif 95 <= latency < 97:
-        range_key = "95-97"
-    elif 97 <= latency < 99:
-        range_key = "97-99"
-    elif 99 <= latency < 101:
-        range_key = "99-101"
-    elif 101 <= latency < 103:
-        range_key = "101-103"
-    elif 103 <= latency < 105:
-        range_key = "103-105"
-    elif latency >= 105:
-        range_key = "105+"
-    else:
-        return None
-    
-    if p1:
-        rank_key = f"{p1['rank']}_{p1['suit']}"
-    else:
-        rank_key = "unknown"
-    
-    full_key = f"{range_key}_{rank_key}"
-    
-    if full_key in learned:
-        data = learned[full_key]
-        if data["total"] > 0:
-            return (data["wins"] / data["total"]) * 100
-    return None
-
-def collect_training_data(latency, predicted_suit, actual_suit, result, p1=None):
-    learned = load_learned_probs()
-    
-    if 93 <= latency < 95:
-        range_key = "93-95"
-    elif 95 <= latency < 97:
-        range_key = "95-97"
-    elif 97 <= latency < 99:
-        range_key = "97-99"
-    elif 99 <= latency < 101:
-        range_key = "99-101"
-    elif 101 <= latency < 103:
-        range_key = "101-103"
-    elif 103 <= latency < 105:
-        range_key = "103-105"
-    elif latency >= 105:
-        range_key = "105+"
-    else:
-        return
-    
-    if p1:
-        rank_key = f"{p1['rank']}_{p1['suit']}"
-    else:
-        rank_key = "unknown"
-    
-    full_key = f"{range_key}_{rank_key}"
-    
-    if full_key not in learned:
-        learned[full_key] = {
-            "total": 0,
-            "wins": 0,
-            "last_update": datetime.now(MOSCOW_TZ).isoformat()
-        }
-    
-    learned[full_key]["total"] += 1
-    if result:
-        learned[full_key]["wins"] += 1
-    learned[full_key]["last_update"] = datetime.now(MOSCOW_TZ).isoformat()
-    
-    save_learned_probs(learned)
-    print(f"📊 Сохранён результат: {predicted_suit} → {actual_suit} ({'✅' if result else '❌'}) для {full_key}", flush=True)
-    
-    total_samples = sum(learned[key]["total"] for key in learned)
-    if total_samples % 10 == 0 and total_samples >= 10:
-        retrain_confidence_table()
-
-def retrain_confidence_table():
-    learned = load_learned_probs()
-    if not learned:
-        return
-    
-    total_samples = sum(learned[key]["total"] for key in learned)
-    if total_samples < 10:
-        return
-    
-    print(f"🧠 Пересчитываю вероятности на основе {total_samples} реальных результатов...", flush=True)
-    
-    ranges = {}
-    for key, data in learned.items():
-        range_part = key.split("_")[0]
-        if range_part not in ranges:
-            ranges[range_part] = {"total": 0, "wins": 0}
-        ranges[range_part]["total"] += data["total"]
-        ranges[range_part]["wins"] += data["wins"]
-    
-    print("📊 Обновлённые проценты по диапазонам:", flush=True)
-    for range_name, data in ranges.items():
-        if data["total"] > 0:
-            win_rate = (data["wins"] / data["total"]) * 100
-            print(f"  {range_name}: {win_rate:.1f}% ({data['wins']}/{data['total']})", flush=True)
-    
-    learned["_meta"] = {
-        "last_retrain": datetime.now(MOSCOW_TZ).isoformat(),
-        "total_samples": total_samples
-    }
-    save_learned_probs(learned)
-    print(f"✅ Таблица вероятностей обновлена!", flush=True)
 
 # =====================================================================
 # ФУНКЦИИ ТЕЛЕГРАМ
@@ -275,6 +149,18 @@ def edit_message(message_id, text):
     except Exception as e:
         print(f"❌ editMessageText: {e}", flush=True)
         return False
+
+def telegram_get_updates(offset):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+    try:
+        r = requests.get(url, params={"offset": offset, "timeout": 30}, timeout=35)
+        if r.status_code != 200:
+            print(f"❌ Telegram getUpdates: {r.status_code} {r.text[:300]}", flush=True)
+            return {}
+        return r.json()
+    except Exception as e:
+        print(f"❌ getUpdates: {e}", flush=True)
+        return {}
 
 # =====================================================================
 # ПАРСИНГ
@@ -532,19 +418,12 @@ def check_results():
                 continue
 
             suit_found = False
-            actual_suit = None
             player_cards = game_data.get("player_cards", [])
             
             for card in player_cards:
                 if card.get("suit") == predicted_suit:
                     suit_found = True
-                    actual_suit = predicted_suit
                     break
-            
-            if not actual_suit and player_cards:
-                actual_suit = player_cards[0].get("suit", "♠️")
-            
-            p1 = player_cards[0] if player_cards else None
 
             if suit_found:
                 print(f"🎯 МАСТЬ {predicted_suit} НАЙДЕНА в игре #N{game_to_check}!", flush=True)
@@ -558,8 +437,6 @@ def check_results():
 
                 state["wins"] = state.get("wins", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
-
-                collect_training_data(latency, predicted_suit, actual_suit, True, p1)
 
                 suffix = f"\n\n✅ <b>ЗАШЛО</b> в игре #N{game_to_check}" if i == 0 else f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}"
                 edit_message(message_id, original_text + suffix)
@@ -577,8 +454,6 @@ def check_results():
 
                 state["losses"] = state.get("losses", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
-
-                collect_training_data(latency, predicted_suit, actual_suit, False, p1)
 
                 suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
                 edit_message(message_id, original_text + suffix)
@@ -617,6 +492,9 @@ def schedule_for_game(game_number):
 
     print(f"📅 Запланировано: #{game_number} → #{target} (+{OFFSET})", flush=True)
 
+# =====================================================================
+# ОСНОВНАЯ ЛОГИКА ПРОГНОЗА (СОВПАДЕНИЕ МАСТИ)
+# =====================================================================
 def process_scheduled():
     for entry in state.get("predictions", []):
         if entry.get("status") != "scheduled":
@@ -634,33 +512,40 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
+        # 1. Определяем масть по задержке
         base_suit = predict_suit_by_latency(latency)
         if base_suit is None:
             print(f"⏭️ Задержка {latency:.1f} мс — нет базовой масти", flush=True)
             continue
 
+        # 2. Получаем уверенность по задержке из таблицы
+        confidence = None
+        for (low, high), probs in LATENCY_PROBS.items():
+            if low <= latency < high:
+                confidence = probs.get(base_suit, 0)
+                break
+        
+        if confidence is None or confidence < MIN_CONFIDENCE:
+            print(f"⏭️ Уверенность {confidence:.1f}% < {MIN_CONFIDENCE:.0f}% — НЕ ДАЁМ", flush=True)
+            entry["status"] = "skipped"
+            entry["selected_prediction"] = None
+            entry["confidence"] = confidence or 0.0
+            entry["latency"] = latency
+            save_json(STATE_FILE, state)
+            continue
+
+        # 3. Определяем масть по рангу (уточнение)
         p = source.get("player_cards", [])
         d = source.get("dealer_cards", [])
         p1 = p[0] if len(p) > 0 else None
         p3 = p[1] if len(p) > 1 else None
         p2 = d[0] if len(d) > 0 else None
 
-        predicted_suit = refine_by_sequence(p1, p2, p3, base_suit, latency)
+        refined_suit = refine_by_sequence(p1, p2, p3, base_suit, latency)
 
-        # ⭐ РАСЧЁТ УВЕРЕННОСТИ
-        confidence = get_confidence(latency, p1)
-        
-        if confidence is None:
-            print(f"⏭️ Нет данных для расчёта уверенности (задержка {latency:.1f} мс, ранга нет)", flush=True)
-            entry["status"] = "skipped"
-            entry["selected_prediction"] = None
-            entry["confidence"] = 0.0
-            entry["latency"] = latency
-            save_json(STATE_FILE, state)
-            continue
-
-        if confidence < MIN_CONFIDENCE:
-            print(f"⏭️ Уверенность {confidence:.1f}% < {MIN_CONFIDENCE:.0f}% — прогноз НЕ ДАЁМ", flush=True)
+        # 4. Сравниваем масти
+        if refined_suit != base_suit:
+            print(f"⏭️ Масть по рангу ({refined_suit}) не совпадает с мастью по задержке ({base_suit}) — НЕ ДАЁМ", flush=True)
             entry["status"] = "skipped"
             entry["selected_prediction"] = None
             entry["confidence"] = confidence
@@ -668,12 +553,15 @@ def process_scheduled():
             save_json(STATE_FILE, state)
             continue
 
-        entry["selected_prediction"] = predicted_suit
+        # 5. ВСЁ СОВПАЛО — даём прогноз
+        print(f"✅ Совпадение! Задержка {latency:.1f} мс → {base_suit} ({confidence:.1f}%), ранг подтверждает", flush=True)
+
+        entry["selected_prediction"] = base_suit
         entry["latency"] = latency
         entry["confidence"] = confidence
         entry["status"] = "pending"
 
-        msg = prediction_text(entry, predicted_suit, source, confidence)
+        msg = prediction_text(entry, base_suit, source, confidence)
         mid = send_message(msg)
 
         if mid:
@@ -682,7 +570,7 @@ def process_scheduled():
             save_json(STATE_FILE, state)
 
             print(
-                f"✅ ПРОГНОЗ: #{target} → {predicted_suit} | "
+                f"✅ ПРОГНОЗ: #{target} → {base_suit} | "
                 f"уверенность={confidence:.1f}%",
                 flush=True,
             )
@@ -717,19 +605,15 @@ def stats_text():
     wins = state.get("wins", 0)
     losses = state.get("losses", 0)
     acc = f"{wins / total * 100:.1f}%" if total else "—"
-    history = len(state.get("training_history", []))
-    learned = len(load_learned_probs())
 
     return (
-        "📊 <b>СТАТИСТИКА (TABLE + LEARNING + THRESHOLD)</b>\n"
+        "📊 <b>СТАТИСТИКА (LATENCY + RANK MATCHING)</b>\n"
         f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n"
         "==============================\n"
         f"📈 Всего прогнозов: {total}\n"
         f"✅ Зашло: {wins}\n"
         f"❌ Не зашло: {losses}\n"
         f"🎯 Точность: {acc}\n"
-        f"🧠 Собрано данных: {history}\n"
-        f"📊 Выучено комбинаций: {learned}\n"
         f"🎯 Минимальный порог: {MIN_CONFIDENCE:.0f}%"
     )
 
@@ -752,7 +636,7 @@ def main():
     global all_messages, state
 
     print("=" * 70, flush=True)
-    print("🃏 ML BOT (TABLE + LEARNING + THRESHOLD)", flush=True)
+    print("🃏 ML BOT (LATENCY + RANK MATCHING)", flush=True)
     print("=" * 70, flush=True)
 
     send_message(stats_text())
@@ -761,6 +645,8 @@ def main():
     last_stats = time.time()
 
     print("🚀 БОТ ГОТОВ.", flush=True)
+    print(f"🎯 OFFSET: +{OFFSET}", flush=True)
+    print(f"🎯 Минимальная уверенность: {MIN_CONFIDENCE:.0f}%", flush=True)
 
     while True:
         try:
@@ -829,21 +715,6 @@ def main():
             except Exception:
                 pass
             time.sleep(10)
-
-# =====================================================================
-# TELEGRAM GET UPDATES
-# =====================================================================
-def telegram_get_updates(offset):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    try:
-        r = requests.get(url, params={"offset": offset, "timeout": 30}, timeout=35)
-        if r.status_code != 200:
-            print(f"❌ Telegram getUpdates: {r.status_code} {r.text[:300]}", flush=True)
-            return {}
-        return r.json()
-    except Exception as e:
-        print(f"❌ getUpdates: {e}", flush=True)
-        return {}
 
 if __name__ == "__main__":
     main()
