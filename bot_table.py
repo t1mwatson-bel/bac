@@ -111,9 +111,72 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
     tmp.replace(path)
 
-state = load_json(STATE_FILE, default_state())
-MODELS = None
-all_messages = []
+# ================================================================
+# СИНХРОНИЗАЦИЯ С GITHUB (ТОЛЬКО ДОБАВЛЯЕТ)
+# ================================================================
+def sync_state_with_github():
+    """
+    Скачивает state с GitHub и МЕРЖИТ с локальным.
+    НИЧЕГО НЕ ПЕРЕЗАПИСЫВАЕТ — только добавляет новые данные.
+    """
+    GITHUB_RAW_URL = "https://raw.githubusercontent.com/ArtyomGrigorian/hybrid_bot/main/hybrid_state.json"
+    
+    try:
+        print("🔄 Загружаю state с GitHub...", flush=True)
+        r = requests.get(GITHUB_RAW_URL, timeout=10)
+        if r.status_code != 200:
+            print(f"⚠️ GitHub вернул {r.status_code}, использую локальный state", flush=True)
+            return False
+        
+        github_data = json.loads(r.text)
+        local_state = state
+        
+        # Мержим training_samples
+        if "training_samples" in github_data and isinstance(github_data["training_samples"], list):
+            existing = {json.dumps(item, sort_keys=True) for item in local_state.get("training_samples", [])}
+            added = 0
+            for item in github_data["training_samples"]:
+                key = json.dumps(item, sort_keys=True)
+                if key not in existing:
+                    local_state["training_samples"].append(item)
+                    existing.add(key)
+                    added += 1
+            print(f"✅ Добавлено {added} новых обучающих примеров из GitHub", flush=True)
+        
+        # Мержим predictions (только новые, которых ещё нет)
+        if "predictions" in github_data and isinstance(github_data["predictions"], list):
+            existing_targets = {p.get("target") for p in local_state.get("predictions", []) if p.get("target")}
+            added = 0
+            for item in github_data["predictions"]:
+                target = item.get("target")
+                if target and target not in existing_targets:
+                    local_state["predictions"].append(item)
+                    existing_targets.add(target)
+                    added += 1
+            print(f"✅ Добавлено {added} новых прогнозов из GitHub", flush=True)
+        
+        # Обновляем статистику (только если она больше текущей)
+        for key in ["rule_wins", "rule_losses", "ml_wins", "ml_losses", "total_predictions", "switches"]:
+            if key in github_data and github_data[key] > local_state.get(key, 0):
+                old = local_state.get(key, 0)
+                local_state[key] = github_data[key]
+                print(f"📊 {key}: {old} → {local_state[key]}", flush=True)
+        
+        # Обновляем model_samples и last_model_train если они больше
+        if github_data.get("model_samples", 0) > local_state.get("model_samples", 0):
+            local_state["model_samples"] = github_data["model_samples"]
+        if github_data.get("last_model_train", 0) > local_state.get("last_model_train", 0):
+            local_state["last_model_train"] = github_data["last_model_train"]
+        
+        # Сохраняем обновлённый state
+        save_json(STATE_FILE, local_state)
+        print(f"✅ State синхронизирован с GitHub (всего {len(local_state.get('training_samples', []))} примеров)", flush=True)
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Ошибка синхронизации с GitHub: {e}", flush=True)
+        traceback.print_exc()
+        return False
 
 # -------------------- TELEGRAM --------------------
 def telegram_get_updates(offset):
@@ -941,6 +1004,11 @@ def main():
     print("=" * 70, flush=True)
     print("🃏 HYBRID RULES + ML BOT (БЕЗ ПЕРЕЗАПИСИ STATE)", flush=True)
     print("=" * 70, flush=True)
+
+    # ================================================================
+    # ЗАГРУЗКА STATE С GITHUB (ТОЛЬКО ПРИ СТАРТЕ)
+    # ================================================================
+    sync_state_with_github()
 
     load_models()
     
