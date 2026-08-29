@@ -31,7 +31,7 @@ if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
-OFFSET = int(os.getenv("PREDICT_OFFSET", "10"))
+OFFSET = int(os.getenv("PREDICT_OFFSET", "1"))
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
 
 MIN_CONFIDENCE = 0.60
