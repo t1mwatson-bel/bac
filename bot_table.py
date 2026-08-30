@@ -792,12 +792,16 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        predicted_rank, confidence = get_prediction(latency, source)
+        # ============================================================
+        # 🔥 ПРОГНОЗ РАНГА ПО ЗАДЕРЖКЕ (БЕЗ МАСТЕЙ)
+        # ============================================================
+        predicted_rank, confidence = predict_rank_by_latency(latency)
 
-        if predicted_rank is None or confidence is None:
-            print(f"⏭️ Нет прогноза от ML для #{target}", flush=True)
+        if predicted_rank is None or confidence < MIN_CONFIDENCE:
+            print(f"⏭️ Уверенность {confidence:.1f}% < {MIN_CONFIDENCE:.0f}% — НЕ ДАЁМ", flush=True)
             entry["status"] = "skipped"
-            entry["confidence"] = 0.0
+            entry["selected_prediction"] = None
+            entry["confidence"] = confidence
             entry["latency"] = latency
             save_json(STATE_FILE, state)
             continue
@@ -812,7 +816,7 @@ def process_scheduled():
         # ============================================================
         msg = f"🔮 <b>RANK BOT (ML)</b>\n"
         msg += f"🃏 Ранг: <b>{predicted_rank}</b>\n"
-        msg += f"🎯 Уверенность: {confidence*100:.1f}%\n"
+        msg += f"🎯 Уверенность: {confidence:.1f}%\n"
         msg += f"🎯 Целевая игра: #N{target} (+{OFFSET})\n"
         msg += f"📈 Догон: {DOGON_GAMES - 1} игры\n"
 
@@ -833,7 +837,7 @@ def process_scheduled():
         # ============================================================
         # 🔥 ЛОГИРУЕМ ТОЛЬКО РАНГ (БЕЗ МАСТЕЙ)
         # ============================================================
-        print(f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | уверенность={confidence*100:.1f}%", flush=True)
+        print(f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | уверенность={confidence:.1f}%", flush=True)
 
         mid = send_message(msg)
         if mid:
@@ -841,48 +845,7 @@ def process_scheduled():
             entry["message_text"] = msg
             save_json(STATE_FILE, state)
             print(
-                f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {predicted_rank} (уверенность {confidence*100:.1f}%)",
-                flush=True,
-            )
-        else:
-            entry["status"] = "scheduled"
-            save_json(STATE_FILE, state)
-
-        entry["selected_prediction"] = predicted_rank
-        entry["latency"] = latency
-        entry["confidence"] = confidence
-        entry["status"] = "pending"
-
-        # ============================================================
-        # 🔥 ФОРМИРУЕМ СООБЩЕНИЕ ТОЛЬКО С РАНГОМ
-        # ============================================================
-        msg = f"🔮 <b>RANK BOT (ML)</b>\n"
-        msg += f"🃏 Ранг: <b>{predicted_rank}</b>\n"
-        msg += f"🎯 Уверенность: {confidence*100:.1f}%\n"
-        msg += f"🎯 Целевая игра: #N{target} (+{OFFSET})\n"
-        msg += f"📈 Догон: {DOGON_GAMES - 1} игры\n"
-
-        # Показываем только ранги первых карт (без мастей)
-        p = source.get("player_cards", [])
-        d = source.get("dealer_cards", [])
-        seq = []
-        for prefix, cards in [("P", p[:3]), ("D", d[:3])]:
-            for i, c in enumerate(cards, 1):
-                rank = c.get("rank", "")
-                if rank:
-                    seq.append(f"{prefix}{i}:{rank}")
-        if seq:
-            msg += "📌 " + " ".join(seq) + "\n"
-
-        msg += "⏰ " + datetime.now(MOSCOW_TZ).strftime("%H:%M:%S")
-
-        mid = send_message(msg)
-        if mid:
-            entry["message_id"] = mid
-            entry["message_text"] = msg
-            save_json(STATE_FILE, state)
-            print(
-                f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {predicted_rank} (уверенность {confidence*100:.1f}%)",
+                f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {predicted_rank} (уверенность {confidence:.1f}%)",
                 flush=True,
             )
         else:
