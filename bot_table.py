@@ -9,14 +9,13 @@ from datetime import datetime, timedelta
 import pytz
 
 # =====================================================================
-# RANK BOT (С ПОДРОБНЫМИ ЛОГАМИ)
+# RANK BOT (ТОЛЬКО РАНГИ, БЕЗ МАСТЕЙ)
 # =====================================================================
 sys.stdout.flush()
 print("=" * 70, flush=True)
 print("🃏 RANK BOT (SELF-LEARNING)", flush=True)
 print("📌 Прогноз точного ранга (6,7,8,9,10,J,Q,K,A)", flush=True)
 print("🧠 Самообучение | Лимит: 3000 игр", flush=True)
-print("📊 Подробные логи: каждый шаг", flush=True)
 print("=" * 70, flush=True)
 
 # =====================================================================
@@ -40,7 +39,7 @@ MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
 OFFSET = 1
-DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
+DOGON_GAMES = 4
 MIN_CONFIDENCE = 28.0
 MAX_TRAIN_GAMES = 3000
 
@@ -61,7 +60,7 @@ HEADERS = {
 if LIVE_COOKIE:
     HEADERS["Cookie"] = LIVE_COOKIE
 
-SUITS = ["♠️", "♣️", "♦️", "♥️"]
+SUITS = ["♠️", "♣️", "♦️", "♥️"]  # Только для парсинга
 RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 
 # =====================================================================
@@ -148,17 +147,13 @@ def learn_from_error(latency, predicted_rank, actual_rank):
     if not range_key or range_key not in state["rank_table"]:
         return
     
-    print(f"🧠 АНАЛИЗ ОШИБКИ: предсказал {predicted_rank}, а выпал {actual_rank} (задержка {range_key})", flush=True)
-    
     if predicted_rank in state["rank_table"][range_key]:
         old = state["rank_table"][range_key][predicted_rank]
         state["rank_table"][range_key][predicted_rank] = max(0, old - 1.0)
-        print(f"   ⬇️ {predicted_rank}: {old:.1f}% → {state['rank_table'][range_key][predicted_rank]:.1f}%", flush=True)
     
     if actual_rank in state["rank_table"][range_key]:
         old = state["rank_table"][range_key][actual_rank]
         state["rank_table"][range_key][actual_rank] = min(100, old + 0.5)
-        print(f"   ⬆️ {actual_rank}: {old:.1f}% → {state['rank_table'][range_key][actual_rank]:.1f}%", flush=True)
     
     total = sum(state["rank_table"][range_key].values())
     if total > 0:
@@ -169,7 +164,7 @@ def learn_from_error(latency, predicted_rank, actual_rank):
     
     state["total_games"] = state.get("total_games", 0) + 1
     save_json(STATE_FILE, state)
-    print(f"✅ Таблица скорректирована. Всего игр: {state['total_games']}/{MAX_TRAIN_GAMES}", flush=True)
+    print(f"🧠 Ошибка: {predicted_rank} → {actual_rank} (задержка {range_key})", flush=True)
 
 # =====================================================================
 # ФУНКЦИИ ТЕЛЕГРАМ
@@ -391,7 +386,7 @@ def cleanup_games():
             games_by_number.pop(k, None)
 
 # =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА
+# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЛЬКО РАНГИ)
 # =====================================================================
 def check_results():
     global all_messages, state
@@ -409,8 +404,6 @@ def check_results():
         if not predicted_rank or not message_id:
             continue
 
-        print(f"🔍 ПРОВЕРКА: ищем ранг {predicted_rank} в играх #{target}–#{target+DOGON_GAMES-1}", flush=True)
-
         max_games_to_check = DOGON_GAMES
 
         for i in range(max_games_to_check):
@@ -423,7 +416,6 @@ def check_results():
                     break
 
             if not game_msg:
-                print(f"⏳ Ждём игру #N{game_to_check} для проверки ранга {predicted_rank}", flush=True)
                 continue
 
             game_data = parse_game_from_text(game_msg)
@@ -433,8 +425,6 @@ def check_results():
             rank_found = False
             actual_rank = None
             player_cards = game_data.get("player_cards", [])
-            
-            print(f"📋 Карты игрока в игре #N{game_to_check}: {[c['rank'] for c in player_cards]}", flush=True)
             
             for card in player_cards:
                 if card.get("rank") == predicted_rank:
@@ -446,7 +436,7 @@ def check_results():
                 actual_rank = player_cards[0].get("rank", "10")
 
             if rank_found:
-                print(f"✅ РАНГ {predicted_rank} НАЙДЕН в игре #N{game_to_check}!", flush=True)
+                print(f"🎯 РАНГ {predicted_rank} НАЙДЕН в игре #N{game_to_check}!", flush=True)
                 dogon_number = i
 
                 entry["selected_result"] = True
@@ -527,19 +517,12 @@ def process_scheduled():
         if not source:
             continue
 
-        print(f"🔥 Прогноз для игры #{target}: получаю задержку...", flush=True)
-        
         latency = get_fresh_latency()
         if latency is None:
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        print(f"📊 Задержка: {latency:.1f} мс", flush=True)
-
         predicted_rank, confidence = predict_rank_by_latency(latency)
-        
-        print(f"📊 Ранг по задержке: {predicted_rank} (уверенность {confidence:.1f}%)", flush=True)
-        
         if predicted_rank is None or confidence < MIN_CONFIDENCE:
             print(f"⏭️ Уверенность {confidence:.1f}% < {MIN_CONFIDENCE:.0f}% — НЕ ДАЁМ", flush=True)
             entry["status"] = "skipped"
@@ -563,7 +546,7 @@ def process_scheduled():
             save_json(STATE_FILE, state)
 
             print(
-                f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {predicted_rank} | "
+                f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | "
                 f"уверенность={confidence:.1f}%",
                 flush=True,
             )
