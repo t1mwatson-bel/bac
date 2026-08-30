@@ -4,6 +4,7 @@ import requests
 import json
 import re
 import time
+from pathlib import Path
 from datetime import datetime, timedelta
 import pytz
 
@@ -204,7 +205,6 @@ def parse_game_from_text(text):
                 else:
                     i += 1
                     continue
-                # Пропускаем масть, берём только ранг
                 if rank:
                     cards.append({"rank": rank})
                 i += 1
