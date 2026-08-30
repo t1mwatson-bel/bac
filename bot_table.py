@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 import pytz
 
 print("=" * 70, flush=True)
-print("🃏 RANK BOT (TOP-2)", flush=True)
-print("📌 Прогноз топ-2 рангов по задержке", flush=True)
+print("🃏 RANK BOT (ТОП-1, С ОЖИДАНИЕМ)", flush=True)
+print("📌 Прогноз топ-1 ранга по задержке", flush=True)
 print("🎯 Минимальная уверенность: 28%", flush=True)
 print("🎯 OFFSET: +1", flush=True)
 print("=" * 70, flush=True)
@@ -218,15 +218,14 @@ def get_game_number():
     return int((now - start).total_seconds() / 60) // 2 % 720 + 1
 
 # =====================================================================
-# ПРОГНОЗ (ТОП-2 РАНГА)
+# ПРОГНОЗ (ТОП-1 РАНГ)
 # =====================================================================
-def predict_ranks(lat):
+def predict_rank(lat):
     for (low, high), probs in RANK_TABLE.items():
         if low <= lat < high:
-            sorted_ranks = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-            top2 = [(rank, prob / 100.0) for rank, prob in sorted_ranks[:2]]
-            return top2
-    return None
+            best = max(probs.items(), key=lambda x: x[1])
+            return best[0], best[1] / 100.0
+    return None, 0.0
 
 # =====================================================================
 # ХРАНИЛИЩЕ
@@ -243,17 +242,17 @@ def find_game(n):
     return games.get(n)
 
 # =====================================================================
-# ПРОВЕРКА
+# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЛЬКО КОГДА ИГРА ЗАВЕРШЕНА)
 # =====================================================================
 def check_results():
     for entry in state["predictions"]:
         if entry["status"] != "pending":
             continue
         target = entry["target"]
-        ranks = entry["ranks"]
+        rank = entry["rank"]
         mid = entry["mid"]
         orig = entry["text"]
-        if not ranks or not mid:
+        if not rank or not mid:
             continue
         for i in range(DOGON_GAMES):
             gnum = target + i
@@ -263,19 +262,19 @@ def check_results():
                     found = m
                     break
             if not found:
-                print(f"⏳ Ждём #N{gnum} для проверки рангов {ranks}")
+                print(f"⏳ Ждём завершения #N{gnum} для проверки ранга {rank}")
                 continue
             data = parse_game(found)
             if not data:
                 continue
             # Проверяем у игрока
-            rank_found = None
+            rank_found = False
             for card in data["player"]:
-                if card["rank"] in ranks:
-                    rank_found = card["rank"]
+                if card["rank"] == rank:
+                    rank_found = True
                     break
             if rank_found:
-                print(f"🎯 РАНГ {rank_found} НАЙДЕН у игрока в #N{gnum}!")
+                print(f"🎯 РАНГ {rank} НАЙДЕН у игрока в #N{gnum}!")
                 entry["status"] = "win"
                 state["wins"] += 1
                 state["total"] += 1
@@ -283,7 +282,7 @@ def check_results():
                 edit(mid, orig + suffix)
                 save_state()
                 return
-        print(f"❌ Ранги {ranks} НЕ НАЙДЕНЫ у игрока за {DOGON_GAMES} игр")
+        print(f"❌ Ранг {rank} НЕ НАЙДЕН у игрока за {DOGON_GAMES} игр")
         entry["status"] = "lose"
         state["losses"] += 1
         state["total"] += 1
@@ -292,7 +291,7 @@ def check_results():
         save_state()
 
 # =====================================================================
-# ПЛАНИРОВЩИК
+# ПЛАНИРОВЩИК (ОЖИДАНИЕ ДО ПОСЛЕДНЕЙ ИГРЫ)
 # =====================================================================
 def schedule(n):
     target = n + OFFSET
@@ -302,7 +301,7 @@ def schedule(n):
     state["predictions"].append({
         "source": target - 1,
         "target": target,
-        "ranks": [],
+        "rank": None,
         "confidence": 0.0,
         "status": "scheduled",
         "mid": None,
@@ -312,10 +311,16 @@ def schedule(n):
     print(f"📅 Запланировано: #{n} → #{target} (+{OFFSET})")
 
 def process_scheduled():
+    current_num = get_game_number()
     for entry in state["predictions"]:
         if entry["status"] != "scheduled":
             continue
         target = entry["target"]
+        games_left = target - current_num
+        # Ждём, пока до целевой игры не останется 1 игра
+        if games_left != 1:
+            continue
+        print(f"🔥 До цели #{target} осталась 1 игра! Делаю прогноз...", flush=True)
         src = find_game(target - 1)
         if not src:
             continue
@@ -323,13 +328,13 @@ def process_scheduled():
         if lat is None:
             print("⏳ Нет задержки")
             continue
-        top2 = predict_ranks(lat)
-        if not top2:
-            print(f"⏭️ Нет прогноза для задержки {lat:.1f}")
+        rank, conf = predict_rank(lat)
+        if rank is None or conf < MIN_CONFIDENCE / 100.0:
+            print(f"⏭️ {conf*100:.1f}% < {MIN_CONFIDENCE}%")
             entry["status"] = "skipped"
             save_state()
             continue
-        # Проверяем, что ранги не заняты P1, D1, P2, D2
+        # Проверяем, что ранг не занят P1, D1, P2, D2
         player_cards = src.get("player", [])
         dealer_cards = src.get("dealer", [])
         check_cards = []
@@ -341,40 +346,21 @@ def process_scheduled():
             check_cards.append(player_cards[1]["rank"])
         if len(dealer_cards) > 1:
             check_cards.append(dealer_cards[1]["rank"])
-        # Фильтруем ранги, которых нет в check_cards
-        filtered = []
-        for rank, prob in top2:
-            if rank not in check_cards:
-                filtered.append((rank, prob))
-        # Если оба ранга заняты — пропускаем
-        if not filtered:
-            print(f"⏭️ Все ранги {[r for r, _ in top2]} заняты среди P1, D1, P2, D2 → пропускаю прогноз для #{target}")
+        if rank in check_cards:
+            print(f"⏭️ Ранг {rank} уже есть среди P1, D1, P2, D2 → пропускаю прогноз для #{target}")
             entry["status"] = "skipped"
             save_state()
             continue
-        # Берём первый доступный ранг
-        rank, conf = filtered[0]
-        # Рассчитываем суммарную уверенность
-        total_conf = sum(p for _, p in filtered)
-        # Если уверенность ниже порога — пропускаем
-        if total_conf < MIN_CONFIDENCE / 100.0:
-            print(f"⏭️ Уверенность {total_conf*100:.1f}% < {MIN_CONFIDENCE}%")
-            entry["status"] = "skipped"
-            save_state()
-            continue
-        entry["ranks"] = [rank]
-        entry["confidence"] = total_conf
+        entry["rank"] = rank
+        entry["confidence"] = conf
         entry["status"] = "pending"
-        # Формируем сообщение с топ-2
-        msg = f"🔮 RANK BOT (ТОП-2)\n\n"
+        msg = f"🔮 RANK BOT\n\n"
         msg += f"🎯 Целевая игра: #N{target} (+{OFFSET})\n"
-        msg += f"⏰ Прогноз: {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')}\n\n"
-        msg += f"📊 Топ-2 ранга:\n"
-        for i, (r, p) in enumerate(filtered[:2], 1):
-            msg += f"  {i}️⃣ {r} — {p*100:.1f}%\n"
-        msg += f"\n📊 Суммарная уверенность: {total_conf*100:.1f}%\n"
+        msg += f"🃏 Ранг: {rank}\n"
+        msg += f"🎯 Уверенность: {conf*100:.1f}%\n"
         msg += f"📈 Догон: {DOGON_GAMES - 1} игр\n"
-        msg += f"📍 Ищем: у игрока"
+        msg += f"📍 Ищем: у игрока\n"
+        msg += f"⏰ {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')}"
         # Добавляем последовательность, если есть
         seq_str = ""
         if len(player_cards) > 0:
@@ -392,7 +378,7 @@ def process_scheduled():
             entry["mid"] = mid
             entry["text"] = msg
             save_state()
-            print(f"✅ ПРОГНОЗ: #{target} → {rank} ({total_conf*100:.1f}%)")
+            print(f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {rank} ({conf*100:.1f}%)", flush=True)
 
 # =====================================================================
 # СТАТИСТИКА
@@ -402,7 +388,7 @@ def stats():
     w = state["wins"]
     l = state["losses"]
     acc = f"{w/t*100:.1f}%" if t else "—"
-    return f"📊 RANK BOT (ТОП-2)\n⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n==============================\n📈 Всего: {t}\n✅ Зашло: {w}\n❌ Не зашло: {l}\n🎯 Точность: {acc}"
+    return f"📊 RANK BOT (ТОП-1)\n⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n==============================\n📈 Всего: {t}\n✅ Зашло: {w}\n❌ Не зашло: {l}\n🎯 Точность: {acc}"
 
 # =====================================================================
 # OFFSET
