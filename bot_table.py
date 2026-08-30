@@ -4,25 +4,18 @@ import requests
 import json
 import re
 import time
-import pickle
-import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
 import pytz
-from collections import deque, defaultdict
-import warnings
-import gc
-import traceback
-warnings.filterwarnings('ignore')
 
 # =====================================================================
-# RANK BOT (САМООБУЧАЮЩИЙСЯ, ТОЛЬКО РАНГИ, БЕЗ МАСТЕЙ)
+# RANK BOT (БЕЗ МАСТЕЙ, ТОЛЬКО РАНГИ)
 # =====================================================================
 sys.stdout.flush()
 print("=" * 70, flush=True)
-print("🃏 RANK BOT (ML SELF-LEARNING)", flush=True)
-print("📌 Прогноз точного ранга (6,7,8,9,10,J,Q,K,A)", flush=True)
-print("🧠 Самообучение на ВСЕХ играх | Анализ ошибок", flush=True)
+print("🃏 RANK BOT (ONLY RANKS)", flush=True)
+print("📌 Прогноз: 6,7,8,9,10,J,Q,K,A", flush=True)
+print("🧠 Самообучение | Лимит: 3000 игр", flush=True)
 print("=" * 70, flush=True)
 
 # =====================================================================
@@ -47,20 +40,14 @@ BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
 OFFSET = 1
 DOGON_GAMES = 4
-ML_CONFIDENCE_THRESHOLD = 0.60
-MAX_RECORDS = 10000
-MIN_TRAIN_SAMPLES = 100
-CHECK_INTERVAL = 5
-MAX_HISTORY = 2000
+MIN_CONFIDENCE = 28.0
+MAX_TRAIN_GAMES = 3000
 
 STATE_DIR = Path(os.getenv("STATE_DIR", ".")).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 STATE_FILE = STATE_DIR / "rank_state.json"
 OFFSET_FILE = STATE_DIR / "rank_offset.txt"
-ML_MODEL_FILE = STATE_DIR / "rank_model.pkl"
-DATA_FILE = STATE_DIR / "rank_data.json"
-HISTORY_FILE = STATE_DIR / "rank_history.json"
 
 MAX_MESSAGES = 3000
 MAX_STATE_PREDICTIONS = 3000
@@ -73,85 +60,24 @@ HEADERS = {
 if LIVE_COOKIE:
     HEADERS["Cookie"] = LIVE_COOKIE
 
-SUITS = ["♠️", "♣️", "♦️", "♥️"]
+# =====================================================================
+# ТОЛЬКО РАНГИ (БЕЗ МАСТЕЙ)
+# =====================================================================
 RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 
-# =====================================================================
-# ML-НАСТРОЙКИ (РАНГИ ВМЕСТО КАРТ)
-# =====================================================================
-TARGET_RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-RANK_VALUES = {'6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
-SUITS_NAMES = {0: "♠️", 1: "♣️", 2: "♦️", 3: "♥️"}
-
-# =====================================================================
-# ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
-# =====================================================================
-ml_model = None
-ml_initialized = False
-all_messages = []
-game_history = deque(maxlen=50)
-stats = {
-    "total": 0,
-    "win": 0,
-    "lose": 0,
-    "ml_wins": 0,
-    "ml_losses": 0,
-    "games_collected": 0,
-    "by_dogon": {0: 0, 1: 0, 2: 0, 3: 0}
+RANK_TABLE = {
+    "93-95": {"10": 18.0, "J": 16.0, "Q": 15.0, "K": 14.0, "A": 13.0, "9": 12.0, "8": 12.0, "7": 0, "6": 0},
+    "95-97": {"J": 18.0, "Q": 16.0, "K": 15.0, "A": 14.0, "10": 13.0, "9": 12.0, "8": 12.0, "7": 0, "6": 0},
+    "97-99": {"K": 18.0, "A": 17.0, "Q": 16.0, "J": 15.0, "10": 14.0, "9": 10.0, "8": 10.0, "7": 0, "6": 0},
+    "99-101": {"A": 19.0, "K": 18.0, "Q": 16.0, "J": 15.0, "10": 14.0, "9": 10.0, "8": 8.0, "7": 0, "6": 0},
+    "101-103": {"Q": 18.0, "K": 17.0, "A": 16.0, "J": 15.0, "10": 14.0, "9": 10.0, "8": 10.0, "7": 0, "6": 0},
+    "103-105": {"K": 19.0, "Q": 18.0, "A": 17.0, "J": 16.0, "10": 15.0, "9": 8.0, "8": 7.0, "7": 0, "6": 0},
+    "105+": {"A": 20.0, "K": 19.0, "Q": 18.0, "J": 17.0, "10": 16.0, "9": 5.0, "8": 5.0, "7": 0, "6": 0},
 }
-games_by_number = {}
 
 # =====================================================================
-# ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ
+# ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ
 # =====================================================================
-def load_data():
-    if DATA_FILE.exists():
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_data(record):
-    data = load_data()
-    
-    # Проверяем дубликаты по номеру игры
-    existing = None
-    for i, r in enumerate(data):
-        if r.get("game_num") == record.get("game_num"):
-            existing = i
-            break
-    
-    if existing is not None:
-        data[existing] = record
-    else:
-        data.append(record)
-        stats["games_collected"] += 1
-    
-    # Ограничиваем размер
-    if len(data) > MAX_RECORDS:
-        data = data[-MAX_RECORDS:]
-    
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    return data
-
-def load_history():
-    if HISTORY_FILE.exists():
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_history(history):
-    if len(history) > MAX_HISTORY:
-        history = history[-MAX_HISTORY:]
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2, ensure_ascii=False)
-
 def default_state():
     return {
         "predictions": [],
@@ -160,6 +86,7 @@ def default_state():
         "total_predictions": 0,
         "wins": 0,
         "losses": 0,
+        "rank_table": RANK_TABLE,
         "learning_active": True,
     }
 
@@ -184,200 +111,59 @@ def save_json(path, data):
     tmp.replace(path)
 
 state = load_json(STATE_FILE, default_state())
+all_messages = []
+
+if "rank_table" in state:
+    RANK_TABLE = state["rank_table"]
 
 # =====================================================================
-# ML-ФУНКЦИИ
+# САМООБУЧЕНИЕ
 # =====================================================================
-def extract_features_from_game(game_data, latency, game_num):
-    """Извлекает признаки из игры для ML"""
-    if not game_data:
-        return None
-    
-    player_cards = game_data.get("player_cards", [])
-    dealer_cards = game_data.get("dealer_cards", [])
-    
-    features = {
-        "latency": latency if latency else 0,
-        "game_num": game_num % 100,
-        "p1_rank_val": 0,
-        "p2_rank_val": 0,
-        "p3_rank_val": 0,
-        "d1_rank_val": 0,
-        "d2_rank_val": 0,
-        "player_total": 0,
-        "dealer_total": 0,
-        "player_count": len(player_cards),
-        "dealer_count": len(dealer_cards),
-        "hour": 0,
-        "minute": 0,
-        "day_of_week": 0,
-        "is_weekend": 0,
-    }
-    
-    for i, card in enumerate(player_cards[:3]):
-        rank = card.get("rank", "")
-        if rank in RANK_VALUES:
-            features[f"p{i+1}_rank_val"] = RANK_VALUES[rank]
-    
-    for i, card in enumerate(dealer_cards[:2]):
-        rank = card.get("rank", "")
-        if rank in RANK_VALUES:
-            features[f"d{i+1}_rank_val"] = RANK_VALUES[rank]
-    
-    player_total = 0
-    for card in player_cards:
-        rank = card.get("rank", "")
-        if rank in RANK_VALUES:
-            val = RANK_VALUES[rank]
-            if val >= 11:
-                player_total += 10
-            else:
-                player_total += val
-    features["player_total"] = player_total
-    
-    dealer_total = 0
-    for card in dealer_cards:
-        rank = card.get("rank", "")
-        if rank in RANK_VALUES:
-            val = RANK_VALUES[rank]
-            if val >= 11:
-                dealer_total += 10
-            else:
-                dealer_total += val
-    features["dealer_total"] = dealer_total
-    
-    now = datetime.now(MOSCOW_TZ)
-    features["hour"] = now.hour
-    features["minute"] = now.minute
-    features["day_of_week"] = now.weekday()
-    features["is_weekend"] = 1 if now.weekday() >= 5 else 0
-    
-    return features
+def get_range_key(latency):
+    if 93 <= latency < 95:
+        return "93-95"
+    elif 95 <= latency < 97:
+        return "95-97"
+    elif 97 <= latency < 99:
+        return "97-99"
+    elif 99 <= latency < 101:
+        return "99-101"
+    elif 101 <= latency < 103:
+        return "101-103"
+    elif 103 <= latency < 105:
+        return "103-105"
+    elif latency >= 105:
+        return "105+"
+    return None
 
-def train_ml_model():
-    global ml_model, ml_initialized
+def learn_from_error(latency, predicted_rank, actual_rank):
+    if state.get("total_games", 0) >= MAX_TRAIN_GAMES:
+        state["learning_active"] = False
+        save_json(STATE_FILE, state)
+        return
     
-    try:
-        from catboost import CatBoostClassifier
-    except ImportError:
-        print("⚠️ CatBoost не установлен. Установите: pip install catboost", flush=True)
-        return False
+    range_key = get_range_key(latency)
+    if not range_key or range_key not in state["rank_table"]:
+        return
     
-    data = load_data()
-    if len(data) < MIN_TRAIN_SAMPLES:
-        print(f"⚠️ ML: недостаточно данных ({len(data)}/{MIN_TRAIN_SAMPLES})", flush=True)
-        return False
+    if predicted_rank in state["rank_table"][range_key]:
+        old = state["rank_table"][range_key][predicted_rank]
+        state["rank_table"][range_key][predicted_rank] = max(0, old - 1.0)
     
-    X = []
-    y = []
-    feature_names = None
+    if actual_rank in state["rank_table"][range_key]:
+        old = state["rank_table"][range_key][actual_rank]
+        state["rank_table"][range_key][actual_rank] = min(100, old + 0.5)
     
-    print(f"🧠 ML: начинаю обучение на {len(data)} играх...", flush=True)
+    total = sum(state["rank_table"][range_key].values())
+    if total > 0:
+        for rank in state["rank_table"][range_key]:
+            state["rank_table"][range_key][rank] = round(
+                state["rank_table"][range_key][rank] / total * 100, 1
+            )
     
-    for game in data:
-        player_cards = game.get("player_cards", [])
-        if not player_cards:
-            continue
-        
-        features = extract_features_from_game(game, game.get("latency", 0), game.get("game_num", 0))
-        if not features:
-            continue
-        
-        feature_vector = []
-        sorted_keys = sorted(features.keys())
-        if not feature_names:
-            feature_names = sorted_keys
-        for key in sorted_keys:
-            feature_vector.append(features[key])
-        
-        # Берем ПЕРВУЮ карту игрока как целевой ранг
-        first_card = player_cards[0] if player_cards else None
-        if first_card:
-            rank = first_card.get("rank", "")
-            if rank in TARGET_RANKS:
-                X.append(feature_vector)
-                y.append(TARGET_RANKS.index(rank))
-    
-    if len(X) < MIN_TRAIN_SAMPLES:
-        print(f"⚠️ ML: недостаточно примеров ({len(X)}/{MIN_TRAIN_SAMPLES})", flush=True)
-        return False
-    
-    print(f"🧠 ML: обучение на {len(X)} примерах из {len(data)} игр...", flush=True)
-    print(f"📊 Признаков: {len(feature_names)}", flush=True)
-    
-    X = np.array(X)
-    y = np.array(y)
-    
-    model = CatBoostClassifier(
-        iterations=200,
-        depth=6,
-        learning_rate=0.08,
-        random_seed=42,
-        verbose=False,
-        loss_function='MultiClass',
-        early_stopping_rounds=30,
-        l2_leaf_reg=5,
-        thread_count=1
-    )
-    
-    model.fit(X, y)
-    ml_model = model
-    ml_initialized = True
-    
-    try:
-        with open(ML_MODEL_FILE, 'wb') as f:
-            pickle.dump({
-                'model': model,
-                'feature_count': len(X[0]),
-                'train_samples': len(X),
-                'total_games': len(data),
-                'feature_names': feature_names
-            }, f)
-        print(f"✅ Модель сохранена! Обучено на {len(X)} примерах из {len(data)} игр", flush=True)
-        return True
-    except Exception as e:
-        print(f"⚠️ Ошибка сохранения: {e}", flush=True)
-        return False
-
-def load_ml_model():
-    global ml_model, ml_initialized
-    
-    if not ML_MODEL_FILE.exists():
-        return False
-    
-    try:
-        with open(ML_MODEL_FILE, 'rb') as f:
-            data = pickle.load(f)
-            ml_model = data['model']
-            ml_initialized = True
-            print(f"✅ ML модель загружена ({data.get('train_samples', 0)} примеров)", flush=True)
-            return True
-    except Exception as e:
-        print(f"⚠️ Не удалось загрузить ML модель: {e}", flush=True)
-        return False
-
-def predict_ml(features):
-    global ml_model, ml_initialized
-    
-    if not ml_initialized or not ml_model:
-        return None, None
-    
-    try:
-        feature_vector = []
-        for key in sorted(features.keys()):
-            feature_vector.append(features[key])
-        
-        feature_vector = np.array([feature_vector])
-        probs = ml_model.predict_proba(feature_vector)[0]
-        
-        top_idx = np.argmax(probs)
-        confidence = probs[top_idx]
-        predicted_rank = TARGET_RANKS[top_idx]
-        
-        return predicted_rank, confidence
-    except Exception as e:
-        print(f"⚠️ Ошибка ML-прогноза: {e}", flush=True)
-        return None, None
+    state["total_games"] = state.get("total_games", 0) + 1
+    save_json(STATE_FILE, state)
+    print(f"🧠 Ошибка: {predicted_rank} → {actual_rank} (задержка {range_key})", flush=True)
 
 # =====================================================================
 # ФУНКЦИИ ТЕЛЕГРАМ
@@ -429,7 +215,7 @@ def telegram_get_updates(offset):
         return {}
 
 # =====================================================================
-# ПАРСИНГ
+# ПАРСИНГ (ТОЛЬКО РАНГИ)
 # =====================================================================
 def parse_game_from_text(text):
     try:
@@ -477,17 +263,10 @@ def parse_game_from_text(text):
                 else:
                     i += 1
                     continue
-                suit = None
-                for sym in SUITS:
-                    if s.startswith(sym, i):
-                        suit = sym
-                        i += len(sym)
-                        break
-                if suit is None and i < len(s) and s[i] in "♠♣♦♥":
-                    suit = s[i] + "️"
-                    i += 1
-                if suit:
-                    cards.append({"rank": rank, "suit": suit})
+                # Пропускаем масть, берём только ранг
+                if rank:
+                    cards.append({"rank": rank})
+                i += 1  # пропускаем символ масти
             return cards
 
         return {
@@ -562,25 +341,31 @@ def get_game_number():
     return int(diff_minutes) // 2 % 720 + 1
 
 # =====================================================================
+# ПРОГНОЗ РАНГА
+# =====================================================================
+def predict_rank_by_latency(latency):
+    range_key = get_range_key(latency)
+    if not range_key or range_key not in RANK_TABLE:
+        return None, 0.0
+    
+    probs = RANK_TABLE[range_key]
+    if not probs:
+        return None, 0.0
+    
+    sorted_ranks = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+    return sorted_ranks[0][0], sorted_ranks[0][1]
+
+# =====================================================================
 # GAME STORAGE
 # =====================================================================
+games_by_number = {}
+
 def add_game(text):
     game = parse_game_from_text(text)
     if not game:
         return None
     n = game["number"]
     games_by_number[n] = game
-    
-    # Сохраняем в данные для обучения
-    record = {
-        "game_num": n,
-        "latency": 0,  # Будет обновлено при прогнозе
-        "player_cards": game.get("player_cards", []),
-        "dealer_cards": game.get("dealer_cards", []),
-        "timestamp": datetime.now(MOSCOW_TZ).isoformat()
-    }
-    save_data(record)
-    
     return game
 
 def find_game(n):
@@ -593,10 +378,10 @@ def cleanup_games():
             games_by_number.pop(k, None)
 
 # =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА (С ОБУЧЕНИЕМ НА ОШИБКАХ)
+# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЛЬКО РАНГИ)
 # =====================================================================
 def check_results():
-    global state, all_messages
+    global all_messages, state
 
     for entry in state.get("predictions", []):
         if entry.get("status") != "pending":
@@ -623,6 +408,7 @@ def check_results():
                     break
 
             if not game_msg:
+                print(f"⏳ Ждём игру #N{game_to_check} для проверки ранга {predicted_rank}", flush=True)
                 continue
 
             game_data = parse_game_from_text(game_msg)
@@ -642,113 +428,48 @@ def check_results():
             if not actual_rank and player_cards:
                 actual_rank = player_cards[0].get("rank", "10")
 
-            # ===========================================
-            # СЛУЧАЙ 1: ПРОГНОЗ ЗАШЁЛ
-            # ===========================================
             if rank_found:
                 print(f"🎯 РАНГ {predicted_rank} НАЙДЕН в игре #N{game_to_check}!", flush=True)
+                dogon_number = i
 
+                entry["selected_result"] = True
+                entry["evaluated"] = True
+                entry["result_game"] = game_to_check
+                entry["dogon"] = dogon_number
                 entry["status"] = "win"
+
                 state["wins"] = state.get("wins", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
-                stats["total"] += 1
-                stats["win"] += 1
-                stats["ml_wins"] += 1
-                stats["by_dogon"][i] = stats["by_dogon"].get(i, 0) + 1
 
-                suffix = f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}" if i > 0 else f"\n\n✅ <b>ЗАШЛО</b> в целевой игре: #N{game_to_check}"
+                suffix = f"\n\n✅ <b>ЗАШЛО</b> в игре #N{game_to_check}" if i == 0 else f"\n\n✅ <b>ЗАШЛО</b> на догоне {i}: #N{game_to_check}"
                 edit_message(message_id, original_text + suffix)
                 entry["message_text"] = original_text + suffix
 
                 save_json(STATE_FILE, state)
-                save_history(state.get("predictions", []))
                 return
 
-            # ===========================================
-            # СЛУЧАЙ 2: ПРОГНОЗ НЕ ЗАШЁЛ → УЧИМСЯ
-            # ===========================================
             if i == max_games_to_check - 1:
                 print(f"❌ Ранг {predicted_rank} НЕ НАЙДЕН за {max_games_to_check} игр", flush=True)
 
+                entry["selected_result"] = False
+                entry["evaluated"] = True
                 entry["status"] = "lose"
+
                 state["losses"] = state.get("losses", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
-                stats["total"] += 1
-                stats["lose"] += 1
-                stats["ml_losses"] += 1
 
-                # 🔥 ОБУЧЕНИЕ НА ОШИБКЕ
-                try:
-                    features = extract_features_from_game(game_data, latency, target)
-                    if features and ml_initialized:
-                        feature_vector = []
-                        for key in sorted(features.keys()):
-                            feature_vector.append(features[key])
-                        
-                        X_new = np.array([feature_vector])
-                        y_new = TARGET_RANKS.index(actual_rank if actual_rank else "10")
-                        
-                        if hasattr(ml_model, 'partial_fit'):
-                            ml_model.partial_fit(X_new, [y_new])
-                            print(f"✅ Мгновенное обучение: запомнил {actual_rank}")
-                        
-                        # Сохраняем игру в данные
-                        game_record = {
-                            "game_num": target,
-                            "latency": latency,
-                            "player_cards": game_data.get("player_cards", []),
-                            "dealer_cards": game_data.get("dealer_cards", []),
-                            "actual_rank": actual_rank,
-                            "predicted_rank": predicted_rank,
-                            "is_error": True
-                        }
-                        save_data(game_record)
-                except Exception as e:
-                    print(f"⚠️ Ошибка при дообучении: {e}", flush=True)
+                if state.get("learning_active", True):
+                    learn_from_error(latency, predicted_rank, actual_rank)
 
-                suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)\n   Выпал: {actual_rank if actual_rank else 'неизвестно'}"
+                suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
                 edit_message(message_id, original_text + suffix)
                 entry["message_text"] = original_text + suffix
 
                 save_json(STATE_FILE, state)
-                save_history(state.get("predictions", []))
                 return
 
 # =====================================================================
-# ПРОГНОЗ (ML)
-# =====================================================================
-def get_prediction(latency, current_game_data):
-    if not ml_initialized:
-        print(f"⏳ ML модель не инициализирована", flush=True)
-        return None, None, None
-    
-    if not current_game_data:
-        print(f"⏳ Нет данных о текущей игре", flush=True)
-        return None, None, None
-    
-    features = extract_features_from_game(current_game_data, latency, 0)
-    if not features:
-        print(f"⏳ Не удалось извлечь признаки", flush=True)
-        return None, None, None
-    
-    predicted_rank, confidence = predict_ml(features)
-    
-    if predicted_rank and confidence is not None:
-        print(f"📊 ML: предсказан ранг {predicted_rank} с уверенностью {confidence*100:.1f}%", flush=True)
-        print(f"   Порог: {ML_CONFIDENCE_THRESHOLD*100:.0f}%", flush=True)
-        
-        if confidence >= ML_CONFIDENCE_THRESHOLD:
-            print(f"✅ Уверенность {confidence*100:.1f}% >= {ML_CONFIDENCE_THRESHOLD*100:.0f}% → ДАЮ ПРОГНОЗ!", flush=True)
-            return predicted_rank, confidence
-        else:
-            print(f"⏭️ Уверенность {confidence*100:.1f}% < {ML_CONFIDENCE_THRESHOLD*100:.0f}% → ПРОПУСКАЮ", flush=True)
-            return None, None
-    else:
-        print(f"⏭️ ML не выдал прогноз", flush=True)
-        return None, None
-
-# =====================================================================
-# PREDICTION SCHEDULER
+# SCHEDULER (ТОЛЬКО РАНГИ)
 # =====================================================================
 def schedule_for_game(game_number):
     target = game_number + OFFSET
@@ -757,8 +478,10 @@ def schedule_for_game(game_number):
         if e.get("target") == target and e.get("status") in ("scheduled", "pending"):
             return
 
+    source = target - 1
+
     state["predictions"].append({
-        "source": target - 1,
+        "source": source,
         "target": target,
         "selected_prediction": None,
         "latency": None,
@@ -792,9 +515,6 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        # ============================================================
-        # 🔥 ПРОГНОЗ РАНГА ПО ЗАДЕРЖКЕ (БЕЗ МАСТЕЙ)
-        # ============================================================
         predicted_rank, confidence = predict_rank_by_latency(latency)
 
         if predicted_rank is None or confidence < MIN_CONFIDENCE:
@@ -811,16 +531,13 @@ def process_scheduled():
         entry["confidence"] = confidence
         entry["status"] = "pending"
 
-        # ============================================================
-        # 🔥 ФОРМИРУЕМ СООБЩЕНИЕ ТОЛЬКО С РАНГОМ (БЕЗ МАСТЕЙ)
-        # ============================================================
-        msg = f"🔮 <b>RANK BOT (ML)</b>\n"
+        # Формируем сообщение (ТОЛЬКО РАНГИ, БЕЗ МАСТЕЙ)
+        msg = "🔮 <b>RANK BOT</b>\n"
         msg += f"🃏 Ранг: <b>{predicted_rank}</b>\n"
         msg += f"🎯 Уверенность: {confidence:.1f}%\n"
-        msg += f"🎯 Целевая игра: #N{target} (+{OFFSET})\n"
+        msg += f"🎯 Целевая игра: #N{target}\n"
         msg += f"📈 Догон: {DOGON_GAMES - 1} игры\n"
 
-        # Показываем только ранги (БЕЗ МАСТЕЙ)
         p = source.get("player_cards", [])
         d = source.get("dealer_cards", [])
         seq = []
@@ -834,133 +551,42 @@ def process_scheduled():
 
         msg += "⏰ " + datetime.now(MOSCOW_TZ).strftime("%H:%M:%S")
 
-        # ============================================================
-        # 🔥 ЛОГИРУЕМ ТОЛЬКО РАНГ (БЕЗ МАСТЕЙ)
-        # ============================================================
-        print(f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | уверенность={confidence:.1f}%", flush=True)
-
         mid = send_message(msg)
         if mid:
             entry["message_id"] = mid
             entry["message_text"] = msg
             save_json(STATE_FILE, state)
             print(
-                f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {predicted_rank} (уверенность {confidence:.1f}%)",
+                f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | уверенность={confidence:.1f}%",
                 flush=True,
             )
         else:
             entry["status"] = "scheduled"
             save_json(STATE_FILE, state)
 
-        entry["selected_prediction"] = predicted_rank
-        entry["latency"] = latency
-        entry["confidence"] = confidence
-        entry["status"] = "pending"
-
-        # Формируем сообщение
-        msg = f"🔮 <b>RANK BOT (ML)</b>\n"
-        msg += f"🃏 Ранг: <b>{predicted_rank}</b>\n"
-        msg += f"🎯 Уверенность: {confidence*100:.1f}%\n"
-        msg += f"🎯 Целевая игра: #N{target} (+{OFFSET})\n"
-        msg += f"📈 Догон: {DOGON_GAMES - 1} игры\n"
-        
-        p = source.get("player_cards", [])
-        d = source.get("dealer_cards", [])
-        seq = []
-        for prefix, cards in [("P", p[:3]), ("D", d[:3])]:
-            for i, c in enumerate(cards, 1):
-                if c.get("rank") and c.get("suit"):
-                    seq.append(f"{prefix}{i}:{c['rank']}{c['suit']}")
-        if seq:
-            msg += "📌 " + " ".join(seq) + "\n"
-        
-        msg += "⏰ " + datetime.now(MOSCOW_TZ).strftime("%H:%M:%S")
-        
-        mid = send_message(msg)
-        if mid:
-            entry["message_id"] = mid
-            entry["message_text"] = msg
-            save_json(STATE_FILE, state)
-            print(f"✅ ПРОГНОЗ ОТПРАВЛЕН: #{target} → {predicted_rank} (уверенность {confidence*100:.1f}%)", flush=True)
-        else:
-            entry["status"] = "scheduled"
-            save_json(STATE_FILE, state)
-
 # =====================================================================
-# СБОР ДАННЫХ
-# =====================================================================
-def collect_game_data():
-    """Собирает данные из активных игр"""
-    active_games = get_active_games()
-    if not active_games:
-        return
-    
-    for game in active_games:
-        game_id = str(game.get("id"))
-        game_data, latency = get_game_data(game_id)
-        
-        if not game_data:
-            continue
-        
-        # Парсим карты из API
-        sc = game_data.get("Value", {}).get("SC", {})
-        player_cards = []
-        dealer_cards = []
-        
-        for item in sc.get("S", []):
-            if item.get("Key") == "P1":
-                try:
-                    cards = json.loads(item.get("Value", "[]"))
-                    player_cards = [
-                        {"rank": RANKS.get(c.get("CV", 0), "?"), "suit": SUITS_NAMES.get(c.get("CS", 0), "?")}
-                        for c in cards
-                    ]
-                except:
-                    pass
-            if item.get("Key") == "P2":
-                try:
-                    cards = json.loads(item.get("Value", "[]"))
-                    dealer_cards = [
-                        {"rank": RANKS.get(c.get("CV", 0), "?"), "suit": SUITS_NAMES.get(c.get("CS", 0), "?")}
-                        for c in cards
-                    ]
-                except:
-                    pass
-        
-        if player_cards:
-            record = {
-                "game_num": get_game_number(),
-                "latency": latency if latency else 0,
-                "player_cards": player_cards,
-                "dealer_cards": dealer_cards,
-                "timestamp": datetime.now(MOSCOW_TZ).isoformat()
-            }
-            save_data(record)
-            print(f"📊 Собрана игра: {record['game_num']}, карт: {len(player_cards)}", flush=True)
-
-# =====================================================================
-# СТАТИСТИКА
+# STATS
 # =====================================================================
 def stats_text():
     total = state.get("total_predictions", 0)
     wins = state.get("wins", 0)
     losses = state.get("losses", 0)
     acc = f"{wins / total * 100:.1f}%" if total else "—"
-    data_count = len(load_data())
-    
-    msg = (
-        "📊 <b>СТАТИСТИКА (RANK BOT ML)</b>\n"
+    total_games = state.get("total_games", 0)
+    learning_active = state.get("learning_active", True)
+
+    return (
+        "📊 <b>СТАТИСТИКА (RANK BOT)</b>\n"
         f"⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n"
         "==============================\n"
-        f"📊 Собрано игр: {data_count}/{MAX_RECORDS}\n"
         f"📈 Всего прогнозов: {total}\n"
         f"✅ Зашло: {wins}\n"
         f"❌ Не зашло: {losses}\n"
         f"🎯 Точность: {acc}\n"
-        f"🧠 ML: {'✅ АКТИВНА' if ml_initialized else '⏳ ОЖИДАЕТ'}\n"
-        f"🎯 Минимальный порог: {ML_CONFIDENCE_THRESHOLD*100:.0f}%"
+        f"📚 Обучающих игр: {total_games}/{MAX_TRAIN_GAMES}\n"
+        f"🎯 Обучение: {'🟢 АКТИВНО' if learning_active else '🔴 ЗАВЕРШЕНО'}\n"
+        f"🎯 Минимальный порог: {MIN_CONFIDENCE:.0f}%"
     )
-    return msg
 
 # =====================================================================
 # OFFSET
@@ -978,63 +604,35 @@ def save_offset(v):
 # MAIN
 # =====================================================================
 def main():
-    global all_messages, state, ml_initialized
+    global all_messages, state
 
     print("=" * 70, flush=True)
-    print("🃏 RANK BOT (ML SELF-LEARNING)", flush=True)
+    print("🃏 RANK BOT (ONLY RANKS)", flush=True)
     print("=" * 70, flush=True)
 
-    # Загружаем модель при старте
-    load_ml_model()
-    
-    # Пытаемся создать модель, если есть данные
-    if not ml_initialized:
-        data_count = len(load_data())
-        if data_count >= MIN_TRAIN_SAMPLES:
-            print(f"📊 Начинаю обучение на {data_count} играх...", flush=True)
-            train_ml_model()
-        else:
-            print(f"⏳ Нужно собрать {MIN_TRAIN_SAMPLES} игр. Сейчас: {data_count}", flush=True)
-    
     send_message(stats_text())
 
     offset = load_offset()
     last_stats = time.time()
-    last_train_time = time.time()
 
     print("🚀 БОТ ГОТОВ.", flush=True)
     print(f"🎯 OFFSET: +{OFFSET}", flush=True)
-    print(f"🎯 Минимальная уверенность: {ML_CONFIDENCE_THRESHOLD*100:.0f}%", flush=True)
+    print(f"🎯 Минимальная уверенность: {MIN_CONFIDENCE:.0f}%", flush=True)
+    print(f"📚 Лимит обучения: {MAX_TRAIN_GAMES} игр", flush=True)
 
     while True:
         try:
             now = time.time()
 
-            # Сбор данных
-            collect_game_data()
-            
-            # Проверка результатов
             check_results()
-            
-            # Обработка запланированных прогнозов
             process_scheduled()
-            
-            # Переобучение каждые 3 минуты
-            if now - last_train_time > 180:
-                data_count = len(load_data())
-                if data_count >= MIN_TRAIN_SAMPLES:
-                    print(f"🔄 ЗАПУСК ПЕРЕОБУЧЕНИЯ (всего игр: {data_count})...", flush=True)
-                    train_ml_model()
-                    last_train_time = now
-                    gc.collect()
 
-            # Статистика раз в час
             if now - last_stats > 3600:
                 send_message(stats_text())
                 last_stats = now
 
-            # Обработка сообщений из канала
             updates = telegram_get_updates(offset)
+
             for upd in updates.get("result", []):
                 uid = upd.get("update_id")
                 if uid is not None:
@@ -1076,7 +674,7 @@ def main():
             check_results()
             process_scheduled()
 
-            time.sleep(CHECK_INTERVAL)
+            time.sleep(1)
 
         except KeyboardInterrupt:
             print("🛑 Остановка", flush=True)
