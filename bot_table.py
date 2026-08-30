@@ -10,10 +10,9 @@ import pytz
 print("START", flush=True)
 
 # ========== ENV ==========
-TOKEN = os.getenv("BOT_TOKEN") or os.getenv("BOT_TOKEN_PROGNOZ")
-CH_STATS = os.getenv("CHANNEL_STATS")
-CH_PROG = os.getenv("CHANNEL_PROGNOZ")
-COOKIE = os.getenv("LIVE_COOKIE", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("BOT_TOKEN_PROGNOZ")
+CHANNEL_STATS = os.getenv("CHANNEL_STATS")
+CHANNEL_PROGNOZ = os.getenv("CHANNEL_PROGNOZ")
 
 if not TOKEN or not CH_STATS or not CH_PROG:
     print("ENV ERROR", flush=True)
