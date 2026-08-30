@@ -48,7 +48,6 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 STATE_FILE = STATE_DIR / "rank_state.json"
 OFFSET_FILE = STATE_DIR / "rank_offset.txt"
-RANK_TABLE_FILE = STATE_DIR / "rank_table.json"
 
 MAX_MESSAGES = 3000
 MAX_STATE_PREDICTIONS = 3000
@@ -83,7 +82,6 @@ RANK_TABLE = {
 def default_state():
     return {
         "predictions": [],
-        "training_history": [],
         "errors": [],
         "total_games": 0,
         "total_predictions": 0,
@@ -139,7 +137,7 @@ def get_range_key(latency):
         return "105+"
     return None
 
-def learn_from_error(latency, p1_rank, d1_rank, predicted_rank, actual_rank):
+def learn_from_error(latency, predicted_rank, actual_rank):
     if state.get("total_games", 0) >= MAX_TRAIN_GAMES:
         state["learning_active"] = False
         save_json(STATE_FILE, state)
@@ -148,19 +146,6 @@ def learn_from_error(latency, p1_rank, d1_rank, predicted_rank, actual_rank):
     range_key = get_range_key(latency)
     if not range_key or range_key not in state["rank_table"]:
         return
-    
-    error_entry = {
-        "latency": latency,
-        "range": range_key,
-        "p1_rank": p1_rank,
-        "d1_rank": d1_rank,
-        "predicted_rank": predicted_rank,
-        "actual_rank": actual_rank,
-        "timestamp": datetime.now(MOSCOW_TZ).isoformat()
-    }
-    state["errors"].append(error_entry)
-    if len(state["errors"]) > 500:
-        state["errors"] = state["errors"][-500:]
     
     # Корректируем таблицу
     if predicted_rank in state["rank_table"][range_key]:
@@ -417,8 +402,6 @@ def check_results():
         message_id = entry.get("message_id")
         original_text = entry.get("message_text", "")
         latency = entry.get("latency", 100)
-        p1_rank = entry.get("p1_rank", None)
-        d1_rank = entry.get("d1_rank", None)
 
         if not predicted_rank or not message_id:
             continue
@@ -486,7 +469,7 @@ def check_results():
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
 
                 if state.get("learning_active", True):
-                    learn_from_error(latency, p1_rank, d1_rank, predicted_rank, actual_rank)
+                    learn_from_error(latency, predicted_rank, actual_rank)
 
                 suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
                 edit_message(message_id, original_text + suffix)
@@ -518,8 +501,6 @@ def schedule_for_game(game_number):
         "created": datetime.now(MOSCOW_TZ).isoformat(),
         "message_id": None,
         "message_text": "",
-        "p1_rank": None,
-        "d1_rank": None,
     })
     if len(state["predictions"]) > MAX_STATE_PREDICTIONS:
         state["predictions"] = state["predictions"][-MAX_STATE_PREDICTIONS:]
@@ -544,7 +525,6 @@ def process_scheduled():
             print("⏳ Нет свежей задержки — прогноз остаётся в очереди", flush=True)
             continue
 
-        # 1. Прогноз ранга по задержке
         predicted_rank, confidence = predict_rank_by_latency(latency)
         if predicted_rank is None or confidence < MIN_CONFIDENCE:
             print(f"⏭️ Уверенность {confidence:.1f}% < {MIN_CONFIDENCE:.0f}% — НЕ ДАЁМ", flush=True)
@@ -555,44 +535,10 @@ def process_scheduled():
             save_json(STATE_FILE, state)
             continue
 
-        # 2. Получаем первую карту игрока и дилера
-        p = source.get("player_cards", [])
-        d = source.get("dealer_cards", [])
-        p1 = p[0] if len(p) > 0 else None
-        d1 = d[0] if len(d) > 0 else None
-        p1_rank = p1["rank"] if p1 else None
-        d1_rank = d1["rank"] if d1 else None
-
-        # 3. Уточнение по картам (игрок + дилер)
-        range_key = get_range_key(latency)
-        if range_key and range_key in RANK_TABLE:
-            probs = RANK_TABLE[range_key]
-            
-            # Проверяем совпадение с картами
-            if p1_rank == predicted_rank or d1_rank == predicted_rank:
-                print(f"✅ Ранг подтверждён картами: игрок={p1_rank}, дилер={d1_rank}", flush=True)
-            else:
-                # Ищем ранг, который совпадает с одной из карт и имеет больший процент
-                best_rank = predicted_rank
-                best_prob = confidence
-                
-                for rank, prob in probs.items():
-                    if rank == p1_rank or rank == d1_rank:
-                        if prob > best_prob:
-                            best_rank = rank
-                            best_prob = prob
-                            print(f"🔄 Смена прогноза на {rank} (совпадение с картой)", flush=True)
-                
-                if best_rank != predicted_rank:
-                    predicted_rank = best_rank
-                    confidence = best_prob
-
         entry["selected_prediction"] = predicted_rank
         entry["latency"] = latency
         entry["confidence"] = confidence
         entry["status"] = "pending"
-        entry["p1_rank"] = p1_rank
-        entry["d1_rank"] = d1_rank
 
         msg = prediction_text(entry, predicted_rank, source, confidence)
         mid = send_message(msg)
@@ -604,8 +550,7 @@ def process_scheduled():
 
             print(
                 f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | "
-                f"уверенность={confidence:.1f}% | "
-                f"игрок={p1_rank}, дилер={d1_rank}",
+                f"уверенность={confidence:.1f}%",
                 flush=True,
             )
         else:
@@ -639,7 +584,6 @@ def stats_text():
     wins = state.get("wins", 0)
     losses = state.get("losses", 0)
     acc = f"{wins / total * 100:.1f}%" if total else "—"
-    errors = len(state.get("errors", []))
     total_games = state.get("total_games", 0)
     learning_active = state.get("learning_active", True)
 
@@ -651,7 +595,6 @@ def stats_text():
         f"✅ Зашло: {wins}\n"
         f"❌ Не зашло: {losses}\n"
         f"🎯 Точность: {acc}\n"
-        f"🧠 Ошибок проанализировано: {errors}\n"
         f"📚 Обучающих игр: {total_games}/{MAX_TRAIN_GAMES}\n"
         f"🎯 Обучение: {'🟢 АКТИВНО' if learning_active else '🔴 ЗАВЕРШЕНО'}\n"
         f"🎯 Минимальный порог: {MIN_CONFIDENCE:.0f}%"
