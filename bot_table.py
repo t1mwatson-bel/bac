@@ -8,8 +8,9 @@ from datetime import datetime, timedelta
 import pytz
 
 print("=" * 70, flush=True)
-print("🃏 RANK BOT (ТОП-1, С ОЖИДАНИЕМ)", flush=True)
+print("🃏 RANK BOT (ИГРОК + ДИЛЕР)", flush=True)
 print("📌 Прогноз топ-1 ранга по задержке", flush=True)
+print("🎯 Проверка: у игрока и у дилера", flush=True)
 print("🎯 Минимальная уверенность: 28%", flush=True)
 print("🎯 OFFSET: +1", flush=True)
 print("=" * 70, flush=True)
@@ -242,7 +243,7 @@ def find_game(n):
     return games.get(n)
 
 # =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЛЬКО КОГДА ИГРА ЗАВЕРШЕНА)
+# ПРОВЕРКА РЕЗУЛЬТАТА (ИГРОК + ДИЛЕР)
 # =====================================================================
 def check_results():
     for entry in state["predictions"]:
@@ -254,49 +255,67 @@ def check_results():
         orig = entry["text"]
         if not rank or not mid:
             continue
+        
+        # Проверяем игры по догону
         for i in range(DOGON_GAMES):
-            gnum = target + i
-            found = None
-            for m in all_messages:
-                if f"#N{gnum}" in m and is_finished(m):
-                    found = m
+            game_to_check = target + i
+            game_msg = None
+            for msg in all_messages:
+                if f"#N{game_to_check}" in msg and is_finished(msg):
+                    game_msg = msg
                     break
-            if not found:
-                print(f"⏳ Ждём завершения #N{gnum} для проверки ранга {rank}")
+            
+            if not game_msg:
+                print(f"⏳ Ждём завершения #N{game_to_check} для проверки ранга {rank}")
                 continue
-            data = parse_game(found)
+            
+            data = parse_game(game_msg)
             if not data:
                 continue
+            
             # Проверяем у игрока
             rank_found = False
             for card in data["player"]:
                 if card["rank"] == rank:
                     rank_found = True
                     break
+            
+            # Если не нашли у игрока — проверяем у дилера
+            if not rank_found:
+                for card in data["dealer"]:
+                    if card["rank"] == rank:
+                        rank_found = True
+                        break
+            
             if rank_found:
-                print(f"🎯 РАНГ {rank} НАЙДЕН у игрока в #N{gnum}!")
+                print(f"🎯 РАНГ {rank} НАЙДЕН в игре #N{game_to_check}!")
                 entry["status"] = "win"
                 state["wins"] += 1
                 state["total"] += 1
-                suffix = f"\n\n✅ ЗАШЛО в #N{gnum}" if i == 0 else f"\n\n✅ ЗАШЛО на догоне {i} в #N{gnum}"
+                suffix = f"\n\n✅ ЗАШЛО в #N{game_to_check}" if i == 0 else f"\n\n✅ ЗАШЛО на догоне {i} в #N{game_to_check}"
                 edit(mid, orig + suffix)
                 save_state()
                 return
-        print(f"❌ Ранг {rank} НЕ НАЙДЕН у игрока за {DOGON_GAMES} игр")
-        entry["status"] = "lose"
-        state["losses"] += 1
-        state["total"] += 1
-        suffix = f"\n\n❌ НЕ ЗАШЛО (проверено {DOGON_GAMES} игр)"
-        edit(mid, orig + suffix)
-        save_state()
+            
+            # Если дошли до последней игры догона и не нашли
+            if i == DOGON_GAMES - 1:
+                print(f"❌ Ранг {rank} НЕ НАЙДЕН за {DOGON_GAMES} игр")
+                entry["status"] = "lose"
+                state["losses"] += 1
+                state["total"] += 1
+                suffix = f"\n\n❌ НЕ ЗАШЛО (проверено {DOGON_GAMES} игр)"
+                edit(mid, orig + suffix)
+                save_state()
+                return
 
 # =====================================================================
-# ПЛАНИРОВЩИК (ОЖИДАНИЕ ДО ПОСЛЕДНЕЙ ИГРЫ)
+# ПЛАНИРОВЩИК
 # =====================================================================
 def schedule(n):
     target = n + OFFSET
     for e in state["predictions"]:
-        if e["target"] == target and e["status"] in ("scheduled", "pending"):
+        if e["target"] == target:
+            print(f"⏭️ Прогноз на #N{target} уже существует (статус: {e['status']})", flush=True)
             return
     state["predictions"].append({
         "source": target - 1,
@@ -317,9 +336,9 @@ def process_scheduled():
             continue
         target = entry["target"]
         games_left = target - current_num
-        # Ждём, пока до целевой игры не останется 1 игра
         if games_left != 1:
             continue
+        
         print(f"🔥 До цели #{target} осталась 1 игра! Делаю прогноз...", flush=True)
         src = find_game(target - 1)
         if not src:
@@ -334,6 +353,7 @@ def process_scheduled():
             entry["status"] = "skipped"
             save_state()
             continue
+        
         # Проверяем, что ранг не занят P1, D1, P2, D2
         player_cards = src.get("player", [])
         dealer_cards = src.get("dealer", [])
@@ -346,22 +366,25 @@ def process_scheduled():
             check_cards.append(player_cards[1]["rank"])
         if len(dealer_cards) > 1:
             check_cards.append(dealer_cards[1]["rank"])
+        
         if rank in check_cards:
             print(f"⏭️ Ранг {rank} уже есть среди P1, D1, P2, D2 → пропускаю прогноз для #{target}")
             entry["status"] = "skipped"
             save_state()
             continue
+        
         entry["rank"] = rank
         entry["confidence"] = conf
         entry["status"] = "pending"
+        
         msg = f"🔮 RANK BOT\n\n"
         msg += f"🎯 Целевая игра: #N{target} (+{OFFSET})\n"
         msg += f"🃏 Ранг: {rank}\n"
         msg += f"🎯 Уверенность: {conf*100:.1f}%\n"
         msg += f"📈 Догон: {DOGON_GAMES - 1} игр\n"
-        msg += f"📍 Ищем: у игрока\n"
+        msg += f"📍 Ищем: у игрока или дилера\n"
         msg += f"⏰ {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')}"
-        # Добавляем последовательность, если есть
+        
         seq_str = ""
         if len(player_cards) > 0:
             seq_str += f"P1:{player_cards[0]['rank']} "
@@ -373,6 +396,7 @@ def process_scheduled():
             seq_str += f"D2:{dealer_cards[1]['rank']}"
         if seq_str:
             msg += f"\n📌 {seq_str}"
+        
         mid = send(msg)
         if mid:
             entry["mid"] = mid
@@ -388,7 +412,7 @@ def stats():
     w = state["wins"]
     l = state["losses"]
     acc = f"{w/t*100:.1f}%" if t else "—"
-    return f"📊 RANK BOT (ТОП-1)\n⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n==============================\n📈 Всего: {t}\n✅ Зашло: {w}\n❌ Не зашло: {l}\n🎯 Точность: {acc}"
+    return f"📊 RANK BOT (ИГРОК + ДИЛЕР)\n⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n==============================\n📈 Всего: {t}\n✅ Зашло: {w}\n❌ Не зашло: {l}\n🎯 Точность: {acc}"
 
 # =====================================================================
 # OFFSET
