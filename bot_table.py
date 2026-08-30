@@ -9,18 +9,13 @@ from datetime import datetime, timedelta
 import pytz
 
 # =====================================================================
-# RANK BOT (БЕЗ МАСТЕЙ, ТОЛЬКО РАНГИ)
+# RANK BOT — ТОЛЬКО РАНГИ, БЕЗ МАСТЕЙ
 # =====================================================================
-sys.stdout.flush()
 print("=" * 70, flush=True)
-print("🃏 RANK BOT (ONLY RANKS)", flush=True)
-print("📌 Прогноз: 6,7,8,9,10,J,Q,K,A", flush=True)
-print("🧠 Самообучение | Лимит: 3000 игр", flush=True)
+print("🃏 RANK BOT (ONLY RANKS, NO SUITS)", flush=True)
 print("=" * 70, flush=True)
 
-# =====================================================================
-# ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
-# =====================================================================
+# -------------------- ENV --------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("BOT_TOKEN_PROGNOZ")
 CHANNEL_STATS = os.getenv("CHANNEL_STATS")
 CHANNEL_PROGNOZ = os.getenv("CHANNEL_PROGNOZ")
@@ -30,11 +25,7 @@ if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
     print("❌ Ошибка: BOT_TOKEN, CHANNEL_STATS или CHANNEL_PROGNOZ не заданы!", flush=True)
     sys.exit(1)
 
-print("✅ Все переменные заданы!", flush=True)
-
-# =====================================================================
-# НАСТРОЙКИ
-# =====================================================================
+# -------------------- SETTINGS --------------------
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 
@@ -60,11 +51,9 @@ HEADERS = {
 if LIVE_COOKIE:
     HEADERS["Cookie"] = LIVE_COOKIE
 
-# =====================================================================
-# ТОЛЬКО РАНГИ (БЕЗ МАСТЕЙ)
-# =====================================================================
 RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 
+# -------------------- RANK TABLE --------------------
 RANK_TABLE = {
     "93-95": {"10": 18.0, "J": 16.0, "Q": 15.0, "K": 14.0, "A": 13.0, "9": 12.0, "8": 12.0, "7": 0, "6": 0},
     "95-97": {"J": 18.0, "Q": 16.0, "K": 15.0, "A": 14.0, "10": 13.0, "9": 12.0, "8": 12.0, "7": 0, "6": 0},
@@ -75,9 +64,7 @@ RANK_TABLE = {
     "105+": {"A": 20.0, "K": 19.0, "Q": 18.0, "J": 17.0, "10": 16.0, "9": 5.0, "8": 5.0, "7": 0, "6": 0},
 }
 
-# =====================================================================
-# ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ
-# =====================================================================
+# -------------------- STATE --------------------
 def default_state():
     return {
         "predictions": [],
@@ -116,9 +103,7 @@ all_messages = []
 if "rank_table" in state:
     RANK_TABLE = state["rank_table"]
 
-# =====================================================================
-# САМООБУЧЕНИЕ
-# =====================================================================
+# -------------------- SELF-LEARNING --------------------
 def get_range_key(latency):
     if 93 <= latency < 95:
         return "93-95"
@@ -165,9 +150,7 @@ def learn_from_error(latency, predicted_rank, actual_rank):
     save_json(STATE_FILE, state)
     print(f"🧠 Ошибка: {predicted_rank} → {actual_rank} (задержка {range_key})", flush=True)
 
-# =====================================================================
-# ФУНКЦИИ ТЕЛЕГРАМ
-# =====================================================================
+# -------------------- TELEGRAM --------------------
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -207,16 +190,13 @@ def telegram_get_updates(offset):
     try:
         r = requests.get(url, params={"offset": offset, "timeout": 30}, timeout=35)
         if r.status_code != 200:
-            print(f"❌ Telegram getUpdates: {r.status_code} {r.text[:300]}", flush=True)
             return {}
         return r.json()
     except Exception as e:
         print(f"❌ getUpdates: {e}", flush=True)
         return {}
 
-# =====================================================================
-# ПАРСИНГ (ТОЛЬКО РАНГИ)
-# =====================================================================
+# -------------------- PARSING (ONLY RANKS) --------------------
 def parse_game_from_text(text):
     try:
         m = re.search(r"#N(\d+)", text)
@@ -263,7 +243,7 @@ def parse_game_from_text(text):
                 else:
                     i += 1
                     continue
-                # Пропускаем масть, берём только ранг
+                # Пропускаем масть
                 if rank:
                     cards.append({"rank": rank})
                 i += 1  # пропускаем символ масти
@@ -282,9 +262,7 @@ def parse_game_from_text(text):
 def is_finished_game(text):
     return "✅" in text or "🔰" in text
 
-# =====================================================================
-# LIVE API
-# =====================================================================
+# -------------------- LIVE API --------------------
 def get_active_games():
     url = (
         f"{BASE_URL}/service-api/main-live-feed/v3/games1x2"
@@ -294,7 +272,6 @@ def get_active_games():
     try:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
-            print(f"⚠️ active games HTTP {r.status_code}", flush=True)
             return []
         data = r.json()
         games = data.get("Value", []) if isinstance(data, dict) else data
@@ -340,9 +317,7 @@ def get_game_number():
     diff_minutes = (now - start).total_seconds() / 60
     return int(diff_minutes) // 2 % 720 + 1
 
-# =====================================================================
-# ПРОГНОЗ РАНГА
-# =====================================================================
+# -------------------- PREDICT RANK --------------------
 def predict_rank_by_latency(latency):
     range_key = get_range_key(latency)
     if not range_key or range_key not in RANK_TABLE:
@@ -355,9 +330,7 @@ def predict_rank_by_latency(latency):
     sorted_ranks = sorted(probs.items(), key=lambda x: x[1], reverse=True)
     return sorted_ranks[0][0], sorted_ranks[0][1]
 
-# =====================================================================
-# GAME STORAGE
-# =====================================================================
+# -------------------- GAME STORAGE --------------------
 games_by_number = {}
 
 def add_game(text):
@@ -377,9 +350,7 @@ def cleanup_games():
         for k in keys[:-MAX_MESSAGES]:
             games_by_number.pop(k, None)
 
-# =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА (ТОЛЬКО РАНГИ)
-# =====================================================================
+# -------------------- CHECK RESULTS (RANKS ONLY) --------------------
 def check_results():
     global all_messages, state
 
@@ -408,7 +379,7 @@ def check_results():
                     break
 
             if not game_msg:
-                print(f"⏳ Ждём игру #N{game_to_check} для проверки ранга {predicted_rank}", flush=True)
+                print(f"⏳ Ждём игру #N{game_to_check} для проверки РАНГА {predicted_rank}", flush=True)
                 continue
 
             game_data = parse_game_from_text(game_msg)
@@ -468,9 +439,7 @@ def check_results():
                 save_json(STATE_FILE, state)
                 return
 
-# =====================================================================
-# SCHEDULER (ТОЛЬКО РАНГИ)
-# =====================================================================
+# -------------------- SCHEDULER --------------------
 def schedule_for_game(game_number):
     target = game_number + OFFSET
 
@@ -531,7 +500,6 @@ def process_scheduled():
         entry["confidence"] = confidence
         entry["status"] = "pending"
 
-        # Формируем сообщение (ТОЛЬКО РАНГИ, БЕЗ МАСТЕЙ)
         msg = "🔮 <b>RANK BOT</b>\n"
         msg += f"🃏 Ранг: <b>{predicted_rank}</b>\n"
         msg += f"🎯 Уверенность: {confidence:.1f}%\n"
@@ -564,9 +532,7 @@ def process_scheduled():
             entry["status"] = "scheduled"
             save_json(STATE_FILE, state)
 
-# =====================================================================
-# STATS
-# =====================================================================
+# -------------------- STATS --------------------
 def stats_text():
     total = state.get("total_predictions", 0)
     wins = state.get("wins", 0)
@@ -588,9 +554,7 @@ def stats_text():
         f"🎯 Минимальный порог: {MIN_CONFIDENCE:.0f}%"
     )
 
-# =====================================================================
-# OFFSET
-# =====================================================================
+# -------------------- OFFSET --------------------
 def load_offset():
     try:
         return int(OFFSET_FILE.read_text().strip())
@@ -600,14 +564,12 @@ def load_offset():
 def save_offset(v):
     OFFSET_FILE.write_text(str(v), encoding="utf-8")
 
-# =====================================================================
-# MAIN
-# =====================================================================
+# -------------------- MAIN --------------------
 def main():
     global all_messages, state
 
     print("=" * 70, flush=True)
-    print("🃏 RANK BOT (ONLY RANKS)", flush=True)
+    print("🃏 RANK BOT (ONLY RANKS, NO SUITS)", flush=True)
     print("=" * 70, flush=True)
 
     send_message(stats_text())
