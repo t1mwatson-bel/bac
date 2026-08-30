@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 import pytz
 
 # =====================================================================
-# БОТ НА ТОЧНЫЙ РАНГ (САМООБУЧЕНИЕ)
+# RANK BOT (ТОЛЬКО РАНГИ, БЕЗ МАСТЕЙ)
 # =====================================================================
 sys.stdout.flush()
 print("=" * 70, flush=True)
 print("🃏 RANK BOT (SELF-LEARNING)", flush=True)
 print("📌 Прогноз точного ранга (6,7,8,9,10,J,Q,K,A)", flush=True)
-print("🧠 Самообучение на ошибках | Лимит: 3000 игр", flush=True)
+print("🧠 Самообучение | Лимит: 3000 игр", flush=True)
 print("=" * 70, flush=True)
 
 # =====================================================================
@@ -41,7 +41,7 @@ BASE_URL = os.getenv("BASE_URL", "https://1xlite-36553.pro")
 OFFSET = 1
 DOGON_GAMES = int(os.getenv("DOGON_GAMES", "4"))
 MIN_CONFIDENCE = 28.0
-MAX_TRAIN_GAMES = 3000  # Лимит обучения
+MAX_TRAIN_GAMES = 3000
 
 STATE_DIR = Path(os.getenv("STATE_DIR", ".")).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,7 +67,6 @@ RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 # =====================================================================
 # ТАБЛИЦА РАНГОВ (НАЧАЛЬНАЯ)
 # =====================================================================
-# Структура: {диапазон_задержки: {ранг: процент, ...}}
 RANK_TABLE = {
     "93-95": {"10": 18.0, "J": 16.0, "Q": 15.0, "K": 14.0, "A": 13.0, "9": 12.0, "8": 12.0, "7": 0, "6": 0},
     "95-97": {"J": 18.0, "Q": 16.0, "K": 15.0, "A": 14.0, "10": 13.0, "9": 12.0, "8": 12.0, "7": 0, "6": 0},
@@ -117,80 +116,12 @@ def save_json(path, data):
 state = load_json(STATE_FILE, default_state())
 all_messages = []
 
-# Загружаем сохранённую таблицу, если есть
 if "rank_table" in state:
     RANK_TABLE = state["rank_table"]
 
 # =====================================================================
-# САМООБУЧЕНИЕ (АНАЛИЗ ОШИБОК)
+# САМООБУЧЕНИЕ
 # =====================================================================
-def learn_from_error(latency, p1_rank, predicted_rank, actual_rank):
-    """
-    Анализирует ошибку и корректирует таблицу.
-    """
-    if state.get("total_games", 0) >= MAX_TRAIN_GAMES:
-        print("📚 Лимит обучения достигнут (3000 игр)", flush=True)
-        state["learning_active"] = False
-        save_json(STATE_FILE, state)
-        return
-    
-    # Определяем диапазон задержки
-    range_key = None
-    if 93 <= latency < 95:
-        range_key = "93-95"
-    elif 95 <= latency < 97:
-        range_key = "95-97"
-    elif 97 <= latency < 99:
-        range_key = "97-99"
-    elif 99 <= latency < 101:
-        range_key = "99-101"
-    elif 101 <= latency < 103:
-        range_key = "101-103"
-    elif 103 <= latency < 105:
-        range_key = "103-105"
-    elif latency >= 105:
-        range_key = "105+"
-    else:
-        return
-    
-    # Сохраняем ошибку
-    error_entry = {
-        "latency": latency,
-        "range": range_key,
-        "p1_rank": p1_rank,
-        "predicted_rank": predicted_rank,
-        "actual_rank": actual_rank,
-        "timestamp": datetime.now(MOSCOW_TZ).isoformat()
-    }
-    state["errors"].append(error_entry)
-    if len(state["errors"]) > 500:
-        state["errors"] = state["errors"][-500:]
-    
-    # Корректируем таблицу
-    if range_key in state["rank_table"]:
-        # Уменьшаем процент для ошибочного ранга
-        if predicted_rank in state["rank_table"][range_key]:
-            old_prob = state["rank_table"][range_key][predicted_rank]
-            state["rank_table"][range_key][predicted_rank] = max(0, old_prob - 1.0)
-        
-        # Увеличиваем процент для правильного ранга
-        if actual_rank in state["rank_table"][range_key]:
-            old_prob = state["rank_table"][range_key][actual_rank]
-            state["rank_table"][range_key][actual_rank] = min(100, old_prob + 0.5)
-        
-        # Нормализуем
-        total = sum(state["rank_table"][range_key].values())
-        if total > 0:
-            for rank in state["rank_table"][range_key]:
-                state["rank_table"][range_key][rank] = round(
-                    state["rank_table"][range_key][rank] / total * 100, 1
-                )
-    
-    state["total_games"] = state.get("total_games", 0) + 1
-    save_json(STATE_FILE, state)
-    
-    print(f"🧠 Ошибка: {predicted_rank} → {actual_rank} (задержка {range_key}), таблица скорректирована", flush=True)
-
 def get_range_key(latency):
     if 93 <= latency < 95:
         return "93-95"
@@ -207,6 +138,50 @@ def get_range_key(latency):
     elif latency >= 105:
         return "105+"
     return None
+
+def learn_from_error(latency, p1_rank, d1_rank, predicted_rank, actual_rank):
+    if state.get("total_games", 0) >= MAX_TRAIN_GAMES:
+        state["learning_active"] = False
+        save_json(STATE_FILE, state)
+        return
+    
+    range_key = get_range_key(latency)
+    if not range_key or range_key not in state["rank_table"]:
+        return
+    
+    error_entry = {
+        "latency": latency,
+        "range": range_key,
+        "p1_rank": p1_rank,
+        "d1_rank": d1_rank,
+        "predicted_rank": predicted_rank,
+        "actual_rank": actual_rank,
+        "timestamp": datetime.now(MOSCOW_TZ).isoformat()
+    }
+    state["errors"].append(error_entry)
+    if len(state["errors"]) > 500:
+        state["errors"] = state["errors"][-500:]
+    
+    # Корректируем таблицу
+    if predicted_rank in state["rank_table"][range_key]:
+        old = state["rank_table"][range_key][predicted_rank]
+        state["rank_table"][range_key][predicted_rank] = max(0, old - 1.0)
+    
+    if actual_rank in state["rank_table"][range_key]:
+        old = state["rank_table"][range_key][actual_rank]
+        state["rank_table"][range_key][actual_rank] = min(100, old + 0.5)
+    
+    # Нормализуем
+    total = sum(state["rank_table"][range_key].values())
+    if total > 0:
+        for rank in state["rank_table"][range_key]:
+            state["rank_table"][range_key][rank] = round(
+                state["rank_table"][range_key][rank] / total * 100, 1
+            )
+    
+    state["total_games"] = state.get("total_games", 0) + 1
+    save_json(STATE_FILE, state)
+    print(f"🧠 Ошибка: {predicted_rank} → {actual_rank} (задержка {range_key})", flush=True)
 
 # =====================================================================
 # ФУНКЦИИ ТЕЛЕГРАМ
@@ -402,7 +377,6 @@ def predict_rank_by_latency(latency):
     if not probs:
         return None, 0.0
     
-    # Сортируем по убыванию вероятности
     sorted_ranks = sorted(probs.items(), key=lambda x: x[1], reverse=True)
     return sorted_ranks[0][0], sorted_ranks[0][1]
 
@@ -429,7 +403,7 @@ def cleanup_games():
             games_by_number.pop(k, None)
 
 # =====================================================================
-# ПРОВЕРКА РЕЗУЛЬТАТА С ОБУЧЕНИЕМ
+# ПРОВЕРКА РЕЗУЛЬТАТА
 # =====================================================================
 def check_results():
     global all_messages, state
@@ -444,6 +418,7 @@ def check_results():
         original_text = entry.get("message_text", "")
         latency = entry.get("latency", 100)
         p1_rank = entry.get("p1_rank", None)
+        d1_rank = entry.get("d1_rank", None)
 
         if not predicted_rank or not message_id:
             continue
@@ -510,9 +485,8 @@ def check_results():
                 state["losses"] = state.get("losses", 0) + 1
                 state["total_predictions"] = state.get("total_predictions", 0) + 1
 
-                # ⭐ АНАЛИЗ ОШИБКИ И ОБУЧЕНИЕ
                 if state.get("learning_active", True):
-                    learn_from_error(latency, p1_rank, predicted_rank, actual_rank)
+                    learn_from_error(latency, p1_rank, d1_rank, predicted_rank, actual_rank)
 
                 suffix = f"\n\n❌ <b>НЕ ЗАШЛО</b> (проверено {max_games_to_check} игр)"
                 edit_message(message_id, original_text + suffix)
@@ -545,6 +519,7 @@ def schedule_for_game(game_number):
         "message_id": None,
         "message_text": "",
         "p1_rank": None,
+        "d1_rank": None,
     })
     if len(state["predictions"]) > MAX_STATE_PREDICTIONS:
         state["predictions"] = state["predictions"][-MAX_STATE_PREDICTIONS:]
@@ -588,16 +563,16 @@ def process_scheduled():
         p1_rank = p1["rank"] if p1 else None
         d1_rank = d1["rank"] if d1 else None
 
-        # 3. Уточнение по рангу первой карты игрока и дилера
+        # 3. Уточнение по картам (игрок + дилер)
         range_key = get_range_key(latency)
         if range_key and range_key in RANK_TABLE:
             probs = RANK_TABLE[range_key]
             
-            # Проверяем, совпадает ли прогноз с картой игрока или дилера
+            # Проверяем совпадение с картами
             if p1_rank == predicted_rank or d1_rank == predicted_rank:
-                print(f"✅ Ранг подтверждён: игрок={p1_rank}, дилер={d1_rank}", flush=True)
+                print(f"✅ Ранг подтверждён картами: игрок={p1_rank}, дилер={d1_rank}", flush=True)
             else:
-                # Если не совпадает — ищем другой ранг, который лучше подходит
+                # Ищем ранг, который совпадает с одной из карт и имеет больший процент
                 best_rank = predicted_rank
                 best_prob = confidence
                 
@@ -631,15 +606,6 @@ def process_scheduled():
                 f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | "
                 f"уверенность={confidence:.1f}% | "
                 f"игрок={p1_rank}, дилер={d1_rank}",
-                flush=True,
-            )
-        else:
-            entry["status"] = "scheduled"
-            save_json(STATE_FILE, state)
-
-            print(
-                f"✅ ПРОГНОЗ: #{target} → {predicted_rank} | "
-                f"уверенность={confidence:.1f}%",
                 flush=True,
             )
         else:
