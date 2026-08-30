@@ -8,9 +8,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import pytz
 
-print("=" * 70)
-print("RANK BOT - ONLY RANKS, NO SUITS")
-print("=" * 70)
+print("=" * 70, flush=True)
+print("🃏 RANK BOT (NO SUITS)", flush=True)
+print("=" * 70, flush=True)
 
 # ---------- ENV ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("BOT_TOKEN_PROGNOZ")
@@ -19,12 +19,12 @@ CHANNEL_PROGNOZ = os.getenv("CHANNEL_PROGNOZ")
 LIVE_COOKIE = os.getenv("LIVE_COOKIE", "")
 
 if not BOT_TOKEN or not CHANNEL_STATS or not CHANNEL_PROGNOZ:
-    print("ERROR: missing env vars")
-    sys.exit(1)
+    raise RuntimeError("BOT_TOKEN, CHANNEL_STATS, CHANNEL_PROGNOZ required")
 
 # ---------- SETTINGS ----------
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 BASE_URL = "https://1xlite-36553.pro"
+
 OFFSET = 1
 DOGON_GAMES = 4
 MIN_CONF = 28.0
@@ -38,7 +38,9 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 if LIVE_COOKIE:
     HEADERS["Cookie"] = LIVE_COOKIE
 
-# ---------- RANK TABLE (NO SUITS) ----------
+# ---------- ONLY RANKS ----------
+RANKS = ["6","7","8","9","10","J","Q","K","A"]
+
 RANK_TABLE = {
     "93-95":  {"10":18,"J":16,"Q":15,"K":14,"A":13,"9":12,"8":12,"7":0,"6":0},
     "95-97":  {"J":18,"Q":16,"K":15,"A":14,"10":13,"9":12,"8":12,"7":0,"6":0},
@@ -112,7 +114,7 @@ def learn_from_error(lat, pred, actual):
             tbl[k] = round(tbl[k] / total * 100, 1)
     state["total_games"] += 1
     save_json(STATE_FILE, state)
-    print(f"learn: {pred}->{actual} ({rng})")
+    print(f"🧠 learn: {pred}->{actual} ({rng})")
 
 # ---------- TELEGRAM ----------
 def send_msg(text):
@@ -141,18 +143,14 @@ def get_updates(offset):
     except:
         return {}
 
-# ---------- PARSING (RANKS ONLY) ----------
+# ---------- PARSING (RANKS ONLY, IGNORE SUITS) ----------
 def parse_game(text):
     try:
         m = re.search(r"#N(\d+)", text)
         if not m:
             return None
         num = int(m.group(1))
-        sep = None
-        if "◀️" in text: sep = "◀️"
-        elif "▶️" in text: sep = "▶️"
-        elif "-" in text: sep = "-"
-        elif "—" in text: sep = "—"
+        sep = "◀️" if "◀️" in text else "▶️" if "▶️" in text else "-" if "-" in text else "—" if "—" in text else None
         if not sep:
             return None
         parts = text.split(sep, 1)
@@ -181,17 +179,15 @@ def parse_game(text):
                 else:
                     i += 1
                     continue
-                # skip suit
+                # skip suit symbol
                 i += 1
                 if rank:
                     cards.append({"rank": rank})
             return cards
-        return {
-            "number": num,
-            "player_cards": parse_cards(parts[0]),
-            "dealer_cards": parse_cards(parts[1]),
-            "text": text
-        }
+        return {"number": num,
+                "player_cards": parse_cards(parts[0]),
+                "dealer_cards": parse_cards(parts[1]),
+                "text": text}
     except:
         return None
 
@@ -285,7 +281,7 @@ def check_results():
                     found = msg
                     break
             if not found:
-                print(f"wait #N{gnum} for rank {pred}")
+                print(f"⏳ wait #N{gnum} for rank {pred}")
                 continue
             gdata = parse_game(found)
             if not gdata:
@@ -298,7 +294,7 @@ def check_results():
             if not actual and gdata["player_cards"]:
                 actual = gdata["player_cards"][0]["rank"]
             if actual == pred:
-                print(f"RANK {pred} FOUND in #N{gnum}!")
+                print(f"✅ RANK {pred} FOUND in #N{gnum}!")
                 entry["status"] = "win"
                 entry["result_game"] = gnum
                 entry["dogon"] = i
@@ -309,7 +305,8 @@ def check_results():
                 entry["message_text"] = orig + suffix
                 save_json(STATE_FILE, state)
                 return
-        print(f"RANK {pred} NOT FOUND in {DOGON_GAMES} games")
+        # не зашло за DOGON_GAMES игр
+        print(f"❌ RANK {pred} NOT FOUND in {DOGON_GAMES} games")
         entry["status"] = "lose"
         state["losses"] += 1
         state["total_predictions"] += 1
@@ -337,7 +334,7 @@ def schedule_for_game(num):
         "message_text": "",
     })
     save_json(STATE_FILE, state)
-    print(f"scheduled #{num} -> #{target} (+{OFFSET})")
+    print(f"📅 scheduled #{num} -> #{target} (+{OFFSET})")
 
 def process_scheduled():
     for entry in state["predictions"]:
@@ -349,9 +346,97 @@ def process_scheduled():
             continue
         lat = get_latency()
         if lat is None:
-            print("no latency")
+            print("⏳ no latency")
             continue
         rank, conf = predict_rank(lat)
         if rank is None or conf < MIN_CONF:
-            print(f"{conf:.1f}% < {MIN_CONF}%")
-            entry
+            print(f"⏭️ {conf:.1f}% < {MIN_CONF}%")
+            entry["status"] = "skipped"
+            entry["confidence"] = conf
+            entry["latency"] = lat
+            save_json(STATE_FILE, state)
+            continue
+        entry["selected_prediction"] = rank
+        entry["latency"] = lat
+        entry["confidence"] = conf
+        entry["status"] = "pending"
+        msg = f"🔮 RANK BOT\n🃏 Rank: {rank}\n🎯 Confidence: {conf:.1f}%\n🎯 Target: #N{target}\n📈 Dogon: {DOGON_GAMES-1} games\n"
+        p = src.get("player_cards", [])
+        if p:
+            msg += "📌 " + " ".join([c["rank"] for c in p[:3]]) + "\n"
+        msg += "⏰ " + datetime.now(MOSCOW_TZ).strftime("%H:%M:%S")
+        mid = send_msg(msg)
+        if mid:
+            entry["message_id"] = mid
+            entry["message_text"] = msg
+            save_json(STATE_FILE, state)
+            print(f"✅ PREDICTED #{target} -> {rank} ({conf:.1f}%)")
+        else:
+            entry["status"] = "scheduled"
+            save_json(STATE_FILE, state)
+
+# ---------- STATS ----------
+def stats_text():
+    total = state["total_predictions"]
+    wins = state["wins"]
+    losses = state["losses"]
+    acc = f"{wins/total*100:.1f}%" if total else "—"
+    return f"📊 RANK BOT STATS\n⏰ {datetime.now(MOSCOW_TZ).strftime('%d.%m.%Y %H:%M:%S')}\n==============================\n📈 Total: {total}\n✅ Wins: {wins}\n❌ Losses: {losses}\n🎯 Accuracy: {acc}\n📚 Games learned: {state['total_games']}/{MAX_TRAIN}\n🎯 Min conf: {MIN_CONF}%"
+
+# ---------- MAIN ----------
+def main():
+    global all_messages
+    send_msg(stats_text())
+    offset = load_offset() if OFFSET_FILE.exists() else 0
+    last_stats = time.time()
+    print("🚀 BOT READY")
+    while True:
+        try:
+            now = time.time()
+            check_results()
+            process_scheduled()
+            if now - last_stats > 3600:
+                send_msg(stats_text())
+                last_stats = now
+            updates = get_updates(offset)
+            for upd in updates.get("result", []):
+                if "update_id" in upd:
+                    offset = upd["update_id"] + 1
+                    save_offset(offset)
+                post = upd.get("channel_post") or upd.get("edited_channel_post")
+                if not post:
+                    continue
+                if str(post.get("chat", {}).get("id", "")) != str(CHANNEL_STATS):
+                    continue
+                text = post.get("text", "")
+                if "#N" not in text:
+                    continue
+                if text not in all_messages:
+                    all_messages.append(text)
+                    if len(all_messages) > 500:
+                        all_messages = all_messages[-500:]
+                g = add_game(text)
+                if not g:
+                    continue
+                n = g["number"]
+                print(f"📥 Game #{n} | {'finished' if is_finished(text) else 'not finished'}")
+                if not is_finished(text):
+                    schedule_for_game(n)
+            check_results()
+            process_scheduled()
+            time.sleep(1)
+        except Exception as e:
+            print(f"❌ ERROR: {e}")
+            time.sleep(10)
+
+def load_offset():
+    try:
+        return int(OFFSET_FILE.read_text().strip())
+    except:
+        return 0
+
+def save_offset(o):
+    OFFSET_FILE.write_text(str(o))
+
+if __name__ == "__main__":
+    main()
