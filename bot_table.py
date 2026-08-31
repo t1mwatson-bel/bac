@@ -51,6 +51,7 @@ HEADERS = {
 
 predictions = []
 seen_upcoming_games = set()
+games_cache = {}
 
 stats = {
     "total": 0,
@@ -104,7 +105,7 @@ def edit_message(message_id, text):
 
 
 # =====================================================================
-# ДАННЫЕ
+# ДАННЫЕ (ТОЛЬКО ЧТЕНИЕ)
 # =====================================================================
 
 def load_data():
@@ -187,7 +188,7 @@ def add_game_offset(num, offset):
 
 
 # =====================================================================
-# API ИГРЫ
+# API
 # =====================================================================
 
 def get_upcoming_games():
@@ -242,7 +243,9 @@ def get_target_cards_from_record(record):
     all_cards = record.get("player_cards", []) + record.get("dealer_cards", [])
     for card in all_cards:
         if isinstance(card, dict):
-            card_str = card.get("rank", "") + card.get("suit", "")
+            rank = card.get("rank", "")
+            suit = card.get("suit", "")
+            card_str = rank + suit
         else:
             card_str = str(card)
         if card_str in TARGET_CARDS:
@@ -288,8 +291,21 @@ def get_prediction_by_milliseconds(timestamp_msk):
     for card in matches:
         counter[card] += 1
     
-    most_common = max(counter.items(), key=lambda x: x[1])
-    return most_common[0], len(set(matches))
+    max_count = max(counter.values())
+    
+    # Если максимальная частота == 1 → нет повторений → нет прогноза
+    if max_count == 1:
+        return None, 0
+    
+    # Собираем все карты с максимальной частотой
+    leaders = [card for card, count in counter.items() if count == max_count]
+    
+    # Если больше одной карты имеют одинаковую максимальную частоту → нет прогноза
+    if len(leaders) > 1:
+        return None, 0
+    
+    # Остался только один лидер
+    return leaders[0], len(matches)
 
 
 # =====================================================================
@@ -384,8 +400,6 @@ def check_upcoming_games():
 # ПРОВЕРКА РЕЗУЛЬТАТОВ
 # =====================================================================
 
-games_cache = {}
-
 def cache_result(num, text):
     global games_cache
     games_cache[num] = text
@@ -397,14 +411,14 @@ def cache_result(num, text):
 
 def parse_cards_from_text(text):
     try:
-        match = re.search(r"#N\d+\.\s*(\d+)\(([^)]*)\)", text)
+        match = re.search(r"#N\d+\.\s*(\d+)\(([^)]*)\)\s*-\s*(?:✅|❌)?\s*(\d+)\(([^)]*)\)", text)
         if not match:
             return []
-        cards_str = match.group(2)
+        all_cards_str = match.group(2) + match.group(4)
         cards = []
         pattern = r"(10|[2-9AJQK])([♠♣♦♥])"
-        for rank, suit in re.findall(pattern, cards_str):
-            suit_map = {"♠": "♠️", "♣": "♣️", "♦": "♦️", "♥": "♥️"}
+        suit_map = {"♠": "♠️", "♣": "♣️", "♦": "♦️", "♥": "♥️"}
+        for rank, suit in re.findall(pattern, all_cards_str):
             cards.append(rank + suit_map.get(suit, suit))
         return cards
     except:
@@ -422,16 +436,17 @@ def check_results():
             continue
         
         target = entry.get("target")
-        card = entry.get("card")
+        predicted_cards = entry.get("cards", [])
         msg_id = entry.get("message_id")
         original = entry.get("original_text", "")
         
-        if not target or not card or not msg_id:
+        if not target or not predicted_cards or not msg_id:
             continue
         
-        print(f"\n🔍 ПРОВЕРКА #{target}: ищем {card}", flush=True)
+        print(f"\n🔍 ПРОВЕРКА #{target}: ищем {predicted_cards}", flush=True)
         
         found = False
+        found_card = None
         found_num = None
         dogon = 0
         
@@ -446,25 +461,30 @@ def check_results():
             actual = parse_cards_from_text(text)
             print(f"🔎 #{num}: {actual}", flush=True)
             
-            if card in actual:
-                found = True
-                found_num = num
-                dogon = i
+            for card in predicted_cards:
+                if card in actual:
+                    found = True
+                    found_card = card
+                    found_num = num
+                    dogon = i
+                    break
+            
+            if found:
                 break
         
         if found:
-            print(f"✅ ЗАШЛО на #{found_num}!", flush=True)
+            print(f"✅ ЗАШЛО на #{found_num}! ({found_card})", flush=True)
             stats["total"] += 1
             stats["win"] += 1
             stats["by_dogon"][dogon] = stats["by_dogon"].get(dogon, 0) + 1
-            stats["card_hits"][card] += 1
+            stats["card_hits"][found_card] += 1
             
             result_text = (
                 f"\n\n════════════════════\n"
                 f"✅ <b>ЗАШЛО</b>\n"
                 f"════════════════════\n"
                 f"🎯 Игра: #{found_num}\n"
-                f"🃏 Выпала: <b>{card}</b>\n"
+                f"🃏 Выпала: <b>{found_card}</b>\n"
                 f"📈 Догон: <b>{dogon}</b>"
             )
             
@@ -472,6 +492,7 @@ def check_results():
             entry["status"] = "win"
             entry["result_game"] = found_num
             entry["dogon"] = dogon
+            entry["found_card"] = found_card
             save_history(predictions)
             continue
         
@@ -493,7 +514,7 @@ def check_results():
             f"❌ <b>НЕ ЗАШЛО</b>\n"
             f"════════════════════\n"
             f"🎯 Цель: #{target}\n"
-            f"🃏 Искали: {card}"
+            f"🃏 Искали: {', '.join(predicted_cards)}"
         )
         
         edit_message(msg_id, original + result_text)
