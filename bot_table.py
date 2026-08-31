@@ -143,7 +143,7 @@ MAX_GAME_HISTORY = 30
 DOGON_GAMES = 4
 LATENCY_CACHE_MAX_SIZE = 2000
 
-FORECAST_OFFSET = 0  # ← OFFSET = 0
+FORECAST_OFFSET = 0
 MIN_FORECAST_PROBABILITY = 0.29
 
 LATENCY_MEASUREMENTS = 2
@@ -636,7 +636,7 @@ def get_target_cards_from_record(record):
 
 
 # =====================================================================
-# ПОИСК ПО МИЛЛИСЕКУНДАМ (НОВАЯ ЛОГИКА)
+# ПОИСК ПО МИЛЛИСЕКУНДАМ
 # =====================================================================
 
 def find_by_milliseconds(timestamp_msk):
@@ -649,7 +649,7 @@ def find_by_milliseconds(timestamp_msk):
     if len(parts) < 2:
         return []
     
-    target_ms = parts[1]  # например "349"
+    target_ms = parts[1]
     
     data = load_data()
     matches = []
@@ -678,7 +678,7 @@ def find_by_milliseconds(timestamp_msk):
 
 
 def predict_by_milliseconds(timestamp_msk):
-    """Прогноз по миллисекундам"""
+    """Прогноз по миллисекундам - возвращает ТОЛЬКО ОДНУ КАРТУ"""
     matches = find_by_milliseconds(timestamp_msk)
     
     if not matches:
@@ -707,7 +707,11 @@ def predict_by_milliseconds(timestamp_msk):
     for i, (card, prob) in enumerate(sorted_cards[:3], 1):
         print(f"   {i}. {card} — {prob * 100:.2f}%", flush=True)
     
-    return sorted_cards[:2], probabilities, len(matches)
+    # Возвращаем ТОЛЬКО ПЕРВУЮ КАРТУ (самую частую)
+    if sorted_cards:
+        return [sorted_cards[0]], probabilities, len(matches)
+    
+    return None, {}, len(matches)
 
 
 # =====================================================================
@@ -957,34 +961,36 @@ def predict_ml(latency, game_num):
 
 
 # =====================================================================
-# ИТОГОВЫЙ ПРОГНОЗ (С ПРИОРИТЕТОМ МИЛЛИСЕКУНД)
+# ИТОГОВЫЙ ПРОГНОЗ (ТОЛЬКО 1 КАРТА)
 # =====================================================================
 
 def get_prediction(latency, game_num, timestamp_msk):
     
     # 1. СНАЧАЛА ИЩЕМ ПО МИЛЛИСЕКУНДАМ (ПРИОРИТЕТ)
-    ms_top, ms_probs, ms_count = predict_by_milliseconds(timestamp_msk)
+    ms_result, ms_probs, ms_count = predict_by_milliseconds(timestamp_msk)
+    
+    # Если есть совпадения по миллисекундам - берем ТОЛЬКО ПЕРВУЮ КАРТУ
+    if ms_result and ms_count >= 2:
+        print(f"\n✅ ПРОГНОЗ ПО МИЛЛИСЕКУНДАМ (приоритет)", flush=True)
+        top_card = ms_result[0]
+        print(f"   🎯 Точная карта по миллисекундам: {top_card[0]} — {top_card[1] * 100:.2f}%", flush=True)
+        return ms_result, "milliseconds", top_card[1], ms_count, top_card[0], top_card[1]
     
     # 2. ПОТОМ ИСТОРИЯ
     historical_top, historical_probs, history_count = historical_prediction(latency, game_num)
     
+    if historical_top and history_count >= 5:
+        print(f"\n✅ ПРОГНОЗ ПО ИСТОРИИ", flush=True)
+        top_card = historical_top[0]
+        return [top_card], "history", top_card[1], history_count, top_card[0], top_card[1]
+    
     # 3. ПОТОМ ML
     ml_top, ml_probs = predict_ml(latency, game_num)
     
-    # Если есть совпадения по миллисекундам - используем их
-    if ms_top and ms_count >= 2:
-        print(f"\n✅ ПРОГНОЗ ПО МИЛЛИСЕКУНДАМ (приоритет)", flush=True)
-        return ms_top, "milliseconds", ms_top[0][1], ms_count, ms_top[0][0], ms_top[0][1]
-    
-    # Если есть исторические аналоги - используем их
-    if historical_top and history_count >= 5:
-        print(f"\n✅ ПРОГНОЗ ПО ИСТОРИИ", flush=True)
-        return historical_top, "history", historical_top[0][1], history_count, historical_top[0][0], historical_top[0][1]
-    
-    # Если есть ML - используем его
     if ml_top and ml_top[0][1] >= MIN_FORECAST_PROBABILITY:
         print(f"\n✅ ПРОГНОЗ ПО ML", flush=True)
-        return ml_top, "ml", ml_top[0][1], 0, ml_top[0][0], ml_top[0][1]
+        top_card = ml_top[0]
+        return [top_card], "ml", top_card[1], 0, top_card[0], top_card[1]
     
     print("⚠️ Нет данных для прогноза", flush=True)
     return None, None, None, 0, None, None
@@ -1063,19 +1069,14 @@ def check_upcoming_games():
             msg = (
                 "🔮 ТОЧНАЯ КАРТА (МИЛЛИСЕКУНДЫ)\n\n"
                 f"🎯 Целевая игра: #N{target_game_num}\n"
-                f"📌 От запланированной: {FORECAST_OFFSET:+d} (#{scheduled_game_num} → #{target_game_num})\n"
-                "🤖 Метод: Миллисекунды + История + ML\n"
-                f"📊 Задержка: {latency:.1f}мс\n"
-                f"⏰ Время замера: {timestamp_msk}\n"
-                f"📚 Найдено аналогов: {matches_count}\n"
+                f"🤖 Метод: Миллисекунды\n"
                 f"⏰ Прогноз: {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')}\n\n"
             )
 
             if base_card:
                 msg += f"📊 Лидер анализа: {base_card} — {base_probability * 100:.1f}%\n\n"
 
-            for i, card in enumerate(cards_list, 1):
-                msg += f"{i}️⃣ {card}\n"
+            msg += f"1️⃣ {cards_list[0]}\n"
 
             msg += f"\n📈 Догон: {DOGON_GAMES - 1} игр"
             msg += "\n📍 Ищем: любую позицию (игрок/дилер)"
@@ -1115,7 +1116,7 @@ def check_upcoming_games():
             print("\n✅ ПРОГНОЗ ОТПРАВЛЕН", flush=True)
             print(f"📌 Источник: #{scheduled_game_num}", flush=True)
             print(f"🎯 Цель: #{target_game_num}", flush=True)
-            print(f"🃏 Прогноз: {' + '.join(cards_list)}", flush=True)
+            print(f"🃏 Прогноз: {cards_list[0]}", flush=True)
             print(f"📢 Канал прогноза: {CHANNEL_PROGNOZ}", flush=True)
 
 
@@ -1141,35 +1142,6 @@ def cache_stats_result(game_number, text):
             key=lambda x: circular_game_distance(x[0], current)
         )
         find_stats_game_text.games_cache = dict(sorted_items[:500])
-
-
-def get_actual_cards_from_game(game_text):
-    game_data = parse_game_from_text(game_text)
-    if not game_data:
-        return []
-
-    all_cards = game_data.get("player_cards", []) + game_data.get("dealer_cards", [])
-    actual_cards = []
-    for card in all_cards:
-        rank = card.get("rank", "")
-        suit = card.get("suit", "")
-        card_str = rank + suit
-        if card_str:
-            actual_cards.append(card_str)
-    return actual_cards
-
-
-def evaluate_prediction_against_game(predicted_cards, game_text):
-    actual_cards = get_actual_cards_from_game(game_text)
-    if not actual_cards:
-        return {"matched": False, "found_card": None, "actual_cards": []}
-
-    predicted_set = set(predicted_cards)
-    for actual_card in actual_cards:
-        if actual_card in predicted_set:
-            return {"matched": True, "found_card": actual_card, "actual_cards": actual_cards}
-
-    return {"matched": False, "found_card": None, "actual_cards": actual_cards}
 
 
 def parse_game_from_text(text):
@@ -1215,6 +1187,35 @@ def parse_game_from_text(text):
     except Exception as e:
         print(f"❌ Ошибка парсинга игры: {e}", flush=True)
         return None
+
+
+def get_actual_cards_from_game(game_text):
+    game_data = parse_game_from_text(game_text)
+    if not game_data:
+        return []
+
+    all_cards = game_data.get("player_cards", []) + game_data.get("dealer_cards", [])
+    actual_cards = []
+    for card in all_cards:
+        rank = card.get("rank", "")
+        suit = card.get("suit", "")
+        card_str = rank + suit
+        if card_str:
+            actual_cards.append(card_str)
+    return actual_cards
+
+
+def evaluate_prediction_against_game(predicted_cards, game_text):
+    actual_cards = get_actual_cards_from_game(game_text)
+    if not actual_cards:
+        return {"matched": False, "found_card": None, "actual_cards": []}
+
+    predicted_set = set(predicted_cards)
+    for actual_card in actual_cards:
+        if actual_card in predicted_set:
+            return {"matched": True, "found_card": actual_card, "actual_cards": actual_cards}
+
+    return {"matched": False, "found_card": None, "actual_cards": actual_cards}
 
 
 def is_finished_game_text(text):
