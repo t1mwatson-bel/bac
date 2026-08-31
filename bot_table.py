@@ -1039,25 +1039,14 @@ def check_upcoming_games():
                 print(f"⏭️ На #{target_game_num} прогноз уже существует", flush=True)
                 continue
 
-            print("📡 ЗАМЕР ЗАДЕРЖКИ...", flush=True)
-
-            (_, measured_latency, _, _) = get_game_data(game_id)
-
-            if measured_latency is not None:
-                latency = measured_latency
-                print(f"   Замер: {latency:.1f}мс", flush=True)
-            else:
-                latency = 500.0
-                print(f"   Замер: 500.0мс (по умолчанию)", flush=True)
-
-            update_game_history(latency, scheduled_game_num)
-
             # Получаем текущее время для миллисекунд
             now = datetime.now(MOSCOW_TZ)
             timestamp_msk = now.strftime("%H:%M:%S.%f")[:-3]
+            
+            print(f"⏰ Время замера: {timestamp_msk}", flush=True)
 
             (predicted_cards, method, confidence, matches_count, base_card, base_probability) = get_prediction(
-                latency, target_game_num, timestamp_msk
+                None, target_game_num, timestamp_msk
             )
 
             if not predicted_cards:
