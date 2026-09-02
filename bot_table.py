@@ -4391,8 +4391,6 @@ def check_upcoming_games():
 
         try:
 
-                    try:
-
             target_num = int(
                 target_num
             )
