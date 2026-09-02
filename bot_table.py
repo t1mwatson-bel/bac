@@ -1538,66 +1538,85 @@ def add_or_update_game(
 # ПОИСК ПРЕДЫДУЩЕЙ ИГРЫ ПО ПОСЛЕДНЕЙ ЦИФРЕ ID
 # =====================================================================
 
-def find_last_same_digit_game(
-    history_data,
-    current_game_id
-):
+def find_last_same_digit_game(history, current_game_id):
+    current_game_id = str(current_game_id)
+    target_digit = current_game_id[-1]
 
-    current_game_id = str(
-        current_game_id
+    for game in reversed(history):
+
+        old_game_id = str(
+            game.get("game_id", "")
+        ).strip()
+
+        if not old_game_id:
+            continue
+
+        # Не берём текущую игру
+        if old_game_id == current_game_id:
+            continue
+
+        # Сравниваем именно последнюю цифру game_id
+        if old_game_id[-1] != target_digit:
+            continue
+
+        sequence = game.get("sequence")
+
+        if not isinstance(sequence, list):
+            continue
+
+        first_player_card = None
+
+        for card in sequence:
+
+            if not isinstance(card, dict):
+                continue
+
+            if (
+                card.get("position") == 1
+                and str(card.get("who", "")).upper() == "P"
+            ):
+                first_player_card = card
+                break
+
+        if not first_player_card:
+            continue
+
+        rank = normalize_rank(
+            first_player_card.get("rank")
+        )
+
+        suit = normalize_suit(
+            first_player_card.get("suit")
+        )
+
+        if not rank or not suit:
+            continue
+
+        result = {
+            "game_id": old_game_id,
+            "first_player_card": {
+                "rank": rank,
+                "suit": f"{suit}\ufe0f",
+            }
+        }
+
+        print(
+            f"📚 ИСТОЧНИК | "
+            f"текущий ID={current_game_id} | "
+            f"цифра={target_digit} | "
+            f"найден ID={old_game_id} | "
+            f"P1={rank}{suit}\ufe0f",
+            flush=True
+        )
+
+        return result
+
+    print(
+        f"⏭️ ID={current_game_id} | "
+        f"предыдущая игра с цифрой {target_digit} "
+        f"не найдена",
+        flush=True
     )
-
-    if not current_game_id:
-        return None
-
-    target_digit = (
-        current_game_id[-1]
-    )
-
-    # Идём от новых игр к старым.
-    for game in reversed(
-        history_data
-    ):
-
-        old_id = str(
-            game.get(
-                "game_id",
-                ""
-            )
-        )
-
-        if not old_id:
-            continue
-
-        if old_id == current_game_id:
-            continue
-
-        if old_id[-1] != target_digit:
-            continue
-
-        # ВАЖНО:
-        # Основной источник — player_cards[0],
-        # потому что именно так устроен
-        # twentyone_data_full.json.
-        player_cards = game.get(
-            "player_cards",
-            []
-        )
-
-        if player_cards:
-
-            first_card = player_cards[0]
-
-            if first_card:
-                return game
-
-        # Дополнительный fallback
-        first_card = game.get(
-            "first_player_card"
-        )
-
-        if first_card:
-            return game
 
     return None
 
