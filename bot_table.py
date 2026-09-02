@@ -778,6 +778,22 @@ def parse_stats_message(text):
     if len(groups) < 2:
         return None
 
+    # -------------------------------------------------------------
+    # ВАЖНО:
+    # groups[0] = карты игрока
+    # groups[1] = карты дилера
+    #
+    # Но здесь мы НЕ считаем, что порядок раздачи:
+    # P1, P2, D1, D2
+    #
+    # Пока сохраняем карты отдельно:
+    # player_cards  -> P1, P2, P3...
+    # dealer_cards  -> D1, D2, D3...
+    #
+    # Сам фильтр позже будет работать с конкретными
+    # позициями предыдущей игры.
+    # -------------------------------------------------------------
+
     player_cards = parse_cards_string(
         groups[0]
     )
@@ -788,6 +804,78 @@ def parse_stats_message(text):
 
     if not player_cards and not dealer_cards:
         return None
+
+    # -------------------------------------------------------------
+    # Позиции карт внутри сторон
+    # -------------------------------------------------------------
+
+    player_p1 = (
+        player_cards[0]
+        if len(player_cards) >= 1
+        else None
+    )
+
+    player_p2 = (
+        player_cards[1]
+        if len(player_cards) >= 2
+        else None
+    )
+
+    player_p3 = (
+        player_cards[2]
+        if len(player_cards) >= 3
+        else None
+    )
+
+    dealer_d1 = (
+        dealer_cards[0]
+        if len(dealer_cards) >= 1
+        else None
+    )
+
+    dealer_d2 = (
+        dealer_cards[1]
+        if len(dealer_cards) >= 2
+        else None
+    )
+
+    dealer_d3 = (
+        dealer_cards[2]
+        if len(dealer_cards) >= 3
+        else None
+    )
+
+    # -------------------------------------------------------------
+    # Первые две карты каждой стороны.
+    #
+    # Пока это именно:
+    # P1 = player_cards[0]
+    # P2 = player_cards[1]
+    # D1 = dealer_cards[0]
+    # D2 = dealer_cards[1]
+    #
+    # Позже, если по API установим реальную физическую
+    # последовательность раздачи P1,D1,P2,D2,
+    # фильтр можно будет поменять именно здесь.
+    # -------------------------------------------------------------
+
+    first_four_cards = []
+
+    if player_p1:
+        first_four_cards.append(player_p1)
+
+    if player_p2:
+        first_four_cards.append(player_p2)
+
+    if dealer_d1:
+        first_four_cards.append(dealer_d1)
+
+    if dealer_d2:
+        first_four_cards.append(dealer_d2)
+
+    # -------------------------------------------------------------
+    # Все карты
+    # -------------------------------------------------------------
 
     all_cards = (
         player_cards
@@ -818,15 +906,74 @@ def parse_stats_message(text):
         if card
     ]
 
+    # -------------------------------------------------------------
+    # Точные карты первых двух карт игрока/дилера
+    # -------------------------------------------------------------
+
+    first_four_exact_cards = [
+        make_card(
+            card["rank"],
+            card["suit"]
+        )
+        for card in first_four_cards
+        if card
+    ]
+
+    first_four_exact_cards = [
+        card
+        for card in first_four_exact_cards
+        if card
+    ]
+
     return {
         "game_number":
             game_number,
+
+        # ---------------------------------------------------------
+        # Полные карты игрока/дилера
+        # ---------------------------------------------------------
 
         "player_cards":
             player_cards,
 
         "dealer_cards":
             dealer_cards,
+
+        # ---------------------------------------------------------
+        # Явные позиции
+        # ---------------------------------------------------------
+
+        "P1":
+            player_p1,
+
+        "P2":
+            player_p2,
+
+        "P3":
+            player_p3,
+
+        "D1":
+            dealer_d1,
+
+        "D2":
+            dealer_d2,
+
+        "D3":
+            dealer_d3,
+
+        # ---------------------------------------------------------
+        # Первые четыре карты для будущего фильтра
+        # ---------------------------------------------------------
+
+        "first_four_cards":
+            first_four_cards,
+
+        "first_four_exact_cards":
+            first_four_exact_cards,
+
+        # ---------------------------------------------------------
+        # Все карты
+        # ---------------------------------------------------------
 
         "all_cards":
             all_cards,
