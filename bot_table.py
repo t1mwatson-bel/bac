@@ -1,8 +1,8 @@
+```python
 import os
 import sys
 import json
 import time
-import re
 import requests
 import pytz
 
@@ -22,7 +22,6 @@ CHAT_ID = os.getenv("CHAT_ID_21")
 
 if not CHAT_ID:
     CHAT_ID = os.getenv("CHAT_ID")
-
 
 if not BOT_TOKEN or not CHAT_ID:
     print(
@@ -57,13 +56,13 @@ DATA_FILE = "twentyone_data_full.json"
 
 PREDICTIONS_FILE = "twentyone_predictions.json"
 
-# Максимум последних игр
+# Храним последние 1000 игр
 MAX_HISTORY_GAMES = 1000
 
 # Проверяем target + ещё 3 игры
 DOGON_GAMES = 4
 
-# Прогноз только на эти карты
+# Прогноз только на эти ранги
 TARGET_RANKS = {
     "J",
     "Q",
@@ -71,7 +70,7 @@ TARGET_RANKS = {
     "A",
 }
 
-# Пары мастей
+# Пары мастей:
 #
 # ♠ <-> ♥
 # ♣ <-> ♦
@@ -183,10 +182,11 @@ def normalize_suit(value):
 
     text = str(value).strip()
 
-    # Убираем variation selector
-    text = text.replace("\ufe0f", "")
+    text = text.replace(
+        "\ufe0f",
+        ""
+    )
 
-    # Числовые варианты
     if text == "0":
         return "♠"
 
@@ -459,7 +459,6 @@ def classify_key(key):
         key
     ).strip().lower()
 
-    # PLAYER
     if (
         k == "p"
         or k.startswith("player")
@@ -474,7 +473,6 @@ def classify_key(key):
     ):
         return "player"
 
-    # DEALER
     if (
         k == "d"
         or k.startswith("dealer")
@@ -808,8 +806,12 @@ def parse_game_data(
                 d2
             )
 
-    # Без первой карты игрока
-    # прогноз создать невозможно
+    # Игра ещё не началась.
+    # Это НОРМАЛЬНО.
+    #
+    # Здесь просто возвращаем None.
+    # Прогноз уже был создан раньше
+    # в process_game().
     if not player_cards:
 
         return None
@@ -818,7 +820,6 @@ def parse_game_data(
         MOSCOW_TZ
     )
 
-    # Состояние
     state = deep_find_value(
         raw_data,
         {
@@ -832,7 +833,6 @@ def parse_game_data(
     if state is not None:
         state = str(state)
 
-    # Счёт игрока
     player_score = deep_find_value(
         raw_data,
         {
@@ -845,7 +845,6 @@ def parse_game_data(
         }
     )
 
-    # Счёт дилера
     dealer_score = deep_find_value(
         raw_data,
         {
@@ -1124,8 +1123,6 @@ def load_history():
     ):
         history = []
 
-    # Если файл уже был больше 1000,
-    # оставляем последние 1000.
     if len(history) > MAX_HISTORY_GAMES:
 
         history = history[
@@ -1238,7 +1235,6 @@ def merge_game_records(
         old
     )
 
-    # Простые значения
     for key, value in new.items():
 
         if value is None:
@@ -1332,7 +1328,7 @@ def merge_game_records(
         )
 
     # ================================================================
-    # ПЕРЕСБОРКА ОБЩИХ ПОЛЕЙ
+    # ПЕРЕСБОРКА
     # ================================================================
 
     player_cards = merged.get(
@@ -1499,15 +1495,8 @@ def add_or_update_game(
         game
     )
 
-    # ================================================================
-    # САМОЕ ВАЖНОЕ:
-    #
-    # НЕ ОЧИЩАЕМ ВЕСЬ ФАЙЛ.
-    #
-    # Если стало 1001,
-    # удаляем только самую старую.
-    # ================================================================
-
+    # Удаляем только самые старые,
+    # если превысили 1000.
     if len(history_data) > MAX_HISTORY_GAMES:
 
         remove_count = (
@@ -1530,11 +1519,15 @@ def add_or_update_game(
         history_data
     )
 
+    first_card = game.get(
+        "first_player_card"
+    )
+
     print(
         f"💾 Новая игра сохранена | "
         f"ID={game_id} | "
         f"последняя цифра={game_id[-1]} | "
-        f"P1={card_to_text(game.get('first_player_card'))} | "
+        f"P1={card_to_text(first_card)} | "
         f"история={len(history_data)}/{MAX_HISTORY_GAMES}",
         flush=True
     )
@@ -1562,7 +1555,7 @@ def find_last_same_digit_game(
         current_game_id[-1]
     )
 
-    # Идём от самых новых к старым
+    # Идём от новых игр к старым.
     for game in reversed(
         history_data
     ):
@@ -1583,21 +1576,26 @@ def find_last_same_digit_game(
         if old_id[-1] != target_digit:
             continue
 
+        # ВАЖНО:
+        # Основной источник — player_cards[0],
+        # потому что именно так устроен
+        # twentyone_data_full.json.
+        player_cards = game.get(
+            "player_cards",
+            []
+        )
+
+        if player_cards:
+
+            first_card = player_cards[0]
+
+            if first_card:
+                return game
+
+        # Дополнительный fallback
         first_card = game.get(
             "first_player_card"
         )
-
-        if not first_card:
-
-            player_cards = game.get(
-                "player_cards",
-                []
-            )
-
-            if player_cards:
-                first_card = (
-                    player_cards[0]
-                )
 
         if first_card:
             return game
@@ -1697,7 +1695,7 @@ def create_prediction_for_game(
         current_game_id
     )
 
-    # Не повторяем прогноз
+    # Не повторяем прогноз.
     if prediction_already_exists(
         predictions,
         current_game_id
@@ -1705,7 +1703,18 @@ def create_prediction_for_game(
 
         return None
 
-    # Ищем предыдущую игру
+    target_digit = current_game_id[-1]
+
+    print(
+        f"🔎 Ищу в истории игру с "
+        f"последней цифрой ID={target_digit}",
+        flush=True
+    )
+
+    # ================================================================
+    # ИЩЕМ ПРЕДЫДУЩУЮ ИГРУ
+    # ================================================================
+
     previous_game = (
         find_last_same_digit_game(
             history,
@@ -1718,7 +1727,7 @@ def create_prediction_for_game(
         print(
             f"⏭️ ID={current_game_id} | "
             f"предыдущая игра с цифрой "
-            f"{current_game_id[-1]} не найдена",
+            f"{target_digit} не найдена",
             flush=True
         )
 
@@ -1730,44 +1739,72 @@ def create_prediction_for_game(
         )
     )
 
-    first_card = previous_game.get(
-        "first_player_card"
+    # ================================================================
+    # БЕРЁМ ПЕРВУЮ КАРТУ ИГРОКА
+    #
+    # В ПЕРВУЮ ОЧЕРЕДЬ:
+    # player_cards[0]
+    #
+    # Именно это находится в
+    # twentyone_data_full.json.
+    # ================================================================
+
+    first_card = None
+
+    player_cards = previous_game.get(
+        "player_cards",
+        []
     )
 
-    if not first_card:
+    if player_cards:
 
-        player_cards = previous_game.get(
-            "player_cards",
-            []
+        first_card = (
+            player_cards[0]
         )
 
-        if player_cards:
+    # fallback
+    if not first_card:
 
-            first_card = (
-                player_cards[0]
-            )
+        first_card = previous_game.get(
+            "first_player_card"
+        )
 
     if not first_card:
 
         print(
             f"⏭️ ID={current_game_id} | "
-            f"у предыдущей игры нет P1",
+            f"у предыдущей игры "
+            f"{source_id} нет P1",
             flush=True
         )
 
         return None
 
+    first_card_text = card_to_text(
+        first_card
+    )
+
+    print(
+        f"🃏 Источник найден | "
+        f"ID={source_id} | "
+        f"P1={first_card_text}",
+        flush=True
+    )
+
+    # ================================================================
+    # СОЗДАЁМ ПАРНЫЙ ПРОГНОЗ
+    # ================================================================
+
     prediction = get_paired_prediction(
         first_card
     )
 
-    # Если 2-10 — пропуск
+    # Если 2-10 — пропуск.
     if not prediction:
 
         print(
             f"⏭️ ID={current_game_id} | "
-            f"P1 предыдущей игры="
-            f"{card_to_text(first_card)} | "
+            f"P1={first_card_text} | "
             f"ранг не J/Q/K/A — пропуск",
             flush=True
         )
@@ -1835,11 +1872,12 @@ def create_prediction_for_game(
     )
 
     print(
-        f"🔮 ПРОГНОЗ | "
+        f"🔮 ПРОГНОЗ СОЗДАН | "
         f"#N{current_game_number} | "
         f"ID={current_game_id} | "
+        f"последняя цифра={target_digit} | "
         f"источник={source_id} | "
-        f"P1={card_to_text(first_card)} | "
+        f"P1={first_card_text} | "
         f"прогноз={prediction['display']}",
         flush=True
     )
@@ -2062,18 +2100,13 @@ def card_matches_prediction(
     if rank != predicted_rank:
         return False
 
-    # ================================================================
-    # ВАЖНО:
+    # Подходит любая из двух мастей.
     #
-    # Подходит ЛЮБАЯ из двух мастей.
-    #
-    # Например прогноз Q♠️♥️:
+    # Q♠️♥️:
     #
     # Q♠️ -> WIN
     # Q♥️ -> WIN
     #
-    # ================================================================
-
     if suit == suit1:
         return True
 
@@ -2148,14 +2181,13 @@ def get_dogon_result(
     if target_index == -1:
         return None
 
-    # Нужно target + 3 следующие игры
     end_index = (
         target_index
         + DOGON_GAMES
     )
 
-    # Пока 4 игры ещё нет —
-    # результат не ставим
+    # Пока 4 игры нет —
+    # результат не ставим.
     if end_index > len(history):
         return None
 
@@ -2182,7 +2214,7 @@ def get_dogon_result(
 
     checked_games = []
 
-    # Проверяем target + следующие 3
+    # target + следующие 3
     for index in range(
         target_index,
         end_index
@@ -2219,7 +2251,6 @@ def get_dogon_result(
                 ),
             }
 
-    # Ни в одной из 4 игр нет карты
     return {
 
         "status": "lose",
@@ -2382,11 +2413,11 @@ def get_duplicate_last_digits(
 ):
 
     """
-    Смотрим ВСЕ игры, которые сейчас
-    одновременно пришли из API.
+    Смотрим ВСЕ игры, которые одновременно
+    пришли из API.
 
     Если последняя цифра API ID
-    встречается два раза или больше,
+    встречается 2 раза или больше,
     эта цифра запрещена для прогноза.
 
     Например:
@@ -2394,7 +2425,8 @@ def get_duplicate_last_digits(
         749469585 -> 5
         749469755 -> 5
 
-    Значит цифра 5 запрещена.
+    Значит обе игры с цифрой 5
+    получают ПРОПУСК прогноза.
     """
 
     digit_counts = {}
@@ -2629,7 +2661,7 @@ def process_game(
     )
 
     # Не обрабатываем дважды
-    # в одном цикле
+    # в одном цикле.
     if game_id in seen_this_cycle:
         return
 
@@ -2637,45 +2669,17 @@ def process_game(
         game_id
     )
 
+    last_digit = game_id[-1]
+
     print(
         f"🔍 API игра | "
         f"ID={game_id} | "
-        f"последняя цифра="
-        f"{game_id[-1]}",
+        f"последняя цифра={last_digit}",
         flush=True
     )
 
-    raw_data = get_game_data(
-        game_id
-    )
-
-    if raw_data is None:
-
-        print(
-            f"⚠️ ID={game_id} | "
-            f"GetGameZip не получен",
-            flush=True
-        )
-
-        return
-
-    parsed = parse_game_data(
-        game_id,
-        raw_data
-    )
-
-    if parsed is None:
-
-        print(
-            f"⚠️ ID={game_id} | "
-            f"карты игрока не найдены",
-            flush=True
-        )
-
-        return
-
     # ================================================================
-    # НОВАЯ ИЛИ УЖЕ СУЩЕСТВУЮЩАЯ
+    # ОПРЕДЕЛЯЕМ, НОВАЯ ЛИ ЭТО ИГРА
     # ================================================================
 
     is_new = not game_exists(
@@ -2686,14 +2690,22 @@ def process_game(
     game_number = get_game_number()
 
     # ================================================================
-    # ПРОГНОЗ
+    # САМОЕ ГЛАВНОЕ ИЗМЕНЕНИЕ
     #
-    # Только для НОВОЙ игры.
+    # ПРОГНОЗ СОЗДАЁТСЯ ДО ПОЛУЧЕНИЯ КАРТ ТЕКУЩЕЙ ИГРЫ.
     #
-    # Если skip_prediction=True,
-    # прогноз не создаём.
+    # Почему?
     #
-    # Но игру всё равно сохраняем.
+    # API может показать игру за 2 минуты
+    # до её начала.
+    #
+    # GetGameZip в этот момент ещё не имеет
+    # player_cards.
+    #
+    # Но нам карты текущей игры НЕ НУЖНЫ.
+    #
+    # Нам нужна предыдущая игра из JSON,
+    # у которой такой же последний символ ID.
     # ================================================================
 
     if is_new:
@@ -2704,8 +2716,7 @@ def process_game(
                 f"🚫 ПРОГНОЗ ПРОПУЩЕН | "
                 f"#N{game_number} | "
                 f"ID={game_id} | "
-                f"последняя цифра="
-                f"{game_id[-1]} | "
+                f"последняя цифра={last_digit} | "
                 f"такая цифра есть "
                 f"у другой будущей игры",
                 flush=True
@@ -2746,7 +2757,50 @@ def process_game(
                     )
 
     # ================================================================
-    # В ЛЮБОМ СЛУЧАЕ СОХРАНЯЕМ ИГРУ
+    # ТЕПЕРЬ ПОЛУЧАЕМ КАРТЫ ТЕКУЩЕЙ ИГРЫ
+    #
+    # Если игра ещё не началась:
+    #
+    # GetGameZip может вернуть данные
+    # без player_cards.
+    #
+    # Это НЕ ОШИБКА ПРОГНОЗА.
+    #
+    # Просто ждём следующий цикл.
+    # ================================================================
+
+    raw_data = get_game_data(
+        game_id
+    )
+
+    if raw_data is None:
+
+        print(
+            f"⏳ ID={game_id} | "
+            f"данные игры пока недоступны",
+            flush=True
+        )
+
+        return
+
+    parsed = parse_game_data(
+        game_id,
+        raw_data
+    )
+
+    if parsed is None:
+
+        print(
+            f"⏳ ID={game_id} | "
+            f"игра ещё не началась "
+            f"или карты пока отсутствуют",
+            flush=True
+        )
+
+        return
+
+    # ================================================================
+    # ИГРА НАЧАЛАСЬ — СОХРАНЯЕМ
     # ================================================================
 
     add_or_update_game(
@@ -2831,6 +2885,12 @@ def main():
     )
 
     print(
+        "⏳ Прогноз создаётся ДО начала "
+        "текущей игры",
+        flush=True
+    )
+
+    print(
         "==================================================",
         flush=True
     )
@@ -2842,7 +2902,7 @@ def main():
         try:
 
             # ========================================================
-            # 1. Получаем ВСЕ текущие будущие игры
+            # 1. Получаем ВСЕ текущие игры из API
             # ========================================================
 
             active_games = (
@@ -2856,7 +2916,12 @@ def main():
             )
 
             # ========================================================
-            # 2. Сначала смотрим ДУБЛИ последних цифр
+            # 2. Сначала определяем ДУБЛИ
+            #
+            # Это делается ДО обработки игр,
+            # чтобы обе игры с одинаковой
+            # последней цифрой получили
+            # запрет на прогноз.
             # ========================================================
 
             duplicate_digits = (
@@ -2883,7 +2948,7 @@ def main():
                 )
 
             # ========================================================
-            # 3. Обрабатываем игры
+            # 3. Обрабатываем все игры
             # ========================================================
 
             seen_this_cycle = set()
@@ -2907,9 +2972,6 @@ def main():
                         game_id[-1]
                     )
 
-                    # Если последняя цифра
-                    # повторяется среди будущих
-                    # игр — прогноз запрещаем.
                     skip_prediction = (
                         last_digit
                         in duplicate_digits
@@ -2942,7 +3004,7 @@ def main():
             check_results()
 
             # ========================================================
-            # 5. Поддерживаем predictions.json
+            # 5. Чистим predictions.json
             # ========================================================
 
             cleanup_predictions()
@@ -2995,3 +3057,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+```
