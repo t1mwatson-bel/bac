@@ -4391,9 +4391,29 @@ def check_upcoming_games():
 
         try:
 
+                    try:
+
             target_num = int(
                 target_num
             )
+
+        except Exception:
+
+            continue
+
+        # =============================================================
+        # ПРОГНОЗ НА +6 ИГР ВПЕРЁД
+        # =============================================================
+
+        target_num += 6
+
+        # =============================================================
+        # НЕ ПОВТОРЯЕМ ПРОГНОЗ НА ТОТ ЖЕ #N
+        # =============================================================
+
+        if has_prediction_for_target(
+            target_num
+        ):
 
         except Exception:
 
@@ -4438,13 +4458,51 @@ def check_upcoming_games():
             target_meta
         )
 
-        predicted_card = result.get(
+                predicted_card = result.get(
             "predicted_card"
         )
+
+        # =============================================================
+        # ДОПОЛНИТЕЛЬНАЯ МАСТЬ ДЛЯ ОТОБРАЖЕНИЯ ПРОГНОЗА
+        # ♥️ + ♣️
+        # ♦️ + ♠️
+        # =============================================================
+
+        display_card = predicted_card
+
+        if predicted_card:
+
+            suit_pairs = {
+                "♥": "♣",
+                "♣": "♥",
+                "♦": "♠",
+                "♠": "♦",
+            }
+
+            clean_card = predicted_card.replace(
+                "\ufe0f",
+                ""
+            )
+
+            rank = clean_card[:-1]
+            suit = clean_card[-1]
+
+            paired_suit = suit_pairs.get(
+                suit
+            )
+
+            if paired_suit:
+
+                display_card = (
+                    predicted_card
+                    + paired_suit
+                    + "\ufe0f"
+                )
 
         probability = result.get(
             "probability",
             0.0
+        )
         )
 
         active_card_patterns = result.get(
@@ -4525,7 +4583,7 @@ def check_upcoming_games():
         msg = (
             f"🎯 Игра: "
             f"<b>#N{target_num}</b>: "
-            f"<b>{predicted_card}</b>"
+            f"<b>{display_card}</b>"
         )
 
         msg_id = send_message(
