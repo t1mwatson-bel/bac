@@ -4389,7 +4389,7 @@ def check_upcoming_games():
         ):
             continue
 
-                try:
+        try:
 
             target_num = int(
                 target_num
