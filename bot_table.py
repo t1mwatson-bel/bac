@@ -4389,7 +4389,7 @@ def check_upcoming_games():
         ):
             continue
 
-        try:
+                try:
 
             target_num = int(
                 target_num
@@ -4412,9 +4412,6 @@ def check_upcoming_games():
         if has_prediction_for_target(
             target_num
         ):
-
-        except Exception:
-
             continue
 
         # =============================================================
