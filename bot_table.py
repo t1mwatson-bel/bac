@@ -17,7 +17,10 @@ import pytz
 # ENV
 # =====================================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("BOT_TOKEN_PROGNOZ")
+BOT_TOKEN = (
+    os.getenv("BOT_TOKEN")
+    or os.getenv("BOT_TOKEN_PROGNOZ")
+)
 
 CHANNEL_STATS = (
     os.getenv("CHANNEL_STATS_21")
@@ -51,10 +54,17 @@ if not CHANNEL_PROGNOZ:
     )
     sys.exit(1)
 
-CHANNEL_STATS = str(CHANNEL_STATS).strip()
-CHANNEL_PROGNOZ = str(CHANNEL_PROGNOZ).strip()
+CHANNEL_STATS = str(
+    CHANNEL_STATS
+).strip()
 
-MOSCOW_TZ = pytz.timezone("Europe/Moscow")
+CHANNEL_PROGNOZ = str(
+    CHANNEL_PROGNOZ
+).strip()
+
+MOSCOW_TZ = pytz.timezone(
+    "Europe/Moscow"
+)
 
 
 # =====================================================================
@@ -73,7 +83,9 @@ HEADERS = {
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/139.0 Safari/537.36"
     ),
-    "Accept": "application/json, text/plain, */*",
+    "Accept": (
+        "application/json, text/plain, */*"
+    ),
     "Referer": (
         f"{BASE_URL}/ru/live/twentyone/"
         f"{LIGA_ID}-twentyone-game"
@@ -92,13 +104,27 @@ HEADERS = {
 # FILES
 # =====================================================================
 
-DATA_FILE = "twentyone_data_full.json"
+DATA_FILE = (
+    "twentyone_data_full.json"
+)
 
-PREDICTIONS_FILE = "twentyone_predictions.json"
+PREDICTIONS_FILE = (
+    "twentyone_predictions.json"
+)
 
-OFFSET_FILE = "twentyone_offset.txt"
+OFFSET_FILE = (
+    "twentyone_offset.txt"
+)
 
-SCANNER_FILE = "twentyone_pattern_scanner.pkl"
+# Старая модель карты.
+SCANNER_FILE = (
+    "twentyone_pattern_scanner.pkl"
+)
+
+# НОВАЯ отдельная модель масти.
+SUIT_SCANNER_FILE = (
+    "twentyone_suit_pattern_scanner.pkl"
+)
 
 
 # =====================================================================
@@ -109,9 +135,6 @@ DOGON_GAMES = 4
 
 CHECK_INTERVAL = 5
 
-# ВАЖНО:
-# Историческая база не должна неожиданно обрезаться.
-# Оставляем большой лимит.
 MAX_RECORDS = 10000
 
 MIN_TRAIN_SAMPLES = 50
@@ -120,7 +143,53 @@ ANALYTICS_INTERVAL = 3600
 
 
 # =====================================================================
-# TARGET CARDS
+# НОВЫЕ ФИЛЬТРЫ
+# =====================================================================
+#
+# ВАЖНО:
+#
+# Ранг уже работает, поэтому его не делаем слишком строгим.
+#
+# Масть, наоборот, фильтруем жёстче.
+#
+# Если:
+#
+# ♠️ 27%
+# ♥️ 26%
+#
+# прогноз НЕ будет отправлен.
+#
+# Если:
+#
+# ♠️ 44%
+# ♥️ 24%
+#
+# масть проходит.
+#
+# =====================================================================
+
+# Минимальная вероятность первой масти.
+MIN_SUIT_PROBABILITY = 0.32
+
+# Минимальная разница между первой и второй мастью.
+MIN_SUIT_MARGIN = 0.08
+
+# Минимальное количество активных паттернов отдельной модели масти.
+MIN_ACTIVE_SUIT_PATTERNS = 3
+
+# Минимальная вероятность ранга после нормализации
+# внутри выбранной масти.
+MIN_RANK_PROBABILITY = 0.30
+
+# Минимальная разница между первым и вторым рангом.
+MIN_RANK_MARGIN = 0.04
+
+# Минимальное количество активных паттернов старой модели карты.
+MIN_ACTIVE_CARD_PATTERNS = 1
+
+
+# =====================================================================
+# TARGETS
 # =====================================================================
 
 TARGET_RANKS = [
@@ -145,14 +214,23 @@ TARGET_CARDS = [
 
 TARGET_CARD_INDEX = {
     card: i
-    for i, card in enumerate(TARGET_CARDS)
+    for i, card in enumerate(
+        TARGET_CARDS
+    )
 }
+
+SUIT_INDEX = {
+    suit: i
+    for i, suit in enumerate(
+        TARGET_SUITS
+    )}
 
 
 # =====================================================================
 # PATTERN SCANNER SETTINGS
 # =====================================================================
 
+# Старая модель карты.
 PATTERN_MIN_SUPPORT = 12
 
 PATTERN_MIN_PRECISION = 0.30
@@ -160,6 +238,20 @@ PATTERN_MIN_PRECISION = 0.30
 PATTERN_MIN_LIFT = 1.05
 
 PATTERN_MAX_FEATURES = 300
+
+
+# =====================================================================
+# ОТДЕЛЬНЫЕ НАСТРОЙКИ МОДЕЛИ МАСТИ
+# =====================================================================
+
+SUIT_PATTERN_MIN_SUPPORT = 12
+
+SUIT_PATTERN_MIN_PRECISION = 0.30
+
+SUIT_PATTERN_MIN_LIFT = 1.05
+
+SUIT_PATTERN_MAX_FEATURES = 250
+
 
 PATTERN_LAGS = (
     1,
@@ -187,28 +279,17 @@ PATTERN_WINDOWS = (
 
 predictions = []
 
-# =====================================================================
-# ВАЖНО:
-#
-# games_cache используется ТОЛЬКО для результатов,
-# которые реально пришли из CHANNEL_STATS в текущем процессе.
-#
-# Старые записи из twentyone_data_full.json сюда НЕ загружаются.
-#
-# Это исправляет проблему:
-#
-# вчера #N1140
-#      ↓
-# сегодня прогноз #N1140
-#      ↓
-# старая #N1140 ошибочно воспринималась как сегодняшняя.
-# =====================================================================
-
 games_cache = {}
 
+# Старая модель карты.
 scanner_patterns = []
 
+# Новая модель масти.
+suit_scanner_patterns = []
+
 scanner_last_train_count = 0
+
+suit_scanner_last_train_count = 0
 
 last_analytics_time = 0
 
@@ -242,12 +323,14 @@ def telegram_request(
     payload=None,
     timeout=20
 ):
+
     url = (
         f"https://api.telegram.org/"
         f"bot{BOT_TOKEN}/{method}"
     )
 
     try:
+
         response = requests.post(
             url,
             json=payload or {},
@@ -255,29 +338,36 @@ def telegram_request(
         )
 
         if response.status_code != 200:
+
             print(
-                f"⚠️ Telegram HTTP {response.status_code}",
+                f"⚠️ Telegram HTTP "
+                f"{response.status_code}",
                 flush=True
             )
+
             return None
 
         data = response.json()
 
         if not data.get("ok"):
+
             print(
-                f"⚠️ Telegram API ошибка: "
+                "⚠️ Telegram API ошибка: "
                 f"{data.get('description', 'unknown')}",
                 flush=True
             )
+
             return None
 
         return data
 
     except Exception as e:
+
         print(
             f"⚠️ Telegram ошибка: {e}",
             flush=True
         )
+
         return None
 
 
@@ -285,6 +375,7 @@ def send_message(
     chat_id,
     text
 ):
+
     result = telegram_request(
         "sendMessage",
         {
@@ -309,6 +400,7 @@ def edit_message(
     message_id,
     text
 ):
+
     result = telegram_request(
         "editMessageText",
         {
@@ -329,7 +421,9 @@ def edit_message(
 
 def load_data():
 
-    if not os.path.exists(DATA_FILE):
+    if not os.path.exists(
+        DATA_FILE
+    ):
         return []
 
     try:
@@ -365,7 +459,8 @@ def load_data():
     except Exception as e:
 
         print(
-            f"⚠️ Ошибка загрузки {DATA_FILE}: {e}",
+            f"⚠️ Ошибка загрузки "
+            f"{DATA_FILE}: {e}",
             flush=True
         )
 
@@ -376,12 +471,16 @@ def save_data(data):
 
     try:
 
-        # Не режем историческую базу,
-        # если она меньше MAX_RECORDS.
         if len(data) > MAX_RECORDS:
-            data = data[-MAX_RECORDS:]
 
-        tmp_file = DATA_FILE + ".tmp"
+            data = data[
+                -MAX_RECORDS:
+            ]
+
+        tmp_file = (
+            DATA_FILE
+            + ".tmp"
+        )
 
         with open(
             tmp_file,
@@ -406,7 +505,8 @@ def save_data(data):
     except Exception as e:
 
         print(
-            f"⚠️ Ошибка сохранения {DATA_FILE}: {e}",
+            f"⚠️ Ошибка сохранения "
+            f"{DATA_FILE}: {e}",
             flush=True
         )
 
@@ -643,14 +743,7 @@ def parse_cards_string(text):
 
 
 # =====================================================================
-# TELEGRAM STATS PARSER
-#
-# Пример:
-#
-# #N476. ✅17(K♥️Q♠️K♦️6♣️) - 25(K♣️J♥️8♦️A♠️) #T42
-#
-# Первая скобка  = игрок
-# Вторая скобка  = дилер
+# STATS PARSER
 # =====================================================================
 
 def parse_stats_message(text):
@@ -840,7 +933,10 @@ def record_all_cards(record):
         "dealer_cards"
     )
 
-    return player + dealer
+    return (
+        player
+        + dealer
+    )
 
 
 def record_exact_cards(record):
@@ -857,7 +953,9 @@ def record_exact_cards(record):
         )
 
         if exact:
-            result.append(exact)
+            result.append(
+                exact
+            )
 
     return result
 
@@ -873,7 +971,45 @@ def record_has_card(
 
 
 # =====================================================================
-# ADD STATS GAME TO DATA
+# CYCLE DATE
+# =====================================================================
+
+def get_cycle_date(
+    dt=None
+):
+
+    if dt is None:
+
+        dt = datetime.now(
+            MOSCOW_TZ
+        )
+
+    if dt.tzinfo is None:
+
+        dt = MOSCOW_TZ.localize(
+            dt
+        )
+
+    else:
+
+        dt = dt.astimezone(
+            MOSCOW_TZ
+        )
+
+    # Игровой день начинается в 03:00.
+    if dt.hour < 3:
+
+        dt = dt - timedelta(
+            days=1
+        )
+
+    return dt.strftime(
+        "%Y-%m-%d"
+    )
+
+
+# =====================================================================
+# ADD GAME TO DATA
 # =====================================================================
 
 def add_stats_game_to_data(
@@ -899,12 +1035,32 @@ def add_stats_game_to_data(
         )
     )
 
-    # =============================================================
-    # Ищем игру по номеру.
-    #
-    # Это только база данных.
-    # На результат прогноза это НЕ влияет.
-    # =============================================================
+    received_at = parsed.get(
+        "received_at"
+    )
+
+    cycle_date = get_cycle_date()
+
+    if received_at:
+
+        try:
+
+            dt = datetime.fromisoformat(
+                received_at
+            )
+
+            cycle_date = get_cycle_date(
+                dt
+            )
+
+        except Exception:
+
+            pass
+
+    # -------------------------------------------------------------
+    # Ищем только в том же игровом дне.
+    # Это исправляет повторяющиеся #N.
+    # -------------------------------------------------------------
 
     for old in data:
 
@@ -929,21 +1085,47 @@ def add_stats_game_to_data(
         if old_num != game_number:
             continue
 
+        old_cycle = old.get(
+            "cycle_date"
+        )
+
+        if not old_cycle:
+
+            old_cycle = get_cycle_date()
+
+            recorded_at = (
+                old.get("recorded_at")
+                or old.get("received_at")
+            )
+
+            if recorded_at:
+
+                try:
+
+                    old_dt = datetime.fromisoformat(
+                        recorded_at
+                    )
+
+                    old_cycle = get_cycle_date(
+                        old_dt
+                    )
+
+                except Exception:
+
+                    pass
+
+        if old_cycle != cycle_date:
+            continue
+
         old_cards = set(
             record_exact_cards(old)
         )
 
-        # Полностью одинаковая запись.
         if old_cards == new_exact_cards:
 
-            # Если старая запись уже была от Telegram,
-            # ничего делать не надо.
-            if old.get("source") == "telegram_stats":
-                return False
-
-            # Если старая запись была исторической,
-            # всё равно можем пометить её источником Telegram.
-            old["source"] = "telegram_stats"
+            old["source"] = (
+                "telegram_stats"
+            )
 
             old["raw_text"] = parsed.get(
                 "raw_text",
@@ -954,14 +1136,13 @@ def add_stats_game_to_data(
                 "received_at"
             )
 
+            old["cycle_date"] = (
+                cycle_date
+            )
+
             save_data(data)
 
-            return True
-
-        # =========================================================
-        # Существующая запись была неполной.
-        # Обновляем её реальными данными статистики.
-        # =========================================================
+            return False
 
         old["player_cards"] = parsed.get(
             "player_cards",
@@ -998,19 +1179,25 @@ def add_stats_game_to_data(
             ""
         )
 
-        old["source"] = "telegram_stats"
+        old["source"] = (
+            "telegram_stats"
+        )
 
         old["received_at"] = parsed.get(
             "received_at"
+        )
+
+        old["cycle_date"] = (
+            cycle_date
         )
 
         save_data(data)
 
         return True
 
-    # =============================================================
+    # -------------------------------------------------------------
     # Новая игра.
-    # =============================================================
+    # -------------------------------------------------------------
 
     now = datetime.now(
         MOSCOW_TZ
@@ -1022,6 +1209,9 @@ def add_stats_game_to_data(
 
         "game_number":
             int(game_number),
+
+        "cycle_date":
+            cycle_date,
 
         "timestamp_msk":
             now.strftime(
@@ -1095,10 +1285,7 @@ def add_stats_game_to_data(
 
 
 # =====================================================================
-# CACHE STATS RESULT
-#
-# ВАЖНО:
-# games_cache пополняется только из CHANNEL_STATS.
+# CACHE
 # =====================================================================
 
 def cache_result(
@@ -1117,16 +1304,8 @@ def cache_result(
 
     num = int(num)
 
-    # -------------------------------------------------------------
-    # Защита от повторного Telegram-сообщения.
-    #
-    # Если пришёл тот же результат второй раз,
-    # просто заменяем тем же содержимым.
-    # -------------------------------------------------------------
-
     games_cache[num] = parsed
 
-    # Ограничиваем cache.
     if len(games_cache) > 2000:
 
         keys = sorted(
@@ -1236,7 +1415,7 @@ def add_game_offset(
 
 
 # =====================================================================
-# SIGNATURE
+# COUNTERS
 # =====================================================================
 
 def card_counter(
@@ -1302,6 +1481,10 @@ def suit_counter(
 
     return result
 
+
+# =====================================================================
+# RECORD SIGNATURE
+# =====================================================================
 
 def record_signature(
     record
@@ -1445,7 +1628,7 @@ def tail_streak(
 
 
 # =====================================================================
-# PATTERN FEATURES
+# FEATURES
 # =====================================================================
 
 def build_scanner_feature_map(
@@ -1489,7 +1672,7 @@ def build_scanner_feature_map(
         ]
 
         # ---------------------------------------------------------
-        # ТОЧНЫЕ КАРТЫ
+        # EXACT CARDS
         # ---------------------------------------------------------
 
         for card in TARGET_CARDS:
@@ -1528,7 +1711,7 @@ def build_scanner_feature_map(
             )
 
         # ---------------------------------------------------------
-        # РАНГИ
+        # RANKS
         # ---------------------------------------------------------
 
         for rank in (
@@ -1581,7 +1764,7 @@ def build_scanner_feature_map(
             )
 
         # ---------------------------------------------------------
-        # МАСТИ
+        # SUITS
         # ---------------------------------------------------------
 
         for suit in TARGET_SUITS:
@@ -1620,7 +1803,7 @@ def build_scanner_feature_map(
             )
 
         # ---------------------------------------------------------
-        # КОЛИЧЕСТВО КАРТ
+        # COUNTS
         # ---------------------------------------------------------
 
         features[
@@ -1655,7 +1838,7 @@ def build_scanner_feature_map(
             continue
 
         # ---------------------------------------------------------
-        # ТОЧНЫЕ КАРТЫ
+        # EXACT CARDS
         # ---------------------------------------------------------
 
         for card in TARGET_CARDS:
@@ -1730,7 +1913,7 @@ def build_scanner_feature_map(
             )
 
         # ---------------------------------------------------------
-        # РАНГИ
+        # RANKS
         # ---------------------------------------------------------
 
         for rank in (
@@ -1777,7 +1960,7 @@ def build_scanner_feature_map(
             ] = values[-1]
 
         # ---------------------------------------------------------
-        # МАСТИ
+        # SUITS
         # ---------------------------------------------------------
 
         for suit in TARGET_SUITS:
@@ -1816,7 +1999,7 @@ def build_scanner_feature_map(
             )
 
         # ---------------------------------------------------------
-        # ОБЩИЕ ПАРАМЕТРЫ
+        # GENERAL
         # ---------------------------------------------------------
 
         features[
@@ -1871,10 +2054,6 @@ def build_scanner_feature_map(
         "dealer_count"
     ]
 
-    # =============================================================
-    # PREVIOUS GAME EXACT CARDS
-    # =============================================================
-
     previous_cards = set(
         current[
             "exact_counts"
@@ -1890,7 +2069,7 @@ def build_scanner_feature_map(
         )
 
     # =============================================================
-    # EXACT CARD TRANSITIONS
+    # TRANSITIONS
     # =============================================================
 
     if len(history) >= 2:
@@ -1936,7 +2115,9 @@ def build_scanner_feature_map(
         "prev_high_card_count"
     ] = high_count
 
-    if current["total_cards"] > 0:
+    if current[
+        "total_cards"
+    ] > 0:
 
         features[
             "prev_high_card_rate"
@@ -1955,7 +2136,7 @@ def build_scanner_feature_map(
 
 
 # =====================================================================
-# TARGET PRESENCE
+# TARGET PRESENCE — EXACT CARD
 # =====================================================================
 
 def target_presence(
@@ -1978,7 +2159,65 @@ def target_presence(
 
 
 # =====================================================================
-# TRAIN PATTERN SCANNER
+# SUIT PRESENCE
+#
+# Отдельная цель для отдельной модели масти.
+#
+# Важно:
+# модель масти не смотрит на результат будущей игры.
+# Она обучается на предыдущей истории.
+#
+# Для масти учитываем J/Q/K/A данной масти.
+#
+# Например:
+#
+# J♥️
+# Q♥️
+# K♥️
+# A♥️
+#
+# относятся к ♥️.
+# =====================================================================
+
+def suit_presence(
+    record
+):
+
+    actual_cards = set(
+        record_exact_cards(record)
+    )
+
+    result = []
+
+    for suit in TARGET_SUITS:
+
+        found = False
+
+        for rank in TARGET_RANKS:
+
+            card = (
+                f"{rank}{suit}"
+            )
+
+            if card in actual_cards:
+
+                found = True
+                break
+
+        result.append(
+            1 if found else 0
+        )
+
+    return np.array(
+        result,
+        dtype=int
+    )
+
+
+# =====================================================================
+# TRAIN CARD PATTERN SCANNER
+#
+# ЭТА МОДЕЛЬ ОСТАЁТСЯ ДЛЯ РАНГА/КАРТЫ.
 # =====================================================================
 
 def train_pattern_scanner(
@@ -1991,7 +2230,7 @@ def train_pattern_scanner(
     if len(data) < MIN_TRAIN_SAMPLES:
 
         print(
-            f"⏳ Pattern Scanner: "
+            f"⏳ Card Pattern Scanner: "
             f"{len(data)}/{MIN_TRAIN_SAMPLES}",
             flush=True
         )
@@ -2028,7 +2267,7 @@ def train_pattern_scanner(
     if len(feature_rows) < MIN_TRAIN_SAMPLES:
 
         print(
-            f"⏳ Pattern Scanner: "
+            f"⏳ Card Pattern Scanner: "
             f"обучающих строк "
             f"{len(feature_rows)}",
             flush=True
@@ -2183,15 +2422,15 @@ def train_pattern_scanner(
     except Exception as e:
 
         print(
-            f"⚠️ Ошибка сохранения Pattern Scanner: {e}",
+            f"⚠️ Ошибка сохранения "
+            f"Card Scanner: {e}",
             flush=True
         )
 
     print(
-        f"🔎 Pattern Scanner: "
-        f"найдено {len(scanner_patterns)} "
-        f"рабочих паттернов | "
-        f"16 точных карт",
+        f"🔎 Card Pattern Scanner: "
+        f"{len(scanner_patterns)} "
+        f"паттернов | 16 карт",
         flush=True
     )
 
@@ -2199,7 +2438,232 @@ def train_pattern_scanner(
 
 
 # =====================================================================
-# LOAD PATTERN SCANNER
+# TRAIN SUIT PATTERN SCANNER
+#
+# НОВАЯ ОТДЕЛЬНАЯ МОДЕЛЬ.
+# =====================================================================
+
+def train_suit_pattern_scanner(
+    data
+):
+
+    global suit_scanner_patterns
+    global suit_scanner_last_train_count
+
+    if len(data) < MIN_TRAIN_SAMPLES:
+
+        print(
+            f"⏳ Suit Pattern Scanner: "
+            f"{len(data)}/{MIN_TRAIN_SAMPLES}",
+            flush=True
+        )
+
+        return False
+
+    feature_rows = []
+
+    targets = []
+
+    for i in range(
+        1,
+        len(data)
+    ):
+
+        features = build_scanner_feature_map(
+            data,
+            i
+        )
+
+        if not features:
+            continue
+
+        feature_rows.append(
+            features
+        )
+
+        targets.append(
+            suit_presence(
+                data[i]
+            )
+        )
+
+    if len(feature_rows) < MIN_TRAIN_SAMPLES:
+
+        print(
+            f"⏳ Suit Pattern Scanner: "
+            f"обучающих строк "
+            f"{len(feature_rows)}",
+            flush=True
+        )
+
+        return False
+
+    names = sorted(
+        {
+            key
+            for row in feature_rows
+            for key in row
+        }
+    )
+
+    target_array = np.array(
+        targets,
+        dtype=int
+    )
+
+    baseline = np.mean(
+        target_array,
+        axis=0
+    )
+
+    discovered = []
+
+    for name in names:
+
+        values = np.array(
+            [
+                float(
+                    row.get(
+                        name,
+                        0.0
+                    )
+                )
+                for row in feature_rows
+            ],
+            dtype=float
+        )
+
+        if np.all(
+            values == values[0]
+        ):
+            continue
+
+        mask = values > 0
+
+        support = int(
+            mask.sum()
+        )
+
+        if support < SUIT_PATTERN_MIN_SUPPORT:
+            continue
+
+        if (
+            support
+            < len(values) * 0.02
+        ):
+            continue
+
+        for suit_idx, suit in enumerate(
+            TARGET_SUITS
+        ):
+
+            base = float(
+                baseline[suit_idx]
+            )
+
+            if base <= 0:
+                continue
+
+            precision = float(
+                np.mean(
+                    target_array[
+                        mask,
+                        suit_idx
+                    ]
+                )
+            )
+
+            lift = (
+                precision
+                / base
+            )
+
+            if (
+                precision
+                >= SUIT_PATTERN_MIN_PRECISION
+                and
+                lift
+                >= SUIT_PATTERN_MIN_LIFT
+            ):
+
+                discovered.append(
+                    {
+                        "feature":
+                            name,
+
+                        "suit":
+                            suit,
+
+                        "support":
+                            support,
+
+                        "precision":
+                            precision,
+
+                        "lift":
+                            lift,
+
+                        "baseline":
+                            base,
+                    }
+                )
+
+    discovered.sort(
+        key=lambda item: (
+            (
+                item["lift"]
+                - 1.0
+            )
+            * item["precision"]
+            * np.log1p(
+                item["support"]
+            )
+        ),
+        reverse=True
+    )
+
+    suit_scanner_patterns = (
+        discovered[
+            :SUIT_PATTERN_MAX_FEATURES
+        ]
+    )
+
+    suit_scanner_last_train_count = len(
+        data
+    )
+
+    try:
+
+        with open(
+            SUIT_SCANNER_FILE,
+            "wb"
+        ) as f:
+
+            pickle.dump(
+                suit_scanner_patterns,
+                f
+            )
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Ошибка сохранения "
+            f"Suit Scanner: {e}",
+            flush=True
+        )
+
+    print(
+        f"🎴 Suit Pattern Scanner: "
+        f"{len(suit_scanner_patterns)} "
+        f"паттернов | 4 масти",
+        flush=True
+    )
+
+    return True
+
+
+# =====================================================================
+# LOAD CARD SCANNER
 # =====================================================================
 
 def load_pattern_scanner():
@@ -2235,6 +2699,7 @@ def load_pattern_scanner():
                 if pattern.get(
                     "card"
                 ) not in TARGET_CARDS:
+
                     continue
 
                 valid.append(
@@ -2244,8 +2709,8 @@ def load_pattern_scanner():
             scanner_patterns = valid
 
             print(
-                f"🔎 Pattern Scanner загружен: "
-                f"{len(scanner_patterns)} паттернов",
+                f"🔎 Card Scanner загружен: "
+                f"{len(scanner_patterns)}",
                 flush=True
             )
 
@@ -2261,7 +2726,70 @@ def load_pattern_scanner():
 
 
 # =====================================================================
-# SCANNER FEATURES FOR FUTURE GAME
+# LOAD SUIT SCANNER
+# =====================================================================
+
+def load_suit_pattern_scanner():
+
+    global suit_scanner_patterns
+
+    try:
+
+        with open(
+            SUIT_SCANNER_FILE,
+            "rb"
+        ) as f:
+
+            patterns = pickle.load(
+                f
+            )
+
+        if isinstance(
+            patterns,
+            list
+        ):
+
+            valid = []
+
+            for pattern in patterns:
+
+                if not isinstance(
+                    pattern,
+                    dict
+                ):
+                    continue
+
+                if pattern.get(
+                    "suit"
+                ) not in TARGET_SUITS:
+
+                    continue
+
+                valid.append(
+                    pattern
+                )
+
+            suit_scanner_patterns = valid
+
+            print(
+                f"🎴 Suit Scanner загружен: "
+                f"{len(suit_scanner_patterns)}",
+                flush=True
+            )
+
+            return True
+
+    except Exception:
+
+        pass
+
+    suit_scanner_patterns = []
+
+    return False
+
+
+# =====================================================================
+# FEATURES FOR FUTURE GAME
 # =====================================================================
 
 def scanner_feature_vector(
@@ -2277,11 +2805,9 @@ def scanner_feature_vector(
         target_record
     )
 
-    # =============================================================
-    # ПРИНЦИПИАЛЬНО:
-    #
-    # Целевая игра НЕ должна попадать в признаки.
-    # =============================================================
+    # -------------------------------------------------------------
+    # Никаких карт целевой игры в признаках.
+    # -------------------------------------------------------------
 
     target_copy[
         "player_cards"
@@ -2310,7 +2836,7 @@ def scanner_feature_vector(
 
 
 # =====================================================================
-# SCANNER PREDICTION
+# CARD SCANNER PREDICTION
 # =====================================================================
 
 def scanner_predict(
@@ -2320,10 +2846,13 @@ def scanner_predict(
 
     if not scanner_patterns:
 
-        return {
-            card: 0.0
-            for card in TARGET_CARDS
-        }, 0
+        return (
+            {
+                card: 0.0
+                for card in TARGET_CARDS
+            },
+            0
+        )
 
     features = scanner_feature_vector(
         data,
@@ -2403,10 +2932,13 @@ def scanner_predict(
 
     if active_patterns <= 0:
 
-        return {
-            card: 0.0
-            for card in TARGET_CARDS
-        }, 0
+        return (
+            {
+                card: 0.0
+                for card in TARGET_CARDS
+            },
+            0
+        )
 
     total_score = sum(
         scores.values()
@@ -2414,10 +2946,13 @@ def scanner_predict(
 
     if total_score <= 0:
 
-        return {
-            card: 0.0
-            for card in TARGET_CARDS
-        }, active_patterns
+        return (
+            {
+                card: 0.0
+                for card in TARGET_CARDS
+            },
+            active_patterns
+        )
 
     probabilities = {
         card: (
@@ -2437,7 +2972,296 @@ def scanner_predict(
 
 
 # =====================================================================
-# MODEL PREDICTION
+# SUIT SCANNER PREDICTION
+#
+# ОТДЕЛЬНАЯ МОДЕЛЬ МАСТИ.
+# =====================================================================
+
+def suit_scanner_predict(
+    data,
+    target_record
+):
+
+    if not suit_scanner_patterns:
+
+        return (
+            {
+                suit: 0.0
+                for suit in TARGET_SUITS
+            },
+            0
+        )
+
+    features = scanner_feature_vector(
+        data,
+        target_record
+    )
+
+    scores = defaultdict(float)
+
+    active_patterns = 0
+
+    for pattern in suit_scanner_patterns:
+
+        feature_name = pattern.get(
+            "feature"
+        )
+
+        suit = pattern.get(
+            "suit"
+        )
+
+        if (
+            not feature_name
+            or suit not in TARGET_SUITS
+        ):
+            continue
+
+        value = float(
+            features.get(
+                feature_name,
+                0.0
+            )
+        )
+
+        if value <= 0:
+            continue
+
+        active_patterns += 1
+
+        support = float(
+            pattern.get(
+                "support",
+                0
+            )
+        )
+
+        precision = float(
+            pattern.get(
+                "precision",
+                0
+            )
+        )
+
+        lift = float(
+            pattern.get(
+                "lift",
+                0
+            )
+        )
+
+        weight = (
+            max(
+                0.0,
+                lift - 1.0
+            )
+            * precision
+            * np.log1p(
+                support
+            )
+        )
+
+        scores[
+            suit
+        ] += (
+            value
+            * weight
+        )
+
+    if active_patterns <= 0:
+
+        return (
+            {
+                suit: 0.0
+                for suit in TARGET_SUITS
+            },
+            0
+        )
+
+    total_score = sum(
+        scores.values()
+    )
+
+    if total_score <= 0:
+
+        return (
+            {
+                suit: 0.0
+                for suit in TARGET_SUITS
+            },
+            active_patterns
+        )
+
+    probabilities = {
+        suit: (
+            scores.get(
+                suit,
+                0.0
+            )
+            / total_score
+        )
+        for suit in TARGET_SUITS
+    }
+
+    return (
+        probabilities,
+        active_patterns
+    )
+
+
+# =====================================================================
+# SORT PROBABILITIES
+# =====================================================================
+
+def top_two(
+    probabilities
+):
+
+    ordered = sorted(
+        probabilities.items(),
+        key=lambda item: item[1],
+        reverse=True
+    )
+
+    if not ordered:
+
+        return (
+            None,
+            0.0,
+            None,
+            0.0
+        )
+
+    first = ordered[0]
+
+    if len(ordered) >= 2:
+
+        second = ordered[1]
+
+    else:
+
+        second = (
+            None,
+            0.0
+        )
+
+    return (
+        first[0],
+        float(first[1]),
+        second[0],
+        float(second[1])
+    )
+
+
+# =====================================================================
+# RANK PROBABILITIES
+#
+# Берём старую рабочую модель карты,
+# но теперь РАНГ и МАСТЬ разделены.
+#
+# Сначала карта-модель говорит:
+#
+# J♠️
+# J♥️
+# K♠️
+# K♦️
+#
+# Мы агрегируем только по рангу.
+#
+# =====================================================================
+
+def aggregate_rank_probabilities(
+    card_probabilities
+):
+
+    result = {
+        rank: 0.0
+        for rank in TARGET_RANKS
+    }
+
+    for card, probability in (
+        card_probabilities.items()
+    ):
+
+        for rank in TARGET_RANKS:
+
+            if card.startswith(
+                rank
+            ):
+
+                result[
+                    rank
+                ] += float(
+                    probability
+                )
+
+                break
+
+    total = sum(
+        result.values()
+    )
+
+    if total > 0:
+
+        result = {
+            rank: (
+                value / total
+            )
+            for rank, value in result.items()
+        }
+
+    return result
+
+
+# =====================================================================
+# CARD PROBABILITIES INSIDE SELECTED SUIT
+#
+# Здесь масть УЖЕ зафиксирована отдельной моделью.
+#
+# Поэтому K♠️ больше не может победить просто потому,
+# что K сильный, если отдельная модель масти выбрала ♥️.
+# =====================================================================
+
+def get_cards_for_suit(
+    card_probabilities,
+    selected_suit
+):
+
+    result = {}
+
+    for rank in TARGET_RANKS:
+
+        card = (
+            f"{rank}{selected_suit}"
+        )
+
+        result[
+            card
+        ] = float(
+            card_probabilities.get(
+                card,
+                0.0
+            )
+        )
+
+    total = sum(
+        result.values()
+    )
+
+    if total > 0:
+
+        result = {
+            card: (
+                value / total
+            )
+            for card, value in result.items()
+        }
+
+    return result
+
+
+# =====================================================================
+# FINAL MODEL PREDICTION
 # =====================================================================
 
 def get_model_prediction(
@@ -2455,14 +3279,38 @@ def get_model_prediction(
         "timestamp_msk"
     ] = timestamp_msk
 
-    probabilities, active_patterns = (
+    # =============================================================
+    # 1. СТАРАЯ МОДЕЛЬ КАРТЫ
+    #
+    # Она продолжает определять ранг.
+    # =============================================================
+
+    card_probabilities, active_card_patterns = (
         scanner_predict(
             data,
             target_meta
         )
     )
 
-    if not probabilities:
+    # =============================================================
+    # 2. НОВАЯ ОТДЕЛЬНАЯ МОДЕЛЬ МАСТИ
+    # =============================================================
+
+    suit_probabilities, active_suit_patterns = (
+        suit_scanner_predict(
+            data,
+            target_meta
+        )
+    )
+
+    # =============================================================
+    # Если модель масти не работает — прогноза нет.
+    # =============================================================
+
+    if (
+        active_suit_patterns
+        < MIN_ACTIVE_SUIT_PATTERNS
+    ):
 
         return {
             "predicted_card":
@@ -2472,20 +3320,369 @@ def get_model_prediction(
                 0.0,
 
             "probabilities":
-                {},
+                card_probabilities,
 
             "active_patterns":
-                0,
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "reason":
+                "мало активных паттернов масти",
         }
 
-    predicted_card = max(
-        probabilities,
-        key=probabilities.get
+    # =============================================================
+    # 3. ВЫБИРАЕМ МАСТЬ
+    # =============================================================
+
+    (
+        best_suit,
+        best_suit_probability,
+        second_suit,
+        second_suit_probability
+    ) = top_two(
+        suit_probabilities
     )
 
-    probability = probabilities.get(
-        predicted_card,
-        0.0
+    suit_margin = (
+        best_suit_probability
+        - second_suit_probability
+    )
+
+    # =============================================================
+    # ФИЛЬТР МАСТИ №1
+    # =============================================================
+
+    if (
+        best_suit_probability
+        < MIN_SUIT_PROBABILITY
+    ):
+
+        return {
+            "predicted_card":
+                None,
+
+            "probability":
+                0.0,
+
+            "probabilities":
+                card_probabilities,
+
+            "active_patterns":
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "best_suit":
+                best_suit,
+
+            "best_suit_probability":
+                best_suit_probability,
+
+            "second_suit":
+                second_suit,
+
+            "second_suit_probability":
+                second_suit_probability,
+
+            "suit_margin":
+                suit_margin,
+
+            "reason":
+                "слабая масть",
+        }
+
+    # =============================================================
+    # ФИЛЬТР МАСТИ №2
+    #
+    # Если первая и вторая масть слишком близки,
+    # прогноз запрещаем.
+    # =============================================================
+
+    if (
+        suit_margin
+        < MIN_SUIT_MARGIN
+    ):
+
+        return {
+            "predicted_card":
+                None,
+
+            "probability":
+                0.0,
+
+            "probabilities":
+                card_probabilities,
+
+            "active_patterns":
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "best_suit":
+                best_suit,
+
+            "best_suit_probability":
+                best_suit_probability,
+
+            "second_suit":
+                second_suit,
+
+            "second_suit_probability":
+                second_suit_probability,
+
+            "suit_margin":
+                suit_margin,
+
+            "reason":
+                "масти слишком близки",
+        }
+
+    # =============================================================
+    # 4. РАНГ
+    # =============================================================
+
+    if (
+        active_card_patterns
+        < MIN_ACTIVE_CARD_PATTERNS
+    ):
+
+        return {
+            "predicted_card":
+                None,
+
+            "probability":
+                0.0,
+
+            "probabilities":
+                card_probabilities,
+
+            "active_patterns":
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "best_suit":
+                best_suit,
+
+            "best_suit_probability":
+                best_suit_probability,
+
+            "second_suit":
+                second_suit,
+
+            "second_suit_probability":
+                second_suit_probability,
+
+            "suit_margin":
+                suit_margin,
+
+            "reason":
+                "нет активной модели ранга",
+        }
+
+    rank_probabilities = (
+        aggregate_rank_probabilities(
+            card_probabilities
+        )
+    )
+
+    (
+        best_rank,
+        best_rank_probability,
+        second_rank,
+        second_rank_probability
+    ) = top_two(
+        rank_probabilities
+    )
+
+    rank_margin = (
+        best_rank_probability
+        - second_rank_probability
+    )
+
+    # =============================================================
+    # ФИЛЬТР РАНГА
+    #
+    # Не ломаем существующую модель,
+    # но не разрешаем совсем случайный ранг.
+    # =============================================================
+
+    if (
+        best_rank_probability
+        < MIN_RANK_PROBABILITY
+    ):
+
+        return {
+            "predicted_card":
+                None,
+
+            "probability":
+                0.0,
+
+            "probabilities":
+                card_probabilities,
+
+            "rank_probabilities":
+                rank_probabilities,
+
+            "active_patterns":
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "best_suit":
+                best_suit,
+
+            "best_suit_probability":
+                best_suit_probability,
+
+            "suit_margin":
+                suit_margin,
+
+            "best_rank":
+                best_rank,
+
+            "best_rank_probability":
+                best_rank_probability,
+
+            "rank_margin":
+                rank_margin,
+
+            "reason":
+                "слабый ранг",
+        }
+
+    if (
+        rank_margin
+        < MIN_RANK_MARGIN
+    ):
+
+        return {
+            "predicted_card":
+                None,
+
+            "probability":
+                0.0,
+
+            "probabilities":
+                card_probabilities,
+
+            "rank_probabilities":
+                rank_probabilities,
+
+            "active_patterns":
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "best_suit":
+                best_suit,
+
+            "best_suit_probability":
+                best_suit_probability,
+
+            "suit_margin":
+                suit_margin,
+
+            "best_rank":
+                best_rank,
+
+            "best_rank_probability":
+                best_rank_probability,
+
+            "rank_margin":
+                rank_margin,
+
+            "reason":
+                "ранги слишком близки",
+        }
+
+    # =============================================================
+    # 5. ФИНАЛЬНАЯ КАРТА
+    #
+    # МАСТЬ берём ТОЛЬКО из отдельной модели.
+    #
+    # РАНГ берём из существующей модели.
+    # =============================================================
+
+    predicted_card = (
+        f"{best_rank}{best_suit}"
+    )
+
+    # =============================================================
+    # Карта должна существовать в TARGET_CARDS.
+    # =============================================================
+
+    if predicted_card not in TARGET_CARDS:
+
+        return {
+            "predicted_card":
+                None,
+
+            "probability":
+                0.0,
+
+            "probabilities":
+                card_probabilities,
+
+            "rank_probabilities":
+                rank_probabilities,
+
+            "active_patterns":
+                active_card_patterns,
+
+            "suit_probabilities":
+                suit_probabilities,
+
+            "active_suit_patterns":
+                active_suit_patterns,
+
+            "reason":
+                "некорректная итоговая карта",
+        }
+
+    # =============================================================
+    # Вероятность конкретной карты ВНУТРИ выбранной масти.
+    #
+    # Это дополнительная информация.
+    # Основной фильтр масти уже пройден.
+    # =============================================================
+
+    cards_for_suit = get_cards_for_suit(
+        card_probabilities,
+        best_suit
+    )
+
+    final_card_probability = (
+        cards_for_suit.get(
+            predicted_card,
+            0.0
+        )
     )
 
     return {
@@ -2493,13 +3690,58 @@ def get_model_prediction(
             predicted_card,
 
         "probability":
-            probability,
+            final_card_probability,
 
         "probabilities":
-            probabilities,
+            card_probabilities,
+
+        "rank_probabilities":
+            rank_probabilities,
+
+        "suit_probabilities":
+            suit_probabilities,
+
+        "cards_for_suit":
+            cards_for_suit,
 
         "active_patterns":
-            active_patterns,
+            active_card_patterns,
+
+        "active_suit_patterns":
+            active_suit_patterns,
+
+        "best_suit":
+            best_suit,
+
+        "best_suit_probability":
+            best_suit_probability,
+
+        "second_suit":
+            second_suit,
+
+        "second_suit_probability":
+            second_suit_probability,
+
+        "suit_margin":
+            suit_margin,
+
+        "best_rank":
+            best_rank,
+
+        "best_rank_probability":
+            best_rank_probability,
+
+        "second_rank":
+            second_rank,
+
+        "second_rank_probability":
+            second_rank_probability,
+
+        "rank_margin":
+            rank_margin,
+
+        "reason":
+            "OK",
     }
 
 
@@ -2532,7 +3774,8 @@ def get_upcoming_games():
         if response.status_code != 200:
 
             print(
-                f"⚠️ API HTTP {response.status_code}",
+                f"⚠️ API HTTP "
+                f"{response.status_code}",
                 flush=True
             )
 
@@ -2688,17 +3931,6 @@ def get_upcoming_games():
 
 # =====================================================================
 # PREDICTION EXISTS
-#
-# ВАЖНО:
-#
-# Проверяем ВСЕ прогнозы:
-#
-# pending
-# win
-# lose
-#
-# Поэтому после получения ❌ бот не создаст новый прогноз
-# на тот же #N.
 # =====================================================================
 
 def has_prediction_for_target(
@@ -2715,6 +3947,8 @@ def has_prediction_for_target(
 
         return False
 
+    current_cycle = get_cycle_date()
+
     for prediction in predictions:
 
         try:
@@ -2729,7 +3963,46 @@ def has_prediction_for_target(
 
             continue
 
-        if prediction_target == target:
+        if prediction_target != target:
+            continue
+
+        prediction_cycle = (
+            prediction.get(
+                "cycle_date"
+            )
+        )
+
+        if not prediction_cycle:
+
+            created = prediction.get(
+                "created"
+            )
+
+            if created:
+
+                try:
+
+                    prediction_cycle = (
+                        get_cycle_date(
+                            datetime.fromisoformat(
+                                created
+                            )
+                        )
+                    )
+
+                except Exception:
+
+                    prediction_cycle = (
+                        current_cycle
+                    )
+
+            else:
+
+                prediction_cycle = (
+                    current_cycle
+                )
+
+        if prediction_cycle == current_cycle:
 
             return True
 
@@ -2737,10 +4010,7 @@ def has_prediction_for_target(
 
 
 # =====================================================================
-# DUPLICATE PREDICTION CLEANUP
-#
-# Если по какой-то причине старый файл уже содержит несколько
-# прогнозов на один и тот же #N, оставляем только один.
+# DUPLICATES
 # =====================================================================
 
 def remove_duplicate_predictions():
@@ -2754,18 +4024,19 @@ def remove_duplicate_predictions():
 
     seen = set()
 
-    # Сначала оставляем pending,
-    # затем завершённые.
     ordered = sorted(
         predictions,
         key=lambda item: (
             0
-            if item.get("status") == "pending"
+            if item.get("status")
+            == "pending"
             else 1
         )
     )
 
     removed = 0
+
+    current_cycle = get_cycle_date()
 
     for entry in ordered:
 
@@ -2785,14 +4056,55 @@ def remove_duplicate_predictions():
 
             continue
 
-        if target in seen:
+        cycle_date = entry.get(
+            "cycle_date"
+        )
+
+        if not cycle_date:
+
+            created = entry.get(
+                "created"
+            )
+
+            if created:
+
+                try:
+
+                    cycle_date = get_cycle_date(
+                        datetime.fromisoformat(
+                            created
+                        )
+                    )
+
+                except Exception:
+
+                    cycle_date = (
+                        current_cycle
+                    )
+
+            else:
+
+                cycle_date = (
+                    current_cycle
+                )
+
+            entry[
+                "cycle_date"
+            ] = cycle_date
+
+        key = (
+            cycle_date,
+            target
+        )
+
+        if key in seen:
 
             removed += 1
 
             continue
 
         seen.add(
-            target
+            key
         )
 
         result.append(
@@ -2813,7 +4125,7 @@ def remove_duplicate_predictions():
 
 
 # =====================================================================
-# ANALYSIS
+# ANALYSIS TEXT
 # =====================================================================
 
 def build_analysis_text(
@@ -2825,21 +4137,81 @@ def build_analysis_text(
         "predicted_card"
     )
 
-    probability = result.get(
+    card_probability = result.get(
         "probability",
         0.0
     )
 
-    active_patterns = result.get(
+    best_suit = result.get(
+        "best_suit"
+    )
+
+    suit_probability = result.get(
+        "best_suit_probability",
+        0.0
+    )
+
+    suit_margin = result.get(
+        "suit_margin",
+        0.0
+    )
+
+    best_rank = result.get(
+        "best_rank"
+    )
+
+    rank_probability = result.get(
+        "best_rank_probability",
+        0.0
+    )
+
+    rank_margin = result.get(
+        "rank_margin",
+        0.0
+    )
+
+    active_card_patterns = result.get(
         "active_patterns",
         0
     )
 
+    active_suit_patterns = result.get(
+        "active_suit_patterns",
+        0
+    )
+
+    suit_probabilities = result.get(
+        "suit_probabilities",
+        {}
+    )
+
+    suit_text = " | ".join(
+        f"{suit} "
+        f"{suit_probabilities.get(suit, 0) * 100:.1f}%"
+        for suit in TARGET_SUITS
+    )
+
     return (
-        f"🔎 #{target_num} Pattern Scanner | "
-        f"Карта={predicted} | "
-        f"Вероятность={probability * 100:.1f}% | "
-        f"Паттернов={active_patterns}"
+        f"🔎 #{target_num} "
+        f"ДВЕ МОДЕЛИ\n"
+        f"🎴 Масть: "
+        f"<b>{best_suit}</b> "
+        f"{suit_probability * 100:.1f}%\n"
+        f"📊 Разница масти: "
+        f"{suit_margin * 100:.1f}%\n"
+        f"🔢 Ранг: "
+        f"<b>{best_rank}</b> "
+        f"{rank_probability * 100:.1f}%\n"
+        f"📊 Разница ранга: "
+        f"{rank_margin * 100:.1f}%\n"
+        f"🎯 Карта: "
+        f"<b>{predicted}</b> "
+        f"{card_probability * 100:.1f}%\n"
+        f"🎴 Масти: {suit_text}\n"
+        f"🔎 Card patterns: "
+        f"{active_card_patterns}\n"
+        f"🎴 Suit patterns: "
+        f"{active_suit_patterns}"
     )
 
 
@@ -2881,10 +4253,7 @@ def check_upcoming_games():
             continue
 
         # =============================================================
-        # КРИТИЧЕСКАЯ ЗАЩИТА ОТ ДУБЛЯ
-        #
-        # Не важно pending / win / lose.
-        # Если #N уже есть в predictions — второй прогноз НЕ создаём.
+        # НЕ ПОВТОРЯЕМ ПРОГНОЗ НА ТОТ ЖЕ #N
         # =============================================================
 
         if has_prediction_for_target(
@@ -2931,48 +4300,80 @@ def check_upcoming_games():
             0.0
         )
 
-        active_patterns = result.get(
+        active_card_patterns = result.get(
             "active_patterns",
             0
         )
 
+        active_suit_patterns = result.get(
+            "active_suit_patterns",
+            0
+        )
+
+        reason = result.get(
+            "reason"
+        )
+
         # =============================================================
-        # Нет паттернов — пропуск.
+        # НЕТ ПРОГНОЗА — И ЭТО НОРМАЛЬНО.
+        #
+        # Теперь бот НЕ ОБЯЗАН прогнозировать каждую игру.
         # =============================================================
 
-        if (
-            not predicted_card
-            or active_patterns <= 0
-        ):
+        if not predicted_card:
+
+            best_suit = result.get(
+                "best_suit"
+            )
+
+            best_suit_probability = result.get(
+                "best_suit_probability",
+                0.0
+            )
+
+            suit_margin = result.get(
+                "suit_margin",
+                0.0
+            )
 
             print(
                 f"⏭️ #{target_num} ПРОПУСК | "
-                f"нет активных Pattern",
+                f"{reason} | "
+                f"масть={best_suit} "
+                f"{best_suit_probability * 100:.1f}% | "
+                f"margin={suit_margin * 100:.1f}% | "
+                f"suit_patterns="
+                f"{active_suit_patterns}",
                 flush=True
             )
 
             continue
 
         # =============================================================
-        # ПРОГНОЗ
+        # ПЕЧАТАЕМ ПОЛНЫЙ АНАЛИЗ
         # =============================================================
 
         print(
             "\n"
-            + "=" * 65
+            + "=" * 75
             + "\n"
-            + "🔮 PATTERN SCANNER\n"
+            + "🔮 ДВЕ ОТДЕЛЬНЫЕ МОДЕЛИ\n"
             + build_analysis_text(
                 target_num,
                 result
             )
             + "\n"
-            + f"🎯 ПРОГНОЗ: #{target_num}: "
+            + f"🎯 ПРОГНОЗ: "
+            f"#{target_num}: "
             f"{predicted_card}"
             + "\n"
-            + "=" * 65,
+            + "=" * 75,
             flush=True
         )
+
+        # =============================================================
+        # TELEGRAM
+        # =============================================================
 
         msg = (
             f"🎯 Игра: "
@@ -2996,10 +4397,7 @@ def check_upcoming_games():
             continue
 
         # =============================================================
-        # Дополнительная защита:
-        #
-        # Перед сохранением ещё раз проверяем,
-        # не успел ли другой цикл создать такой же прогноз.
+        # ЕЩЁ РАЗ ПРОВЕРЯЕМ ДУБЛЬ.
         # =============================================================
 
         if has_prediction_for_target(
@@ -3008,8 +4406,7 @@ def check_upcoming_games():
 
             print(
                 f"⚠️ #N{target_num} уже существует "
-                f"в predictions — "
-                f"новая запись не добавлена",
+                f"в predictions",
                 flush=True
             )
 
@@ -3025,6 +4422,9 @@ def check_upcoming_games():
             "game_id":
                 str(game_id),
 
+            "cycle_date":
+                get_cycle_date(now),
+
             "message_id":
                 msg_id,
 
@@ -3037,6 +4437,10 @@ def check_upcoming_games():
             "predicted_card":
                 predicted_card,
 
+            # -----------------------------------------------------
+            # Финальная вероятность карты.
+            # -----------------------------------------------------
+
             "probability":
                 probability,
 
@@ -3046,8 +4450,69 @@ def check_upcoming_games():
                     {}
                 ),
 
+            # -----------------------------------------------------
+            # РАНГ.
+            # -----------------------------------------------------
+
+            "rank_probabilities":
+                result.get(
+                    "rank_probabilities",
+                    {}
+                ),
+
+            "predicted_rank":
+                result.get(
+                    "best_rank"
+                ),
+
+            "rank_probability":
+                result.get(
+                    "best_rank_probability",
+                    0.0
+                ),
+
+            "rank_margin":
+                result.get(
+                    "rank_margin",
+                    0.0
+                ),
+
+            # -----------------------------------------------------
+            # МАСТЬ — отдельная модель.
+            # -----------------------------------------------------
+
+            "suit_probabilities":
+                result.get(
+                    "suit_probabilities",
+                    {}
+                ),
+
+            "predicted_suit":
+                result.get(
+                    "best_suit"
+                ),
+
+            "suit_probability":
+                result.get(
+                    "best_suit_probability",
+                    0.0
+                ),
+
+            "suit_margin":
+                result.get(
+                    "suit_margin",
+                    0.0
+                ),
+
+            # -----------------------------------------------------
+            # PATTERNS
+            # -----------------------------------------------------
+
             "active_patterns":
-                active_patterns,
+                active_card_patterns,
+
+            "active_suit_patterns":
+                active_suit_patterns,
 
             "timestamp_msk":
                 timestamp,
@@ -3062,10 +4527,6 @@ def check_upcoming_games():
 
             "checked_games":
                 [],
-
-            # =====================================================
-            # Какие игры реально пришли из CHANNEL_STATS
-            # =====================================================
 
             "received_games":
                 [],
@@ -3090,32 +4551,18 @@ def check_upcoming_games():
             f"🔥 ПРОГНОЗ СОХРАНЁН | "
             f"#{target_num} | "
             f"{predicted_card} | "
-            f"{probability * 100:.1f}%",
+            f"масть="
+            f"{result.get('best_suit')} "
+            f"{result.get('best_suit_probability', 0) * 100:.1f}% | "
+            f"ранг="
+            f"{result.get('best_rank')} "
+            f"{result.get('best_rank_probability', 0) * 100:.1f}%",
             flush=True
         )
 
 
 # =====================================================================
 # RESULT CHECK
-#
-# КРИТИЧЕСКИ ВАЖНО:
-#
-# games_cache содержит ТОЛЬКО игры, пришедшие из CHANNEL_STATS.
-#
-# Если #N1140 ещё НЕ пришла:
-#
-# games_cache[1140] отсутствует.
-#
-# Тогда бот НЕ имеет права ставить ❌.
-#
-# Для проигрыша должны реально присутствовать:
-#
-# #N1140
-# #N1141
-# #N1142
-# #N1143
-#
-# из CHANNEL_STATS.
 # =====================================================================
 
 def check_prediction_against_game(
@@ -3176,10 +4623,6 @@ def get_dogon_result(
 
     received_games = []
 
-    # =============================================================
-    # Проверяем строго последовательно.
-    # =============================================================
-
     for dogon in range(
         DOGON_GAMES
     ):
@@ -3188,15 +4631,6 @@ def get_dogon_result(
             target,
             dogon
         )
-
-        # ---------------------------------------------------------
-        # КРИТИЧЕСКИ ВАЖНО:
-        #
-        # Если игры нет в games_cache,
-        # значит бот ЕЩЁ НЕ ПОЛУЧИЛ её из CHANNEL_STATS.
-        #
-        # Нельзя считать её проигрышем.
-        # ---------------------------------------------------------
 
         parsed = games_cache.get(
             game_number
@@ -3217,10 +4651,6 @@ def get_dogon_result(
         received_games.append(
             game_number
         )
-
-        # ---------------------------------------------------------
-        # Проверяем карту.
-        # ---------------------------------------------------------
 
         if check_prediction_against_game(
             predicted_card,
@@ -3243,17 +4673,6 @@ def get_dogon_result(
                 "received_games":
                     received_games.copy(),
             }
-
-    # =============================================================
-    # Сюда мы попадём ТОЛЬКО если:
-    #
-    # 1140 есть
-    # 1141 есть
-    # 1142 есть
-    # 1143 есть
-    #
-    # и карта нигде не найдена.
-    # =============================================================
 
     return {
         "status":
@@ -3315,14 +4734,7 @@ def check_results():
             entry
         )
 
-        # ---------------------------------------------------------
-        # Недостаточно реальных игр.
-        #
-        # НИЧЕГО НЕ МЕНЯЕМ.
-        # ---------------------------------------------------------
-
         if result is None:
-
             continue
 
         # =========================================================
@@ -3331,25 +4743,9 @@ def check_results():
 
         if result["status"] == "win":
 
-            stats["total"] += 1
-
-            stats["win"] += 1
-
             dogon = result.get(
                 "dogon"
             )
-
-            if dogon in stats[
-                "by_dogon"
-            ]:
-
-                stats[
-                    "by_dogon"
-                ][dogon] += 1
-
-            stats["card_hits"][
-                predicted_card
-            ] += 1
 
             result_game = result.get(
                 "game"
@@ -3359,10 +4755,6 @@ def check_results():
                 "received_games",
                 []
             )
-
-            # -----------------------------------------------------
-            # Редактируем своё сообщение.
-            # -----------------------------------------------------
 
             result_text = (
                 f"🎯 Игра: "
@@ -3422,8 +4814,6 @@ def check_results():
 
         # =========================================================
         # LOSE
-        #
-        # СЮДА МОЖНО ПОПАСТЬ ТОЛЬКО ПОСЛЕ ПОЛУЧЕНИЯ ВСЕХ 4 ИГР.
         # =========================================================
 
         if result["status"] == "lose":
@@ -3433,25 +4823,11 @@ def check_results():
                 []
             )
 
-            # Дополнительная защита.
             if len(
                 received_games
             ) < DOGON_GAMES:
 
-                print(
-                    f"⏳ #N{target} | "
-                    f"нельзя ставить ❌ | "
-                    f"получено "
-                    f"{len(received_games)}/"
-                    f"{DOGON_GAMES}",
-                    flush=True
-                )
-
                 continue
-
-            stats["total"] += 1
-
-            stats["lose"] += 1
 
             result_text = (
                 f"🎯 Игра: "
@@ -3492,8 +4868,7 @@ def check_results():
                 f"❌ НЕ ЗАШЛО | "
                 f"#{target} | "
                 f"{predicted_card} | "
-                f"получены реальные игры: "
-                f"{received_games}",
+                f"игры={received_games}",
                 flush=True
             )
 
@@ -3504,8 +4879,6 @@ def check_results():
 
 # =====================================================================
 # TELEGRAM UPDATES
-#
-# Бот читает ТОЛЬКО CHANNEL_STATS.
 # =====================================================================
 
 def process_updates(
@@ -3528,15 +4901,13 @@ def process_updates(
         if update_id is None:
             continue
 
-        offset = update_id + 1
+        offset = (
+            update_id + 1
+        )
 
         save_offset(
             offset
         )
-
-        # =============================================================
-        # Принимаем channel_post и edited_channel_post.
-        # =============================================================
 
         post = (
             update.get(
@@ -3563,10 +4934,6 @@ def process_updates(
             )
         )
 
-        # =============================================================
-        # ТОЛЬКО КАНАЛ СТАТИСТИКИ.
-        # =============================================================
-
         if chat_id != CHANNEL_STATS:
 
             continue
@@ -3592,25 +4959,18 @@ def process_updates(
 
         print(
             f"📩 СТАТИСТИКА #{num} | "
-            f"игрок={len(parsed['player_cards'])} карт | "
-            f"дилер={len(parsed['dealer_cards'])} карт",
+            f"игрок="
+            f"{len(parsed['player_cards'])} "
+            f"карт | "
+            f"дилер="
+            f"{len(parsed['dealer_cards'])} "
+            f"карт",
             flush=True
         )
-
-        # =============================================================
-        # Сначала cache.
-        #
-        # Именно эта запись потом используется
-        # для проверки прогнозов.
-        # =============================================================
 
         cache_result(
             parsed
         )
-
-        # =============================================================
-        # Потом сохраняем в историю.
-        # =============================================================
 
         added = add_stats_game_to_data(
             parsed
@@ -3624,13 +4984,6 @@ def process_updates(
                 flush=True
             )
 
-        # =============================================================
-        # Сразу проверяем прогнозы.
-        #
-        # Это позволяет обработать результат сразу после
-        # появления игры в CHANNEL_STATS.
-        # =============================================================
-
         check_results()
 
     return offset
@@ -3643,6 +4996,7 @@ def process_updates(
 def maybe_retrain():
 
     global scanner_last_train_count
+    global suit_scanner_last_train_count
 
     data = load_data()
 
@@ -3651,21 +5005,36 @@ def maybe_retrain():
     if count < MIN_TRAIN_SAMPLES:
         return
 
-    if (
+    need_card = (
         scanner_last_train_count
-        == count
-    ):
+        != count
+    )
+
+    need_suit = (
+        suit_scanner_last_train_count
+        != count
+    )
+
+    if not need_card and not need_suit:
         return
 
     print(
-        f"🔄 Переобучение Pattern Scanner | "
+        f"🔄 Переобучение моделей | "
         f"игр={count}",
         flush=True
     )
 
-    train_pattern_scanner(
-        data
-    )
+    if need_card:
+
+        train_pattern_scanner(
+            data
+        )
+
+    if need_suit:
+
+        train_suit_pattern_scanner(
+            data
+        )
 
 
 # =====================================================================
@@ -3695,8 +5064,8 @@ def build_stats_text():
     return (
         "📊 <b>СТАТИСТИКА OLD_bot</b>\n\n"
 
-        "🔎 Метод: "
-        "<b>Pattern Scanner</b>\n\n"
+        "🤖 Метод: "
+        "<b>Ранг + отдельная модель масти</b>\n\n"
 
         f"✅ Зашло: "
         f"<b>{stats['win']}</b>\n"
@@ -3764,11 +5133,15 @@ def rebuild_stats_from_history():
 
             continue
 
-        stats["total"] += 1
+        stats[
+            "total"
+        ] += 1
 
         if status == "win":
 
-            stats["win"] += 1
+            stats[
+                "win"
+            ] += 1
 
             dogon = entry.get(
                 "dogon"
@@ -3794,7 +5167,9 @@ def rebuild_stats_from_history():
 
         else:
 
-            stats["lose"] += 1
+            stats[
+                "lose"
+            ] += 1
 
     print(
         f"📊 Статистика восстановлена | "
@@ -3846,39 +5221,10 @@ def maybe_send_analytics():
 
 
 # =====================================================================
-# ВАЖНО:
-#
-# Мы БОЛЬШЕ НЕ загружаем historical JSON в games_cache.
-#
-# Почему?
-#
-# twentyone_data_full.json содержит историю.
-#
-# Например:
-#
-# вчера #N1140
-#
-# сегодня снова #N1140
-#
-# номер совпадает, но это разные реальные игры.
-#
-# Поэтому JSON используется:
-#
-# 1. для обучения Pattern Scanner;
-# 2. для хранения истории;
-#
-# но НЕ для подтверждения текущего результата прогноза.
-#
-# games_cache = только CHANNEL_STATS.
+# RESULT CACHE
 # =====================================================================
 
 def load_recent_results_into_cache():
-
-    # -------------------------------------------------------------
-    # Специально ничего не загружаем.
-    #
-    # Очищаем cache при старте для полной гарантии.
-    # -------------------------------------------------------------
 
     games_cache.clear()
 
@@ -3942,27 +5288,32 @@ def main():
     global last_analytics_time
 
     print(
-        "=" * 70,
+        "=" * 75,
         flush=True
     )
 
     print(
-        "🔮 21 CLASSIC — EXACT CARD PATTERN SCANNER",
+        "🔮 21 CLASSIC — TWO MODEL FORECAST",
         flush=True
     )
 
     print(
-        "🎴 ЦЕЛИ: J/Q/K/A + МАСТЬ",
+        "🔢 МОДЕЛЬ №1: РАНГ J/Q/K/A",
         flush=True
     )
 
     print(
-        "🎯 ПРОГНОЗ: ОДНА ТОЧНАЯ КАРТА",
+        "🎴 МОДЕЛЬ №2: МАСТЬ ♠️♣️♦️♥️",
         flush=True
     )
 
     print(
-        "📩 РЕЗУЛЬТАТ: КАНАЛ СТАТИСТИКИ",
+        "🎯 ИТОГ: РАНГ + МАСТЬ",
+        flush=True
+    )
+
+    print(
+        "🚫 СЛАБЫЕ ПРОГНОЗЫ НЕ ОТПРАВЛЯЮТСЯ",
         flush=True
     )
 
@@ -3972,32 +5323,36 @@ def main():
     )
 
     print(
-        "=" * 70,
+        "=" * 75,
         flush=True
     )
 
     print(
-        f"📌 CHANNEL_STATS: {CHANNEL_STATS}",
+        f"📌 CHANNEL_STATS: "
+        f"{CHANNEL_STATS}",
         flush=True
     )
 
     print(
-        f"📌 CHANNEL_PROGNOZ: {CHANNEL_PROGNOZ}",
+        f"📌 CHANNEL_PROGNOZ: "
+        f"{CHANNEL_PROGNOZ}",
         flush=True
     )
 
     print(
-        f"📌 BASE_URL: {BASE_URL}",
+        f"📌 BASE_URL: "
+        f"{BASE_URL}",
         flush=True
     )
 
     print(
-        f"📌 LIGA_ID: {LIGA_ID}",
+        f"📌 LIGA_ID: "
+        f"{LIGA_ID}",
         flush=True
     )
 
     print(
-        "=" * 70,
+        "=" * 75,
         flush=True
     )
 
@@ -4015,14 +5370,12 @@ def main():
 
     # =============================================================
     # CACHE
-    #
-    # НЕ загружаем старую историю в result-cache.
     # =============================================================
 
     load_recent_results_into_cache()
 
     # =============================================================
-    # PATTERN
+    # CARD MODEL
     # =============================================================
 
     load_pattern_scanner()
@@ -4036,8 +5389,32 @@ def main():
     else:
 
         print(
-            f"⏳ Недостаточно данных Pattern Scanner: "
-            f"{len(data)}/{MIN_TRAIN_SAMPLES}",
+            f"⏳ Недостаточно данных "
+            f"Card Scanner: "
+            f"{len(data)}/"
+            f"{MIN_TRAIN_SAMPLES}",
+            flush=True
+        )
+
+    # =============================================================
+    # SUIT MODEL
+    # =============================================================
+
+    load_suit_pattern_scanner()
+
+    if len(data) >= MIN_TRAIN_SAMPLES:
+
+        train_suit_pattern_scanner(
+            data
+        )
+
+    else:
+
+        print(
+            f"⏳ Недостаточно данных "
+            f"Suit Scanner: "
+            f"{len(data)}/"
+            f"{MIN_TRAIN_SAMPLES}",
             flush=True
         )
 
@@ -4060,20 +5437,12 @@ def main():
         flush=True
     )
 
-    # =============================================================
-    # Удаляем старые дубли.
-    # =============================================================
-
     remove_duplicate_predictions()
-
-    # =============================================================
-    # RESTORE STATS
-    # =============================================================
 
     rebuild_stats_from_history()
 
     # =============================================================
-    # TELEGRAM OFFSET
+    # OFFSET
     # =============================================================
 
     offset = get_offset()
@@ -4091,7 +5460,7 @@ def main():
     last_cleanup = 0
 
     print(
-        "=" * 70,
+        "=" * 75,
         flush=True
     )
 
@@ -4101,13 +5470,36 @@ def main():
     )
 
     print(
-        "🔎 Pattern Scanner активен",
+        "🔢 Card Pattern Scanner активен",
+        flush=True
+    )
+
+    print(
+        "🎴 Suit Pattern Scanner активен",
         flush=True
     )
 
     print(
         "🎴 Цели: "
-        + ", ".join(TARGET_CARDS),
+        + ", ".join(
+            TARGET_CARDS
+        ),
+        flush=True
+    )
+
+    print(
+        f"🎴 Фильтр масти: "
+        f"мин. {MIN_SUIT_PROBABILITY * 100:.1f}% | "
+        f"margin "
+        f"{MIN_SUIT_MARGIN * 100:.1f}%",
+        flush=True
+    )
+
+    print(
+        f"🔢 Фильтр ранга: "
+        f"мин. {MIN_RANK_PROBABILITY * 100:.1f}% | "
+        f"margin "
+        f"{MIN_RANK_MARGIN * 100:.1f}%",
         flush=True
     )
 
@@ -4118,19 +5510,19 @@ def main():
     )
 
     print(
-        "🚫 Старый JSON НЕ используется "
+        "🚫 Исторический JSON НЕ используется "
         "для текущей проверки результатов",
         flush=True
     )
 
     print(
-        "📌 Формат прогноза: "
+        "📌 Формат: "
         "🎯 Игра: #NXXX: Q♦️",
         flush=True
     )
 
     print(
-        "=" * 70,
+        "=" * 75,
         flush=True
     )
 
@@ -4145,9 +5537,7 @@ def main():
             now = time.time()
 
             # =====================================================
-            # TELEGRAM UPDATES
-            #
-            # Сначала получаем новые игры из CHANNEL_STATS.
+            # TELEGRAM
             # =====================================================
 
             updates = telegram_request(
@@ -4170,7 +5560,7 @@ def main():
                 )
 
             # =====================================================
-            # RESULT CHECK
+            # RESULTS
             # =====================================================
 
             if (
