@@ -279,23 +279,27 @@ def get_active_games():
             timeout=10
         )
 
+        print(
+            f"🌐 API status: {response.status_code}",
+            flush=True
+        )
+
         if response.status_code != 200:
+
+            print(
+                f"❌ API ответ: {response.text[:500]}",
+                flush=True
+            )
 
             return []
 
         data = response.json()
 
-        if isinstance(
-            data,
-            list
-        ):
+        if isinstance(data, list):
 
             games = data
 
-        elif (
-            isinstance(data, dict)
-            and "Value" in data
-        ):
+        elif isinstance(data, dict):
 
             games = data.get(
                 "Value",
@@ -304,33 +308,49 @@ def get_active_games():
 
         else:
 
+            print(
+                f"❌ Неизвестный формат API: {type(data)}",
+                flush=True
+            )
+
             return []
+
+        print(
+            f"📡 API получено игр: {len(games)}",
+            flush=True
+        )
 
         result = []
 
-        for game in games:
+        for g in games:
 
-            league = game.get(
+            game_id = g.get("id")
+
+            if not game_id:
+                continue
+
+            liga = g.get(
                 "liga",
                 {}
             )
 
-            league_id = league.get(
+            liga_id = liga.get(
                 "id"
             )
 
-            game_id = game.get(
-                "id"
+            # Диагностика первых игр
+            print(
+                f"🔍 API игра | "
+                f"ID={game_id} | "
+                f"liga={liga_id}",
+                flush=True
             )
 
-            if (
-                league_id == LEAGUE_ID
-                and game_id
-            ):
-
-                result.append(
-                    game
-                )
+            # Пока НЕ фильтруем жёстко,
+            # чтобы увидеть реальные данные API
+            result.append(
+                g
+            )
 
         return result
 
