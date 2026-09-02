@@ -4811,7 +4811,68 @@ def get_dogon_result(
 
         return None
 
+    # =============================================================
+    # СОЗДАЁМ ВТОРУЮ ДОПУСТИМУЮ КАРТУ
+    #
+    # ♥️ <-> ♣️
+    # ♦️ <-> ♠️
+    #
+    # J♠️ -> J♦️
+    # J♦️ -> J♠️
+    # A♥️ -> A♣️
+    # A♣️ -> A♥️
+    # =============================================================
+
+    suit_pairs = {
+        "♥": "♣",
+        "♣": "♥",
+        "♦": "♠",
+        "♠": "♦",
+    }
+
+    clean_card = str(
+        predicted_card
+    ).replace(
+        "\ufe0f",
+        ""
+    )
+
+    rank = clean_card[:-1]
+
+    suit = clean_card[-1]
+
+    paired_suit = suit_pairs.get(
+        suit
+    )
+
+    paired_card = None
+
+    if paired_suit:
+
+        paired_card = (
+            rank
+            + paired_suit
+        )
+
+    # =============================================================
+    # СПИСОК ДОПУСТИМЫХ КАРТ
+    # =============================================================
+
+    allowed_cards = [
+        predicted_card
+    ]
+
+    if paired_card:
+
+        allowed_cards.append(
+            paired_card
+        )
+
     received_games = []
+
+    # =============================================================
+    # ПРОВЕРКА ОСНОВНОЙ И ДОПОЛНИТЕЛЬНОЙ КАРТЫ
+    # =============================================================
 
     for dogon in range(
         DOGON_GAMES
@@ -4842,27 +4903,44 @@ def get_dogon_result(
             game_number
         )
 
-        if check_prediction_against_game(
-            predicted_card,
-            parsed
-        ):
+        # =========================================================
+        # ПРОВЕРЯЕМ ОБЕ КАРТЫ
+        # =========================================================
 
-            return {
-                "status":
-                    "win",
+        for card_to_check in allowed_cards:
 
-                "game":
-                    game_number,
+            if check_prediction_against_game(
+                card_to_check,
+                parsed
+            ):
 
-                "dogon":
-                    dogon,
+                print(
+                    f"🎯 НАЙДЕНА КАРТА | "
+                    f"{card_to_check} | "
+                    f"прогноз={predicted_card} "
+                    f"+ {paired_card}",
+                    flush=True
+                )
 
-                "parsed":
-                    parsed,
+                return {
+                    "status":
+                        "win",
 
-                "received_games":
-                    received_games.copy(),
-            }
+                    "game":
+                        game_number,
+
+                    "dogon":
+                        dogon,
+
+                    "parsed":
+                        parsed,
+
+                    "found_card":
+                        card_to_check,
+
+                    "received_games":
+                        received_games.copy(),
+                }
 
     return {
         "status":
@@ -4875,6 +4953,9 @@ def get_dogon_result(
             None,
 
         "parsed":
+            None,
+
+        "found_card":
             None,
 
         "received_games":
@@ -4913,6 +4994,19 @@ def check_results():
             "predicted_card"
         )
 
+        # =========================================================
+        # ОТОБРАЖАЕМАЯ КАРТА
+        # Например:
+        #
+        # J♠️ + ♦️
+        # A♥️ + ♣️
+        # =========================================================
+
+        display_card = entry.get(
+            "display_card",
+            predicted_card
+        )
+
         if (
             target is None
             or not msg_id
@@ -4946,10 +5040,16 @@ def check_results():
                 []
             )
 
+            # Какая именно карта из двух зашла
+            found_card = result.get(
+                "found_card",
+                predicted_card
+            )
+
             result_text = (
                 f"🎯 Игра: "
                 f"<b>#N{target}</b>: "
-                f"<b>{predicted_card}✅</b>"
+                f"<b>{display_card}✅</b>"
             )
 
             edit_message(
@@ -4968,8 +5068,10 @@ def check_results():
                     "dogon":
                         dogon,
 
+                    # Сохраняем реальную карту,
+                    # которая зашла
                     "found_card":
-                        predicted_card,
+                        found_card,
 
                     "checked_games":
                         received_games,
@@ -4994,7 +5096,8 @@ def check_results():
             print(
                 f"✅ ЗАШЛО | "
                 f"#{target} | "
-                f"{predicted_card} | "
+                f"прогноз={display_card} | "
+                f"выпало={found_card} | "
                 f"игра #{result_game} | "
                 f"догон {dogon}",
                 flush=True
@@ -5022,7 +5125,7 @@ def check_results():
             result_text = (
                 f"🎯 Игра: "
                 f"<b>#N{target}</b>: "
-                f"<b>{predicted_card}❌</b>"
+                f"<b>{display_card}❌</b>"
             )
 
             edit_message(
@@ -5057,7 +5160,7 @@ def check_results():
             print(
                 f"❌ НЕ ЗАШЛО | "
                 f"#{target} | "
-                f"{predicted_card} | "
+                f"{display_card} | "
                 f"игры={received_games}",
                 flush=True
             )
