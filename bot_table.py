@@ -1541,83 +1541,54 @@ def add_or_update_game(
 def find_last_same_digit_game(history, current_game_id):
     current_game_id = str(current_game_id)
     target_digit = current_game_id[-1]
-
-    for game in reversed(history):
-
-        old_game_id = str(
-            game.get("game_id", "")
-        ).strip()
-
-        if not old_game_id:
+    
+    print(f"🔍 Ищу игру с цифрой {target_digit} в истории", flush=True)
+    
+    # Ищем ЛЮБУЮ игру с P1
+    for game in history:  # Просто перебираем все
+        old_game_id = str(game.get("game_id", "")).strip()
+        
+        if not old_game_id or old_game_id == current_game_id:
             continue
-
-        # Не берём текущую игру
-        if old_game_id == current_game_id:
-            continue
-
-        # Сравниваем именно последнюю цифру game_id
+            
         if old_game_id[-1] != target_digit:
             continue
-
-        sequence = game.get("sequence")
-
-        if not isinstance(sequence, list):
-            continue
-
-        first_player_card = None
-
-        for card in sequence:
-
-            if not isinstance(card, dict):
-                continue
-
-            if (
-                card.get("position") == 1
-                and str(card.get("who", "")).upper() == "P"
-            ):
-                first_player_card = card
-                break
-
-        if not first_player_card:
-            continue
-
-        rank = normalize_rank(
-            first_player_card.get("rank")
-        )
-
-        suit = normalize_suit(
-            first_player_card.get("suit")
-        )
-
-        if not rank or not suit:
-            continue
-
-        result = {
-            "game_id": old_game_id,
-            "first_player_card": {
-                "rank": rank,
-                "suit": f"{suit}\ufe0f",
-            }
-        }
-
-        print(
-            f"📚 ИСТОЧНИК | "
-            f"текущий ID={current_game_id} | "
-            f"цифра={target_digit} | "
-            f"найден ID={old_game_id} | "
-            f"P1={rank}{suit}\ufe0f",
-            flush=True
-        )
-
-        return result
-
-    print(
-        f"⏭️ ID={current_game_id} | "
-        f"предыдущая игра с цифрой {target_digit} "
-        f"не найдена",
-        flush=True
-    )
-
+        
+        # Пытаемся найти P1
+        p1 = None
+        
+        # 1. player_cards
+        if not p1:
+            cards = game.get("player_cards", [])
+            if cards:
+                p1 = cards[0]
+        
+        # 2. first_player_card
+        if not p1:
+            p1 = game.get("first_player_card")
+        
+        # 3. sequence
+        if not p1:
+            for card in game.get("sequence", []):
+                if card.get("position") == 1 and card.get("who") == "P":
+                    p1 = card
+                    break
+        
+        if p1:
+            rank = normalize_rank(p1.get("rank"))
+            suit = normalize_suit(p1.get("suit"))
+            
+            if rank and suit:
+                print(f"✅ Найдена игра {old_game_id} с P1={rank}{suit}", flush=True)
+                return {
+                    "game_id": old_game_id,
+                    "first_player_card": {
+                        "rank": rank,
+                        "suit": f"{suit}\ufe0f",
+                    }
+                }
+    
+    print(f"❌ Игра с цифрой {target_digit} не найдена", flush=True)
     return None
 
 
