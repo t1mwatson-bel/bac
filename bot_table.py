@@ -4501,7 +4501,6 @@ def check_upcoming_games():
             "probability",
             0.0
         )
-        )
 
         active_card_patterns = result.get(
             "active_patterns",
