@@ -4412,15 +4412,6 @@ def check_upcoming_games():
         if has_prediction_for_target(
             target_num
         ):
-            continue
-
-        # =============================================================
-        # НЕ ПОВТОРЯЕМ ПРОГНОЗ НА ТОТ ЖЕ #N
-        # =============================================================
-
-        if has_prediction_for_target(
-            target_num
-        ):
 
             continue
 
