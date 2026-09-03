@@ -18,16 +18,16 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     BOT_TOKEN = os.getenv("BOT_TOKEN_PROGNOZ")
 
-CHAT_ID = os.getenv("CHAT_ID_21")
+CHANNEL_PROGNOZ = os.getenv("CHAT_ID_21")
 
-if not CHAT_ID:
-    CHAT_ID = os.getenv("CHAT_ID")
+if not CHANNEL_PROGNOZ:
+    CHANNEL_PROGNOZ = os.getenv("CHANNEL_PROGNOZ")
 
-STATS_CHAT_ID = os.getenv("STATS_CHAT_ID")  # Канал статистики
+CHANNEL_STATS = os.getenv("CHANNEL_STATS")  # Канал статистики
 
-if not BOT_TOKEN or not CHAT_ID:
+if not BOT_TOKEN or not CHANNEL_PROGNOZ:
     print(
-        "❌ Ошибка: BOT_TOKEN или CHAT_ID не заданы!",
+        "❌ Ошибка: BOT_TOKEN или CHANNEL_PROGNOZ не заданы!",
         flush=True
     )
     sys.exit(1)
