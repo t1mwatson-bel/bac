@@ -742,7 +742,7 @@ def get_game_number():
 
 def telegram_send(text, chat_id=None):
     if not chat_id:
-        chat_id = CHAT_ID
+        chat_id = CHANNEL_PROGNOZ  
     url = f"{TELEGRAM_API}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -765,7 +765,7 @@ def telegram_edit(message_id, text, chat_id=None):
     if not message_id:
         return False
     if not chat_id:
-        chat_id = CHAT_ID
+        chat_id = CHANNEL_PROGNOZ
     url = f"{TELEGRAM_API}/editMessageText"
     payload = {
         "chat_id": chat_id,
