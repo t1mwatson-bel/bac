@@ -32,20 +32,19 @@ if not BOT_TOKEN or not CHANNEL_PROGNOZ:
     )
     sys.exit(1)
 
-
 print(
     f"✅ BOT_TOKEN: {BOT_TOKEN[:5]}...",
     flush=True
 )
 
 print(
-    f"✅ CHAT_ID: {CHAT_ID}",
+    f"✅ CHANNEL_PROGNOZ: {CHANNEL_PROGNOZ}",
     flush=True
 )
 
-if STATS_CHAT_ID:
+if CHANNEL_STATS:
     print(
-        f"✅ STATS_CHAT_ID: {STATS_CHAT_ID}",
+        f"✅ CHANNEL_STATS: {CHANNEL_STATS}",
         flush=True
     )
 
