@@ -895,11 +895,11 @@ def check_prediction_with_cards(entry, cards):
 # =====================================================================
 
 def check_results_from_channel():
-    if not STATS_CHAT_ID:
-        print("⚠️ STATS_CHAT_ID не задан, проверка по каналу статистики отключена", flush=True)
+    if not CHANNEL_STATS:
+        print("⚠️ CHANNEL_STATS не задан, проверка по каналу статистики отключена", flush=True)
         return
     
-    messages = get_channel_messages(STATS_CHAT_ID, limit=30)
+    messages = get_channel_messages(CHANNEL_STATS, limit=30)
     changed = False
     
     for entry in predictions:
@@ -1104,7 +1104,7 @@ def main():
     print("🃏 Источник: первая карта игрока", flush=True)
     print(f"📚 История: последние {MAX_HISTORY_GAMES} игр", flush=True)
     print(f"🎯 Проверка: {DOGON_GAMES} игры (догон)", flush=True)
-    if STATS_CHAT_ID:
+    if CHANNEL_STATS:  # <--- БЫЛО STATS_CHAT_ID, ИСПРАВИЛ НА CHANNEL_STATS
         print(f"📊 Проверка результатов из канала статистики", flush=True)
     print("==================================================", flush=True)
     
