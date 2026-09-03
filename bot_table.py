@@ -2145,7 +2145,7 @@ def game_matches_prediction(
 
 
 # =====================================================================
-# РЕЗУЛЬТАТ ПРОГНОЗА
+# РЕЗУЛЬТАТ ПРОГНОЗА С ДОГОНОМ
 # =====================================================================
 
 def get_dogon_result(
@@ -2261,7 +2261,7 @@ def get_dogon_result(
 
 
 # =====================================================================
-# ПРОВЕРКА ВСЕХ ПРОГНОЗОВ
+# ПРОВЕРКА ВСЕХ ПРОГНОЗОВ - ИСПРАВЛЕНА
 # =====================================================================
 
 def check_results():
@@ -2328,16 +2328,16 @@ def check_results():
                 "message_id"
             )
 
-            text = (
-                f"🔮 <b>ПРОГНОЗ</b>\n\n"
-                f"🎯 Игра: "
-                f"<b>#N{target}</b>\n"
-                f"🃏 Прогноз: "
-                f"<b>{predicted}</b> "
-                f"✅"
-            )
-
             if message_id:
+
+                text = (
+                    f"🔮 <b>ПРОГНОЗ</b>\n\n"
+                    f"🎯 Игра: "
+                    f"<b>#N{target}</b>\n"
+                    f"🃏 Прогноз: "
+                    f"<b>{predicted}</b> "
+                    f"✅"
+                )
 
                 telegram_edit(
                     message_id,
@@ -2369,16 +2369,16 @@ def check_results():
                 "message_id"
             )
 
-            text = (
-                f"🔮 <b>ПРОГНОЗ</b>\n\n"
-                f"🎯 Игра: "
-                f"<b>#N{target}</b>\n"
-                f"🃏 Прогноз: "
-                f"<b>{predicted}</b> "
-                f"❌"
-            )
-
             if message_id:
+
+                text = (
+                    f"🔮 <b>ПРОГНОЗ</b>\n\n"
+                    f"🎯 Игра: "
+                    f"<b>#N{target}</b>\n"
+                    f"🃏 Прогноз: "
+                    f"<b>{predicted}</b> "
+                    f"❌"
+                )
 
                 telegram_edit(
                     message_id,
@@ -2629,7 +2629,7 @@ def get_game_data(
 
 
 # =====================================================================
-# ОБРАБОТКА ОДНОЙ ИГРЫ
+# ОБРАБОТКА ОДНОЙ ИГРЫ - ИСПРАВЛЕНА
 # =====================================================================
 
 def process_game(
@@ -2679,25 +2679,12 @@ def process_game(
     game_number = get_game_number()
 
     # ================================================================
-    # САМОЕ ГЛАВНОЕ ИЗМЕНЕНИЕ
-    #
-    # ПРОГНОЗ СОЗДАЁТСЯ ДО ПОЛУЧЕНИЯ КАРТ ТЕКУЩЕЙ ИГРЫ.
-    #
-    # Почему?
-    #
-    # API может показать игру за 2 минуты
-    # до её начала.
-    #
-    # GetGameZip в этот момент ещё не имеет
-    # player_cards.
-    #
-    # Но нам карты текущей игры НЕ НУЖНЫ.
-    #
-    # Нам нужна предыдущая игра из JSON,
-    # у которой такой же последний символ ID.
+    # ЕСЛИ НОВАЯ - ДАЕМ ПРОГНОЗ СРАЗУ
     # ================================================================
 
     if is_new:
+
+        print(f"🆕 НОВАЯ ИГРА В ЛОББИ! ID={game_id}", flush=True)
 
         if skip_prediction:
 
@@ -2705,57 +2692,50 @@ def process_game(
                 f"🚫 ПРОГНОЗ ПРОПУЩЕН | "
                 f"#N{game_number} | "
                 f"ID={game_id} | "
-                f"последняя цифра={last_digit} | "
-                f"такая цифра есть "
-                f"у другой будущей игры",
+                f"дубликат цифры {last_digit}",
                 flush=True
             )
 
         else:
 
-            prediction = (
-                create_prediction_for_game(
-                    game_id,
-                    game_number
-                )
+            prediction = create_prediction_for_game(
+                game_id,
+                game_number
             )
 
             if prediction:
 
-                message = (
-                    make_prediction_message(
-                        prediction
-                    )
+                message = make_prediction_message(
+                    prediction
                 )
 
-                message_id = (
-                    telegram_send(
-                        message
-                    )
+                message_id = telegram_send(
+                    message
                 )
 
                 if message_id:
 
-                    prediction[
-                        "message_id"
-                    ] = message_id
+                    prediction["message_id"] = message_id
+                    atomic_save_json(PREDICTIONS_FILE, predictions)
 
-                    atomic_save_json(
-                        PREDICTIONS_FILE,
-                        predictions
-                    )
+                print(
+                    f"🔮 ПРОГНОЗ ОТПРАВЛЕН СРАЗУ! "
+                    f"#N{game_number} | "
+                    f"ID={game_id} | "
+                    f"{prediction.get('predicted_card', '')}",
+                    flush=True
+                )
+
+            else:
+
+                print(
+                    f"⏭️ Нет данных в истории для прогноза "
+                    f"ID={game_id} (цифра {last_digit})",
+                    flush=True
+                )
 
     # ================================================================
-    # ТЕПЕРЬ ПОЛУЧАЕМ КАРТЫ ТЕКУЩЕЙ ИГРЫ
-    #
-    # Если игра ещё не началась:
-    #
-    # GetGameZip может вернуть данные
-    # без player_cards.
-    #
-    # Это НЕ ОШИБКА ПРОГНОЗА.
-    #
-    # Просто ждём следующий цикл.
+    # ПОЛУЧАЕМ КАРТЫ (ТОЛЬКО ДЛЯ СОХРАНЕНИЯ)
     # ================================================================
 
     raw_data = get_game_data(
@@ -2781,16 +2761,11 @@ def process_game(
 
         print(
             f"⏳ ID={game_id} | "
-            f"игра ещё не началась "
-            f"или карты пока отсутствуют",
+            f"игра ещё не началась",
             flush=True
         )
 
         return
-
-    # ================================================================
-    # ИГРА НАЧАЛАСЬ — СОХРАНЯЕМ
-    # ================================================================
 
     add_or_update_game(
         history,
