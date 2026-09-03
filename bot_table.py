@@ -896,60 +896,109 @@ def check_prediction_with_cards(entry, cards):
 
 def check_results_from_channel():
     if not CHANNEL_STATS:
-        print("⚠️ CHANNEL_STATS не задан, проверка по каналу статистики отключена", flush=True)
+        print("⚠️ CHANNEL_STATS не задан", flush=True)
         return
     
-    messages = get_channel_messages(CHANNEL_STATS, limit=30)
-    changed = False
+    print(f"🔍 Проверяем канал {CHANNEL_STATS} на наличие результатов...", flush=True)
     
-    for entry in predictions:
-        if entry.get("status") != "pending":
-            continue
+    # Получаем сообщения через getUpdates
+    url = f"{TELEGRAM_API}/getUpdates"
+    try:
+        response = SESSION.get(url, params={"limit": 50}, timeout=10)
+        data = response.json()
         
-        target_number = str(entry.get("target_number", ""))
-        if not target_number:
-            continue
+        if not data.get("ok"):
+            print(f"❌ Ошибка getUpdates: {data}", flush=True)
+            return
         
-        # Ищем сообщение с этим номером игры
-        found_message = None
-        for msg in messages:
-            text = msg.get("message", {}).get("text", "")
-            if f"#N{target_number}" in text:
-                found_message = text
-                break
+        messages = []
+        for update in data.get("result", []):
+            # Проверяем channel_post (сообщения в канале)
+            if "channel_post" in update:
+                msg = update["channel_post"]
+                chat_id = msg.get("chat", {}).get("id")
+                if str(chat_id) == str(CHANNEL_STATS):
+                    messages.append(msg)
+            # Проверяем message (если это группа или чат)
+            if "message" in update:
+                msg = update["message"]
+                chat_id = msg.get("chat", {}).get("id")
+                if str(chat_id) == str(CHANNEL_STATS):
+                    messages.append(msg)
         
-        if not found_message:
-            continue
+        print(f"📨 Получено сообщений из канала: {len(messages)}", flush=True)
         
-        parsed = parse_cards_from_message(found_message)
-        if not parsed or not parsed.get("cards"):
-            continue
+        if not messages:
+            print("⚠️ Нет сообщений из канала статистики", flush=True)
+            return
         
-        result = check_prediction_with_cards(entry, parsed["cards"])
-        if not result:
-            continue
+        # Показываем первые 3 сообщения для отладки
+        for i, msg in enumerate(messages[:3]):
+            text = msg.get("text", "")
+            print(f"📝 Сообщение {i+1}: {text[:50]}...", flush=True)
         
-        main_found = result.get("main_found", False)
-        test_found = result.get("test_found")
+        changed = False
         
-        if main_found:
-            entry["status"] = "win"
-            entry["result"] = "win"
-            changed = True
-            print(f"✅ ОСНОВНОЙ ЗАШЕЛ! #N{target_number} | {entry.get('main_predicted')}", flush=True)
-        else:
-            entry["status"] = "lose"
-            entry["result"] = "lose"
-            changed = True
-            print(f"❌ ОСНОВНОЙ НЕ ЗАШЕЛ! #N{target_number} | {entry.get('main_predicted')}", flush=True)
+        for entry in predictions:
+            if entry.get("status") != "pending":
+                continue
+            
+            target_number = str(entry.get("target_number", ""))
+            if not target_number:
+                continue
+            
+            # Ищем сообщение с этим номером игры
+            found_text = None
+            for msg in messages:
+                text = msg.get("text", "")
+                if f"#N{target_number}" in text:
+                    found_text = text
+                    break
+            
+            if not found_text:
+                print(f"⏳ #N{target_number} еще нет в канале", flush=True)
+                continue
+            
+            print(f"✅ Найдено сообщение для #N{target_number}", flush=True)
+            
+            # Парсим карты
+            parsed = parse_cards_from_message(found_text)
+            if not parsed or not parsed.get("cards"):
+                print(f"⚠️ Не удалось распарсить карты для #N{target_number}", flush=True)
+                continue
+            
+            cards = parsed["cards"]
+            print(f"🃏 Карты в игре: {[card_to_text(c) for c in cards]}", flush=True)
+            
+            # Проверяем прогноз
+            result = check_prediction_with_cards(entry, cards)
+            if not result:
+                continue
+            
+            main_found = result.get("main_found", False)
+            test_found = result.get("test_found")
+            
+            if main_found:
+                entry["status"] = "win"
+                entry["result"] = "win"
+                changed = True
+                print(f"✅ ОСНОВНОЙ ЗАШЕЛ! #N{target_number} | {entry.get('main_predicted')}", flush=True)
+            else:
+                entry["status"] = "lose"
+                entry["result"] = "lose"
+                changed = True
+                print(f"❌ ОСНОВНОЙ НЕ ЗАШЕЛ! #N{target_number} | {entry.get('main_predicted')}", flush=True)
+            
+            message_id = entry.get("message_id")
+            if message_id:
+                text = make_result_message(entry, main_found, test_found)
+                telegram_edit(message_id, text)
         
-        message_id = entry.get("message_id")
-        if message_id:
-            text = make_result_message(entry, main_found, test_found)
-            telegram_edit(message_id, text)
-    
-    if changed:
-        atomic_save_json(PREDICTIONS_FILE, predictions)
+        if changed:
+            atomic_save_json(PREDICTIONS_FILE, predictions)
+            
+    except Exception as e:
+        print(f"❌ Ошибка проверки канала: {e}", flush=True)
 
 
 # =====================================================================
