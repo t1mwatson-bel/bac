@@ -899,9 +899,9 @@ def check_results_from_channel():
     global last_update_id
     
     if not CHANNEL_STATS:
-        print("⚠️ CHANNEL_STATS не задан", flush=True)
         return
     
+    # Получаем свежие сообщения из канала
     url = f"{TELEGRAM_API}/getUpdates"
     try:
         params = {"limit": 50}
@@ -940,48 +940,71 @@ def check_results_from_channel():
             if entry.get("status") != "pending":
                 continue
             
-            target_number = str(entry.get("target_number", ""))
+            target_number = int(entry.get("target_number", 0))
             if not target_number:
                 continue
             
-            # Ищем сообщение с этим номером
-            found_text = None
-            for msg in messages:
-                text = msg.get("text", "")
-                if f"#N{target_number}" in text:
-                    found_text = text
+            # ДОГОН: проверяем 4 игры (target, target+1, target+2, target+3)
+            found_win = False
+            win_game = None
+            checked_count = 0
+            
+            for offset in range(4):
+                game_number = target_number + offset
+                
+                # Ищем сообщение с этим номером
+                found_text = None
+                for msg in messages:
+                    text = msg.get("text", "")
+                    if f"#N{game_number}" in text:
+                        found_text = text
+                        break
+                
+                if not found_text:
+                    # Если нет сообщения - выходим, ждем следующий цикл
+                    break
+                
+                checked_count += 1
+                
+                # Парсим карты
+                parsed = parse_cards_from_message(found_text)
+                if not parsed or not parsed.get("cards"):
+                    continue
+                
+                # Проверяем совпадение
+                result = check_prediction_with_cards(entry, parsed["cards"])
+                if result and result.get("main_found"):
+                    found_win = True
+                    win_game = game_number
                     break
             
-            if not found_text:
+            # Если проверили не все 4 игры - ждем дальше
+            if checked_count < 4 and not found_win:
                 continue
             
-            # Парсим и проверяем
-            parsed = parse_cards_from_message(found_text)
-            if not parsed or not parsed.get("cards"):
-                continue
-            
-            result = check_prediction_with_cards(entry, parsed["cards"])
-            if not result:
-                continue
-            
-            main_found = result.get("main_found", False)
-            test_found = result.get("test_found")
-            
-            if main_found:
+            # Если нашли WIN
+            if found_win:
                 entry["status"] = "win"
                 entry["result"] = "win"
                 changed = True
-                print(f"✅ ЗАШЕЛ! #N{target_number} | {entry.get('main_predicted')}", flush=True)
-            else:
+                print(f"✅ ЗАШЕЛ! #N{target_number} на игре #N{win_game} | {entry.get('main_predicted')}", flush=True)
+                
+                message_id = entry.get("message_id")
+                if message_id:
+                    text = make_result_message(entry, True)
+                    telegram_edit(message_id, text)
+            
+            # Если проверили 4 игры и нигде не нашли
+            elif checked_count == 4:
                 entry["status"] = "lose"
                 entry["result"] = "lose"
                 changed = True
-                print(f"❌ НЕ ЗАШЕЛ! #N{target_number} | {entry.get('main_predicted')}", flush=True)
-            
-            message_id = entry.get("message_id")
-            if message_id:
-                text = make_result_message(entry, main_found, test_found)
-                telegram_edit(message_id, text)
+                print(f"❌ НЕ ЗАШЕЛ! #N{target_number} (проверено 4 игры) | {entry.get('main_predicted')}", flush=True)
+                
+                message_id = entry.get("message_id")
+                if message_id:
+                    text = make_result_message(entry, False)
+                    telegram_edit(message_id, text)
         
         if changed:
             atomic_save_json(PREDICTIONS_FILE, predictions)
