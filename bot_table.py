@@ -1117,32 +1117,31 @@ def save_offset(offset):
 # =====================================================================
 
 def process_telegram_updates(offset):
-    global predictions, last_prediction_time
-    
+    global predictions
+
     if not CHANNEL_STATS:
         return offset
 
     try:
         response = SESSION.get(
             f"{TELEGRAM_API}/getUpdates",
-            params={
-                "offset": offset,
-                "timeout": 3,
-                "limit": 50
-            },
+            params={"offset": offset, "timeout": 3, "limit": 50},
             timeout=10,
         )
 
         data = response.json()
-
         if not data.get("ok"):
             return offset
 
+        # Находим последнее сообщение с ожидаемой игрой
+        latest_game_id = None
+        latest_game_number = None
+        latest_update_id = None
+
         for update in data.get("result", []):
             update_id = update.get("update_id")
-            if update_id is not None:
-                offset = update_id + 1
-                save_offset(offset)
+            if update_id is not None and (latest_update_id is None or update_id > latest_update_id):
+                latest_update_id = update_id
 
             post = update.get("channel_post") or update.get("edited_channel_post")
             if not post:
@@ -1153,51 +1152,45 @@ def process_telegram_updates(offset):
                 continue
 
             text = post.get("text", "")
-            
-            # ✅ ИЩЕМ ID ИГРЫ В СООБЩЕНИИ
+            if "⏳ Ожидание игры" not in text:
+                continue
+
+            # Парсим ID и номер
             id_match = re.search(r"ID:\s*(\d+)", text)
-            if not id_match:
-                continue
-                
-            game_id = id_match.group(1)
-            
-            # ✅ ИЩЕМ НОМЕР ИГРЫ
             num_match = re.search(r"#N(\d+)", text)
-            game_number = int(num_match.group(1)) if num_match else None
 
-            # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ УЖЕ ПРОГНОЗ НА ЭТОТ ID
-            has_prediction = False
+            if id_match and num_match:
+                latest_game_id = id_match.group(1)
+                latest_game_number = int(num_match.group(1))
+                # Сохраняем последний update_id, чтобы обновить offset
+                if update_id is not None:
+                    latest_update_id = update_id
+
+        # Обновляем offset, если нашли последнее сообщение
+        if latest_update_id is not None:
+            offset = latest_update_id + 1
+            save_offset(offset)
+
+        # Если нашли ID - создаем прогноз
+        if latest_game_id and latest_game_number:
+            # Проверяем, есть ли уже прогноз на этот ID
             for entry in predictions:
-                if entry.get("target_game_id") == game_id and entry.get("status") == "pending":
-                    has_prediction = True
-                    break
+                if entry.get("target_game_id") == latest_game_id and entry.get("status") == "pending":
+                    print(f"⏭️ Прогноз на ID={latest_game_id} уже существует")
+                    return offset
 
-            if has_prediction:
-                print(f"⏭️ Прогноз на ID={game_id} уже существует", flush=True)
-                continue
+            print(f"\n🆕 СОЗДАЕМ ПРОГНОЗ ПО ID ИЗ КАНАЛА: #N{latest_game_number} | ID={latest_game_id}")
 
-            # ✅ ПОЛУЧАЕМ ДАННЫЕ ИГРЫ ИЗ API ПО ID
-            print(f"📡 Получаем данные для ID={game_id} из API", flush=True)
-            raw = get_game_data(game_id)
-            
-            if not raw:
-                print(f"❌ Нет данных для ID={game_id}", flush=True)
-                continue
+            # Получаем данные игры из API по ID
+            raw = get_game_data(latest_game_id)
+            if raw:
+                parsed = parse_game_data(latest_game_id, raw)
+                if parsed:
+                    # Сохраняем игру в историю
+                    add_or_update_game(parsed)
 
-            # ✅ ПАРСИМ ДАННЫЕ
-            parsed = parse_game_data(game_id, raw)
-            if not parsed:
-                print(f"❌ Не удалось распарсить игру ID={game_id}", flush=True)
-                continue
-
-            # ✅ ЕСЛИ НЕТ НОМЕРА - БЕРЕМ ИЗ ПАРСЕННЫХ ДАННЫХ
-            if game_number is None:
-                game_number = parsed.get("game_number") or get_game_number()
-
-            print(f"\n🆕 НОВАЯ ИГРА ИЗ КАНАЛА | #N{game_number} | ID={game_id}", flush=True)
-
-            # ✅ СОЗДАЕМ ПРОГНОЗ
-            prediction = create_hybrid_prediction(game_id, game_number)
+            # Создаем прогноз
+            prediction = create_hybrid_prediction(latest_game_id, latest_game_number)
 
             if prediction:
                 message = make_prediction_message(prediction)
@@ -1207,13 +1200,10 @@ def process_telegram_updates(offset):
                 if message_id:
                     prediction["message_id"] = message_id
                     atomic_save_json(PREDICTIONS_FILE, predictions)
-                    print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{game_number}", flush=True)
-
-            # ✅ СОХРАНЯЕМ В ИСТОРИЮ
-            add_or_update_game(parsed)
+                    print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{latest_game_number}")
 
     except Exception as e:
-        print(f"⚠️ Updates error: {e}", flush=True)
+        print(f"⚠️ Updates error: {e}")
 
     return offset
 
@@ -1574,36 +1564,19 @@ def main():
     print(f"📌 Telegram offset: {offset}", flush=True)
 
     while True:
-        start = time.time()
+    start = time.time()
+    try:
+        offset = process_telegram_updates(offset)
+        check_predictions()
+        cleanup_predictions()
 
-        try:
-            games = get_active_games()
-
-            if games:
-                print(f"📡 API игр: {len(games)}", flush=True)
-
-            for game in games:
-                try:
-                    process_game(game)
-                except Exception as e:
-                    print(f"❌ Ошибка игры: {e}", flush=True)
-
-            offset = process_telegram_updates(offset)
-
-            check_predictions()
-
-            cleanup_predictions()
-
-            elapsed = time.time() - start
-            time.sleep(max(0.1, POLL_INTERVAL - elapsed))
-
-        except KeyboardInterrupt:
-            print("\n🛑 Бот остановлен", flush=True)
-            break
-
-        except Exception as e:
-            print(f"❌ Критическая ошибка: {e}", flush=True)
-            time.sleep(3)
+        elapsed = time.time() - start
+        time.sleep(max(0.1, POLL_INTERVAL - elapsed))
+    except KeyboardInterrupt:
+        break
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        time.sleep(3)
 
 
 # =====================================================================
