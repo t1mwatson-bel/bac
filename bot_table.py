@@ -1564,19 +1564,19 @@ def main():
     print(f"📌 Telegram offset: {offset}", flush=True)
 
     while True:
-            start = time.time()
-    try:
-        offset = process_telegram_updates(offset)
-        check_predictions()
-        cleanup_predictions()
+        start = time.time()
+        try:
+            offset = process_telegram_updates(offset)
+            check_predictions()
+            cleanup_predictions()
 
-        elapsed = time.time() - start
-        time.sleep(max(0.1, POLL_INTERVAL - elapsed))
-    except KeyboardInterrupt:
-        break
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        time.sleep(3)
+            elapsed = time.time() - start
+            time.sleep(max(0.1, POLL_INTERVAL - elapsed))
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+            time.sleep(3)
 
 
 # =====================================================================
