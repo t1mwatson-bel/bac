@@ -1483,26 +1483,15 @@ def process_game(active_game):
     else:
         game_number = get_game_number()
 
-    # ✅ ПРОВЕРЯЕМ: ЭТОТ НОМЕР УЖЕ ЕСТЬ В МАППИНГЕ?
-    existing_id = get_game_id_by_number(game_number)
+    # ✅ ПРОВЕРЯЕМ: ЕСТЬ ЛИ УЖЕ ПРОГНОЗ НА ЭТОТ НОМЕР?
+    for entry in predictions:
+        if entry.get("target_number") == game_number and entry.get("status") == "pending":
+            print(f"⏭️ Прогноз на #N{game_number} уже существует (из канала)", flush=True)
+            return
+
+    # ✅ ЕСЛИ ПРОГНОЗА НЕТ - СОЗДАЕМ (НО ЭТО УЖЕ НЕ НУЖНО, Т.К. КАНАЛ ДАЕТ ВСЁ)
+    print(f"⚠️ Прогноз на #N{game_number} не найден в канале, создаём из API", flush=True)
     
-    if existing_id:
-        # Номер уже есть, просто обновляем ID если он другой
-        if str(existing_id) != str(gid):
-            print(f"🔄 Обновление ID для #N{game_number}: {existing_id} -> {gid}", flush=True)
-            update_game_mapping(game_number, gid)
-        else:
-            print(f"⏭️ #N{game_number} уже известен (ID:{gid})", flush=True)
-        return
-
-    # ✅ ЭТО НОВЫЙ НОМЕР! СОЗДАЕМ ПРОГНОЗ
-    print("\n══════════════════════════════════", flush=True)
-    print(f"🆕 НОВАЯ ИГРА ОБНАРУЖЕНА | #N{game_number} | ID={gid}", flush=True)
-
-    # Сохраняем маппинг
-    update_game_mapping(game_number, gid)
-
-    # Создаем прогноз
     prediction = create_hybrid_prediction(gid, game_number)
 
     if prediction:
@@ -1515,7 +1504,7 @@ def process_game(active_game):
             atomic_save_json(PREDICTIONS_FILE, predictions)
             print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{game_number}", flush=True)
 
-    # Сохраняем игру в историю (для сканера)
+    # Сохраняем игру в историю
     raw = get_game_data(gid)
     if raw:
         parsed = parse_game_data(gid, raw)
