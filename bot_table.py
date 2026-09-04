@@ -1444,31 +1444,26 @@ def process_game(active_game):
     elif "number" in active_game:
         game_number = int(active_game["number"])
     else:
-        # Если номера нет, вычисляем по времени
         game_number = get_game_number()
 
-    # ✅ СОХРАНЯЕМ СОПОСТАВЛЕНИЕ НОМЕРА И ID
-    update_game_mapping(game_number, gid)
-
-    # ✅ ПОЛУЧАЕМ ТЕКУЩИЙ НОМЕР ИГРЫ (КОТОРАЯ СЕЙЧАС ИДЕТ)
-    current_game_number = get_game_number()
+    # ✅ ПРОВЕРЯЕМ: ЭТОТ НОМЕР УЖЕ ЕСТЬ В МАППИНГЕ?
+    existing_id = get_game_id_by_number(game_number)
     
-    # ✅ ПОЛУЧАЕМ НОМЕР ЛОББИ (СЛЕДУЮЩАЯ ИГРА)
-    lobby_number = add_game_offset(current_game_number, 1)
-
-    # ✅ СОЗДАЕМ ПРОГНОЗ ТОЛЬКО ДЛЯ ЛОББИ
-    if game_number != lobby_number:
-        print(f"⏭️ #N{game_number} (ID:{gid}) - не лобби (текущая #{current_game_number}, лобби #{lobby_number})", flush=True)
+    if existing_id:
+        # Номер уже есть, просто обновляем ID если он другой
+        if str(existing_id) != str(gid):
+            print(f"🔄 Обновление ID для #N{game_number}: {existing_id} -> {gid}", flush=True)
+            update_game_mapping(game_number, gid)
+        else:
+            print(f"⏭️ #N{game_number} уже известен (ID:{gid})", flush=True)
         return
 
-    # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ УЖЕ ПРОГНОЗ НА ЭТУ ИГРУ
-    for entry in predictions:
-        if entry.get("target_number") == game_number and entry.get("status") == "pending":
-            print(f"⏭️ Прогноз на #N{game_number} уже существует", flush=True)
-            return
-
+    # ✅ ЭТО НОВЫЙ НОМЕР! СОЗДАЕМ ПРОГНОЗ
     print("\n══════════════════════════════════", flush=True)
-    print(f"🆕 НОВАЯ ИГРА В ЛОББИ | ID={gid} | #N{game_number}", flush=True)
+    print(f"🆕 НОВАЯ ИГРА ОБНАРУЖЕНА | #N{game_number} | ID={gid}", flush=True)
+
+    # Сохраняем маппинг
+    update_game_mapping(game_number, gid)
 
     # Создаем прогноз
     prediction = create_hybrid_prediction(gid, game_number)
@@ -1483,7 +1478,7 @@ def process_game(active_game):
             atomic_save_json(PREDICTIONS_FILE, predictions)
             print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{game_number}", flush=True)
 
-    # Сохраняем игру в историю
+    # Сохраняем игру в историю (для сканера)
     raw = get_game_data(gid)
     if raw:
         parsed = parse_game_data(gid, raw)
