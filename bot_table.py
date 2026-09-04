@@ -1117,6 +1117,8 @@ def save_offset(offset):
 # =====================================================================
 
 def process_telegram_updates(offset):
+    global predictions, last_prediction_time
+    
     if not CHANNEL_STATS:
         return offset
 
@@ -1136,6 +1138,9 @@ def process_telegram_updates(offset):
         if not data.get("ok"):
             return offset
 
+        latest_game = None  # ✅ ХРАНИМ САМУЮ ПОСЛЕДНЮЮ ИГРУ
+        latest_id = None
+
         for update in data.get("result", []):
             update_id = update.get("update_id")
             if update_id is not None:
@@ -1151,17 +1156,49 @@ def process_telegram_updates(offset):
                 continue
 
             text = post.get("text", "")
-            parsed = parse_cards_from_message(text)
+            
+            # ✅ ИЩЕМ СООБЩЕНИЯ С "Ожидание игры"
+            if "⏳ Ожидание игры" in text:
+                match = re.search(r"#N(\d+)", text)
+                if match:
+                    game_number = int(match.group(1))
+                    
+                    # Ищем ID
+                    id_match = re.search(r"ID:\s*(\d+)", text)
+                    game_id = id_match.group(1) if id_match else None
+                    
+                    # ✅ СОХРАНЯЕМ ПОСЛЕДНЮЮ ИГРУ (она будет последней в цикле)
+                    latest_game = game_number
+                    latest_id = game_id
+                    
+                    print(f"📌 Найдена игра в канале: #N{game_number} (ID: {game_id})", flush=True)
 
-            if not parsed:
-                continue
+        # ✅ ЕСЛИ НАШЛИ ПОСЛЕДНЮЮ ИГРУ - СОЗДАЕМ ПРОГНОЗ
+        if latest_game and latest_id:
+            # Проверяем, есть ли уже прогноз на этот номер
+            has_prediction = False
+            for entry in predictions:
+                if entry.get("target_number") == latest_game and entry.get("status") == "pending":
+                    has_prediction = True
+                    break
+            
+            if not has_prediction:
+                print(f"\n🆕 СОЗДАЕМ ПРОГНОЗ ДЛЯ #N{latest_game} (ID: {latest_id})", flush=True)
+                
+                # ✅ СОЗДАЕМ ПРОГНОЗ
+                prediction = create_hybrid_prediction(latest_id, latest_game)
+                
+                if prediction:
+                    message = make_prediction_message(prediction)
+                    prediction["original_text"] = message
+                    message_id = telegram_send(message)
 
-            games_cache[parsed["game_number"]] = text
-            print(
-                f"💾 CHANNEL_STATS -> #{parsed['game_number']} | "
-                f"карты={parsed['cards']}",
-                flush=True
-            )
+                    if message_id:
+                        prediction["message_id"] = message_id
+                        atomic_save_json(PREDICTIONS_FILE, predictions)
+                        print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{latest_game}", flush=True)
+            else:
+                print(f"⏭️ Прогноз на #N{latest_game} уже существует", flush=True)
 
     except Exception as e:
         print(f"⚠️ Updates error: {e}", flush=True)
