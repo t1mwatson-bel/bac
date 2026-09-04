@@ -1969,135 +1969,163 @@ if len(games_cache) > 2000:
 # =====================================================================
 
 def check_predictions():
+    """ЖЕСТКАЯ ДИАГНОСТИКА — покажет, где проблема"""
+    global predictions
 
-```
-changed = False
+    print("=" * 60, flush=True)
+    print("🔍 check_predictions() ВЫЗВАНА!", flush=True)
+    print(f"📊 Всего прогнозов: {len(predictions)}", flush=True)
+    print(f"📡 CHANNEL_STATS = {CHANNEL_STATS}", flush=True)
 
-for entry in predictions:
+    if not predictions:
+        print("📭 Нет прогнозов для проверки", flush=True)
+        return
 
-    if entry.get("status") != "pending":
-        continue
+    if not CHANNEL_STATS:
+        print("❌ CHANNEL_STATS не задан!", flush=True)
+        return
 
-    target = entry.get(
-        "target_number"
-    )
+    # 1. ПРОВЕРЯЕМ ДОСТУП К КАНАЛУ
+    print("\n📥 Пытаюсь прочитать канал статистики...", flush=True)
 
-    predicted = entry.get(
-        "predicted_card"
-    )
-
-    if not target or not predicted:
-        continue
-
-    found = False
-    found_card = None
-    found_game = None
-
-    available = 0
-
-    for dogon in range(
-        DOGON_GAMES
-    ):
-
-        game_num = add_game_offset(
-            target,
-            dogon
+    try:
+        response = SESSION.get(
+            f"{TELEGRAM_API}/getChatHistory",
+            params={
+                "chat_id": CHANNEL_STATS,
+                "limit": 5
+            },
+            timeout=10
         )
 
-        text = games_cache.get(
-            game_num
-        )
+        print(f"📡 Статус ответа: {response.status_code}", flush=True)
 
-        if not text:
+        if response.status_code != 200:
+            print(f"❌ Ошибка: статус {response.status_code}", flush=True)
+            print(f"📄 Текст: {response.text[:200]}", flush=True)
+            return
+
+        data = response.json()
+        print(f"📩 Telegram ответ: ok={data.get('ok')}", flush=True)
+
+        if not data.get("ok"):
+            print(f"❌ Telegram ошибка: {data}", flush=True)
+            return
+
+        messages = data.get("result", [])
+        print(f"📥 Получено сообщений: {len(messages)}", flush=True)
+
+        if not messages:
+            print("📭 В канале нет сообщений за последние 5", flush=True)
+
+    except Exception as e:
+        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА при запросе: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return
+
+    # 2. ПАРСИМ СООБЩЕНИЯ
+    print("\n📝 Парсим сообщения...", flush=True)
+
+    for msg in messages:
+        text = msg.get("text", "")
+        print(f"   📄 Текст: {text[:100]}...", flush=True)
+
+        parsed = parse_cards_from_message(text)
+        if parsed:
+            games_cache[parsed["game_number"]] = text
+            print(f"   ✅ #{parsed['game_number']} -> {parsed['cards']}", flush=True)
+        else:
+            print(f"   ⚠️ Не распарсилось", flush=True)
+
+    print(f"\n📦 games_cache содержит: {list(games_cache.keys())[-10:]}", flush=True)
+
+    # 3. ПРОВЕРЯЕМ ПРОГНОЗЫ
+    print("\n🔍 Проверяем прогнозы...", flush=True)
+
+    for entry in predictions:
+        if entry.get("status") != "pending":
+            print(f"⏭️ Прогноз #{entry.get('target_number')} уже {entry.get('status')}", flush=True)
             continue
 
-        available += 1
+        target = entry.get("target_number")
+        predicted_cards = entry.get("predicted_cards", [])
+        msg_id = entry.get("message_id")
 
-        parsed = parse_cards_from_message(
-            text
-        )
+        print(f"\n🎯 Проверяю #N{target}: {predicted_cards}", flush=True)
 
-        if not parsed:
+        if not target or not predicted_cards:
+            print("   ⚠️ Нет target или predicted_cards", flush=True)
             continue
 
-        actual_cards = parsed.get(
-            "cards",
-            []
-        )
+        found = None
+        all_available = True
 
-        print(
-            f"🔎 Проверка #{game_num}: "
-            f"{actual_cards}",
-            flush=True
-        )
+        for dogon in range(DOGON_GAMES + 1):
+            num = add_game_offset(target, dogon)
+            text = games_cache.get(num)
 
-        if predicted in actual_cards:
+            if not text:
+                all_available = False
+                print(f"   ⏳ #{num} нет в кэше (догон {dogon})", flush=True)
+                continue
 
-            found = True
-            found_card = predicted
-            found_game = game_num
+            parsed = parse_cards_from_message(text)
+            if not parsed:
+                continue
 
-            break
+            actual_cards = parsed.get("cards", [])
+            print(f"   🃏 #{num} -> {actual_cards}", flush=True)
 
-    if found:
-
-        entry["status"] = "win"
-
-        entry["result_game"] = found_game
-
-        entry["found_card"] = found_card
-
-        changed = True
-
-        print(
-            f"✅ ЗАШЛО! "
-            f"{predicted} "
-            f"на #{found_game}",
-            flush=True
-        )
-
-        if entry.get("message_id"):
-
-            telegram_edit(
-                entry["message_id"],
-                make_result_text(
-                    entry,
-                    "win",
-                    found_card,
-                    found_game
-                )
+            hit_card = next(
+                (card for card in predicted_cards if card in actual_cards),
+                None
             )
 
-        continue
+            if hit_card:
+                found = {
+                    "num": num,
+                    "dogon": dogon,
+                    "card": hit_card,
+                }
+                print(f"   ✅ НАШЕЛ! {hit_card} на #{num}", flush=True)
+                break
 
-    if available >= DOGON_GAMES:
+        if found:
+            entry["status"] = "win"
+            entry["result_game"] = found["num"]
+            entry["found_card"] = found["card"]
+            entry["current_dogon"] = found["dogon"]
+
+            print(f"✅ ЗАШЛО на #{found['num']} | догон {found['dogon']} | {found['card']}", flush=True)
+
+            if msg_id:
+                telegram_edit(
+                    msg_id,
+                    f"🎯 #N{entry['target_number']}\n✅ ЗАШЛО на #{found['num']}\n🃏 {found['card']}"
+                )
+
+            atomic_save_json(PREDICTIONS_FILE, predictions)
+            continue
+
+        if not all_available:
+            print(f"⏳ Ожидание #N{target} (не все догоны в кэше)", flush=True)
+            continue
 
         entry["status"] = "lose"
+        print(f"❌ НЕ ЗАШЛО: догоны 0-{DOGON_GAMES} для #N{target}", flush=True)
 
-        changed = True
-
-        print(
-            f"❌ НЕ ЗАШЛО: "
-            f"{predicted}",
-            flush=True
-        )
-
-        if entry.get("message_id"):
-
+        if msg_id:
             telegram_edit(
-                entry["message_id"],
-                make_result_text(
-                    entry,
-                    "lose"
-                )
+                msg_id,
+                f"🎯 #N{entry['target_number']}\n❌ НЕ ЗАШЛО"
             )
 
-if changed:
+        atomic_save_json(PREDICTIONS_FILE, predictions)
 
-    atomic_save_json(
-        PREDICTIONS_FILE,
-        predictions
-    )
+    print("=" * 60, flush=True)
+    print("✅ check_predictions() ЗАВЕРШЕНА", flush=True)
+    print("=" * 60, flush=True)
 ```
 
 # =====================================================================
