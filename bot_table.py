@@ -1564,7 +1564,7 @@ def main():
     print(f"📌 Telegram offset: {offset}", flush=True)
 
     while True:
-    start = time.time()
+            start = time.time()
     try:
         offset = process_telegram_updates(offset)
         check_predictions()
