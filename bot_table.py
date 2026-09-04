@@ -72,7 +72,8 @@ MIN_FORECAST_PROBABILITY = 0.29
 MIN_LEADER_GAP = 0.06
 MIN_ACTIVE_METHODS = 2
 
-PREDICTION_COOLDOWN_SECONDS = 20
+# ⚡ УМЕНЬШИЛ ДО 2 СЕКУНД
+PREDICTION_COOLDOWN_SECONDS = 2
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -1004,29 +1005,22 @@ def make_prediction_message(entry):
 
 
 # =====================================================================
-# PARSE CHANNEL RESULT (С ПРОВЕРКОЙ СТАТУСОВ)
+# PARSE CHANNEL RESULT
 # =====================================================================
 
 def parse_cards_from_message(text):
-    """
-    Парсит номер игры и ВСЕ карты из сообщения канала статистики.
-    Учитывает статусы: 🔰 (завершена) и ✅ (завершена/выиграна)
-    """
     if not text:
         return None
 
-    # Проверяем, что игра завершена (есть ✅ или 🔰)
     if not re.search(r'[✅🔰]', text):
         return None
 
-    # Ищем номер игры
     match = re.search(r"#N(\d+)", text)
     if not match:
         return None
 
     game_number = int(match.group(1))
 
-    # Ищем ВСЕ карты в тексте
     found = re.findall(r"(10|[2-9AJQK])([♠♣♦♥])\ufe0f?", text)
     
     if not found:
@@ -1034,7 +1028,6 @@ def parse_cards_from_message(text):
 
     cards = [f"{rank}{suit}\ufe0f" for rank, suit in found]
 
-    # Если карт нет - ищем в скобках
     if not cards:
         matches = re.findall(r"\((.*?)\)", text)
         for match in matches:
@@ -1042,7 +1035,6 @@ def parse_cards_from_message(text):
             for rank, suit in found_inner:
                 cards.append(f"{rank}{suit}\ufe0f")
 
-    # Убираем дубликаты
     cards = list(dict.fromkeys(cards))
 
     return {
@@ -1075,11 +1067,10 @@ def save_offset(offset):
 
 
 # =====================================================================
-# PROCESS UPDATES (ПРАВИЛЬНАЯ ВЕРСИЯ ЧЕРЕЗ getUpdates)
+# PROCESS UPDATES
 # =====================================================================
 
 def process_telegram_updates(offset):
-    """Читает канал статистики через getUpdates и заполняет games_cache"""
     if not CHANNEL_STATS:
         return offset
 
@@ -1137,10 +1128,6 @@ def process_telegram_updates(offset):
 # =====================================================================
 
 def check_predictions():
-    """
-    Проверяет прогнозы через games_cache
-    games_cache заполняется из process_telegram_updates()
-    """
     global predictions
 
     if not predictions:
@@ -1166,7 +1153,6 @@ def check_predictions():
         found = None
         all_available = True
 
-        # Перебираем догоны от 0 до DOGON_GAMES
         for dogon in range(DOGON_GAMES + 1):
             num = add_game_offset(target, dogon)
             text = games_cache.get(num)
@@ -1194,7 +1180,6 @@ def check_predictions():
                 }
                 break
 
-        # WIN
         if found:
             entry["status"] = "win"
             entry["result_game"] = found["num"]
@@ -1218,12 +1203,10 @@ def check_predictions():
             atomic_save_json(PREDICTIONS_FILE, predictions)
             continue
 
-        # НЕ ВСЕ ИГРЫ ДОСТУПНЫ → ЖДЁМ
         if not all_available:
             print(f"⏳ Ожидание #{target} (не все догоны в кэше)", flush=True)
             continue
 
-        # LOSE
         entry["status"] = "lose"
         changed = True
 
@@ -1242,13 +1225,11 @@ def check_predictions():
 
 
 # =====================================================================
-# PREDICTIONS (СОЗДАНИЕ ПРОГНОЗА)
+# PREDICTIONS (СОЗДАНИЕ ПРОГНОЗА) - ИСПРАВЛЕННАЯ!
 # =====================================================================
 
 def has_pending_prediction():
-    for entry in predictions:
-        if entry.get("status") == "pending":
-            return True
+    # ⚡ ВСЕГДА ВОЗВРАЩАЕМ False - НЕТ БЛОКИРОВКИ
     return False
 
 
@@ -1267,23 +1248,22 @@ def create_hybrid_prediction(game_id, game_number):
 
     game_id = str(game_id)
 
+    # Проверяем только дубли по ID
     if prediction_exists(game_id):
+        print(f"⏭️ Прогноз для ID {game_id} уже существует", flush=True)
         return None
 
-    if has_pending_prediction():
-        print("⏳ Есть активный прогноз", flush=True)
-        return None
-
+    # Минимальная задержка 2 секунды
     now_ts = time.time()
-
-    if now_ts - last_prediction_time < PREDICTION_COOLDOWN_SECONDS:
+    if now_ts - last_prediction_time < 2:
+        print(f"⏭️ Cooldown 2 сек", flush=True)
         return None
 
     now = datetime.now(MOSCOW_TZ)
     timestamp_msk = now.strftime("%H:%M:%S.%f")[:-3]
 
     print("\n══════════════════════════════════", flush=True)
-    print(f"🧠 HYBRID АНАЛИЗ | ID={game_id}", flush=True)
+    print(f"🧠 HYBRID АНАЛИЗ | ID={game_id} | #N{game_number}", flush=True)
     print(f"⏱ Timestamp={timestamp_msk}", flush=True)
 
     result = build_hybrid_prediction(game_id, timestamp_msk)
@@ -1318,12 +1298,11 @@ def create_hybrid_prediction(game_id, game_number):
     }
 
     predictions.append(entry)
-
     atomic_save_json(PREDICTIONS_FILE, predictions)
 
     last_prediction_time = now_ts
 
-    print(f"🔮 ПРОГНОЗ СОЗДАН: {result['card']}", flush=True)
+    print(f"🔮 ПРОГНОЗ СОЗДАН: {result['card']} для #N{game_number}", flush=True)
 
     return entry
 
@@ -1413,7 +1392,7 @@ def get_game_data(game_id):
 
 
 # =====================================================================
-# PROCESS GAME
+# PROCESS GAME - ИСПРАВЛЕННАЯ!
 # =====================================================================
 
 def process_game(active_game):
@@ -1422,35 +1401,43 @@ def process_game(active_game):
     if not gid:
         return
 
-    raw = get_game_data(gid)
-
-    parsed = None
-
-    if raw:
-        parsed = parse_game_data(gid, raw)
-
-    is_new = not game_exists(gid)
-
-    if is_new:
-        print("\n══════════════════════════════════", flush=True)
-        print(f"🆕 НОВАЯ ИГРА | ID={gid}", flush=True)
-
+    # Получаем номер игры (если есть в API)
+    game_number = None
+    if "gameNumber" in active_game:
+        game_number = int(active_game["gameNumber"])
+    elif "number" in active_game:
+        game_number = int(active_game["number"])
+    else:
         game_number = get_game_number()
 
-        prediction = create_hybrid_prediction(gid, game_number)
+    # Проверяем, есть ли уже прогноз на этот номер игры
+    for entry in predictions:
+        if entry.get("target_number") == game_number and entry.get("status") == "pending":
+            print(f"⏭️ Прогноз на #N{game_number} уже существует", flush=True)
+            return
 
-        if prediction:
-            message = make_prediction_message(prediction)
-            prediction["original_text"] = message
-            message_id = telegram_send(message)
+    print("\n══════════════════════════════════", flush=True)
+    print(f"🆕 НОВАЯ ИГРА В ЛОББИ | ID={gid} | #N{game_number}", flush=True)
 
-            if message_id:
-                prediction["message_id"] = message_id
-                atomic_save_json(PREDICTIONS_FILE, predictions)
-                print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{game_number}", flush=True)
+    # ⚡ СОЗДАЕМ ПРОГНОЗ МГНОВЕННО
+    prediction = create_hybrid_prediction(gid, game_number)
 
-    if parsed:
-        add_or_update_game(parsed)
+    if prediction:
+        message = make_prediction_message(prediction)
+        prediction["original_text"] = message
+        message_id = telegram_send(message)
+
+        if message_id:
+            prediction["message_id"] = message_id
+            atomic_save_json(PREDICTIONS_FILE, predictions)
+            print(f"📤 ОТПРАВЛЕНО: {prediction['predicted_card']} на #N{game_number}", flush=True)
+
+    # Сохраняем игру в историю
+    raw = get_game_data(gid)
+    if raw:
+        parsed = parse_game_data(gid, raw)
+        if parsed:
+            add_or_update_game(parsed)
 
 
 # =====================================================================
@@ -1490,6 +1477,7 @@ def main():
     print(f"📈 Догон: {DOGON_GAMES} игры", flush=True)
     print(f"📊 Мин. вероятность: {MIN_FORECAST_PROBABILITY:.0%}", flush=True)
     print(f"📏 Мин. отрыв: {MIN_LEADER_GAP:.0%}", flush=True)
+    print("⚡ Прогноз: МГНОВЕННО при появлении в лобби", flush=True)
     print("==================================================\n", flush=True)
 
     offset = get_offset()
@@ -1499,7 +1487,6 @@ def main():
         start = time.time()
 
         try:
-            # 1. Получаем активные игры
             games = get_active_games()
 
             if games:
@@ -1511,18 +1498,13 @@ def main():
                 except Exception as e:
                     print(f"❌ Ошибка игры: {e}", flush=True)
 
-            # 2. Читаем канал статистики через getUpdates
             offset = process_telegram_updates(offset)
 
-            # 3. Проверяем прогнозы
             check_predictions()
 
-            # 4. Очищаем старые прогнозы
             cleanup_predictions()
 
             elapsed = time.time() - start
-
-            # ЗАСЫПАЕМ до следующего цикла
             time.sleep(max(0.1, POLL_INTERVAL - elapsed))
 
         except KeyboardInterrupt:
