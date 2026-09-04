@@ -39,6 +39,7 @@ LEAGUE_ID = 1643503
 DATA_FILE = "twentyone_data_full.json"
 PREDICTIONS_FILE = "twentyone_predictions.json"
 OFFSET_FILE = "hybrid_offset.txt"
+GAME_MAPPING_FILE = "game_mapping.json"  # ✅ НОВЫЙ ФАЙЛ ДЛЯ СОПОСТАВЛЕНИЯ
 
 MAX_HISTORY_GAMES = 3000
 DOGON_GAMES = 4
@@ -72,7 +73,6 @@ MIN_FORECAST_PROBABILITY = 0.29
 MIN_LEADER_GAP = 0.06
 MIN_ACTIVE_METHODS = 2
 
-# ⚡ УМЕНЬШИЛ ДО 2 СЕКУНД
 PREDICTION_COOLDOWN_SECONDS = 2
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -106,6 +106,7 @@ RANKS = {
 history = []
 predictions = []
 games_cache = {}
+game_mapping = {}  # ✅ СЛОВАРЬ: {game_number: game_id}
 last_prediction_time = 0
 
 # =====================================================================
@@ -204,6 +205,51 @@ def atomic_save_json(filename, data):
         except:
             pass
         return False
+
+
+# =====================================================================
+# GAME MAPPING
+# =====================================================================
+
+def load_game_mapping():
+    """Загружает сопоставление номеров игр с ID"""
+    global game_mapping
+    data = load_json_file(GAME_MAPPING_FILE, {})
+    game_mapping = data if isinstance(data, dict) else {}
+    print(f"📋 Загружено сопоставлений: {len(game_mapping)}", flush=True)
+    return game_mapping
+
+
+def save_game_mapping():
+    """Сохраняет сопоставление номеров игр с ID"""
+    atomic_save_json(GAME_MAPPING_FILE, game_mapping)
+
+
+def get_game_id_by_number(game_number):
+    """Получает ID игры по номеру"""
+    return game_mapping.get(game_number)
+
+
+def get_game_number_by_id(game_id):
+    """Получает номер игры по ID"""
+    for number, gid in game_mapping.items():
+        if str(gid) == str(game_id):
+            return number
+    return None
+
+
+def update_game_mapping(game_number, game_id):
+    """Обновляет сопоставление номера и ID"""
+    game_number = int(game_number)
+    game_id = str(game_id)
+    
+    # Если уже есть другой ID для этого номера, обновляем
+    if game_mapping.get(game_number) != game_id:
+        game_mapping[game_number] = game_id
+        save_game_mapping()
+        print(f"📌 Сопоставление: #N{game_number} <-> ID={game_id}", flush=True)
+        return True
+    return False
 
 
 # =====================================================================
@@ -1225,21 +1271,10 @@ def check_predictions():
 
 
 # =====================================================================
-# PREDICTIONS (СОЗДАНИЕ ПРОГНОЗА) - ИСПРАВЛЕННАЯ!
+# PREDICTIONS (СОЗДАНИЕ ПРОГНОЗА) - С ПРОВЕРКОЙ ПО НОМЕРУ
 # =====================================================================
 
 def has_pending_prediction():
-    # ⚡ ВСЕГДА ВОЗВРАЩАЕМ False - НЕТ БЛОКИРОВКИ
-    return False
-
-
-def prediction_exists(target_game_id):
-    target_game_id = str(target_game_id)
-
-    for entry in predictions:
-        if str(entry.get("target_game_id", "")) == target_game_id:
-            return True
-
     return False
 
 
@@ -1248,10 +1283,11 @@ def create_hybrid_prediction(game_id, game_number):
 
     game_id = str(game_id)
 
-    # Проверяем только дубли по ID
-    if prediction_exists(game_id):
-        print(f"⏭️ Прогноз для ID {game_id} уже существует", flush=True)
-        return None
+    # ✅ ПРОВЕРЯЕМ ПО НОМЕРУ ИГРЫ
+    for entry in predictions:
+        if entry.get("target_number") == game_number and entry.get("status") == "pending":
+            print(f"⏭️ Прогноз на #N{game_number} уже существует", flush=True)
+            return None
 
     # Минимальная задержка 2 секунды
     now_ts = time.time()
@@ -1392,7 +1428,7 @@ def get_game_data(game_id):
 
 
 # =====================================================================
-# PROCESS GAME - ИСПРАВЛЕННАЯ!
+# PROCESS GAME - С СОПОСТАВЛЕНИЕМ ID И НОМЕРА
 # =====================================================================
 
 def process_game(active_game):
@@ -1401,16 +1437,31 @@ def process_game(active_game):
     if not gid:
         return
 
-    # Получаем номер игры (если есть в API)
+    # Получаем номер игры из API
     game_number = None
     if "gameNumber" in active_game:
         game_number = int(active_game["gameNumber"])
     elif "number" in active_game:
         game_number = int(active_game["number"])
     else:
+        # Если номера нет, вычисляем по времени
         game_number = get_game_number()
 
-    # Проверяем, есть ли уже прогноз на этот номер игры
+    # ✅ СОХРАНЯЕМ СОПОСТАВЛЕНИЕ НОМЕРА И ID
+    update_game_mapping(game_number, gid)
+
+    # ✅ ПОЛУЧАЕМ ТЕКУЩИЙ НОМЕР ИГРЫ (КОТОРАЯ СЕЙЧАС ИДЕТ)
+    current_game_number = get_game_number()
+    
+    # ✅ ПОЛУЧАЕМ НОМЕР ЛОББИ (СЛЕДУЮЩАЯ ИГРА)
+    lobby_number = add_game_offset(current_game_number, 1)
+
+    # ✅ СОЗДАЕМ ПРОГНОЗ ТОЛЬКО ДЛЯ ЛОББИ
+    if game_number != lobby_number:
+        print(f"⏭️ #N{game_number} (ID:{gid}) - не лобби (текущая #{current_game_number}, лобби #{lobby_number})", flush=True)
+        return
+
+    # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ УЖЕ ПРОГНОЗ НА ЭТУ ИГРУ
     for entry in predictions:
         if entry.get("target_number") == game_number and entry.get("status") == "pending":
             print(f"⏭️ Прогноз на #N{game_number} уже существует", flush=True)
@@ -1419,7 +1470,7 @@ def process_game(active_game):
     print("\n══════════════════════════════════", flush=True)
     print(f"🆕 НОВАЯ ИГРА В ЛОББИ | ID={gid} | #N{game_number}", flush=True)
 
-    # ⚡ СОЗДАЕМ ПРОГНОЗ МГНОВЕННО
+    # Создаем прогноз
     prediction = create_hybrid_prediction(gid, game_number)
 
     if prediction:
@@ -1459,12 +1510,18 @@ def cleanup_predictions():
 def main():
     global history
     global predictions
+    global game_mapping
 
     print("\n==================================================", flush=True)
     print("🚀 OLD BOT — ТОЧНАЯ КАРТА HYBRID + СКАНЕР", flush=True)
     print("==================================================", flush=True)
 
+    history = load_history()
+    predictions = load_predictions()
+    game_mapping = load_game_mapping()
+
     print(f"📚 История: {len(history)} игр", flush=True)
+    print(f"📋 Сопоставлений: {len(game_mapping)}", flush=True)
 
     print("🧠 Методы:", flush=True)
     print("   ⏱ MS — миллисекунды", flush=True)
@@ -1477,7 +1534,7 @@ def main():
     print(f"📈 Догон: {DOGON_GAMES} игры", flush=True)
     print(f"📊 Мин. вероятность: {MIN_FORECAST_PROBABILITY:.0%}", flush=True)
     print(f"📏 Мин. отрыв: {MIN_LEADER_GAP:.0%}", flush=True)
-    print("⚡ Прогноз: МГНОВЕННО при появлении в лобби", flush=True)
+    print("⚡ Прогноз: ТОЛЬКО на лобби (по номеру игры)", flush=True)
     print("==================================================\n", flush=True)
 
     offset = get_offset()
@@ -1521,6 +1578,4 @@ def main():
 # =====================================================================
 
 if __name__ == "__main__":
-    history = load_history()
-    predictions = load_predictions()
     main()
