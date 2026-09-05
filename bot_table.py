@@ -970,37 +970,18 @@ def telegram_edit(message_id, text, chat_id=None):
 
 def make_prediction_message(entry):
     result = entry["hybrid"]
-
-    text = "🔮 <b>ТОЧНАЯ КАРТА — HYBRID</b>\n\n"
-    text += f"🎯 Игра: <b>#N{entry['target_number']}</b>\n"
-    text += f"🃏 <b>{result['card']}</b> — <b>{result['probability'] * 100:.1f}%</b>\n\n"
-    text += f"🥈 {result.get('second_card', '—')} — {result.get('second_probability', 0) * 100:.1f}%\n\n"
-    text += "🤖 <b>Сигналы:</b>\n"
-
-    details = result.get("method_details", {})
-
-    names = {
-        "MS": "⏱ Миллисекунды",
-        "ID1": "🔢 ID ×1",
-        "ID2": "🔢 ID ×2",
-        "SEQ": "🧩 Последовательность",
-        "FREQ": "📚 Частота"
-    }
-
-    for key in ["MS", "ID1", "ID2", "SEQ", "FREQ"]:
-        if key not in details:
-            continue
-
-        info = details[key]
-
-        marker = "✅" if info.get("top") == result["card"] else "▫️"
-
-        text += f"{marker} {names[key]}: <b>{info.get('top')}</b> ({info.get('probability', 0) * 100:.1f}%)\n"
-
-    text += f"\n📊 Методов: {len(result.get('active_methods', []))}"
-    text += f"\n🎯 Подтвердили: {', '.join(result.get('supporters', []))}"
-    text += f"\n📈 Догон: {DOGON_GAMES - 1} игр"
-
+    
+    card1 = result["card"]
+    prob1 = result["probability"]
+    card2 = result.get("second_card") or "—"
+    prob2 = result.get("second_probability", 0.0)
+    
+    text = (
+        f"🎯 Игра: #N{entry['target_number']}\n"
+        f"🃏 {card1} — {prob1*100:.1f}%\n"
+        f"🥈 {card2} — {prob2*100:.1f}%"
+    )
+    
     return text
 
 
@@ -1211,7 +1192,6 @@ def check_predictions():
             print(f"✅ ЗАШЛО на #{found['num']} | догон {found['dogon']} | {found['card']}")
 
             if msg_id and original_text:
-                # ✅ МЕНЯЕМ ТОЛЬКО ПЕРВУЮ СТРОКУ
                 lines = original_text.split('\n')
                 lines[0] = f"🎯 Игра: #N{target} ✅"
                 new_text = '\n'.join(lines)
@@ -1230,7 +1210,6 @@ def check_predictions():
         print(f"❌ НЕ ЗАШЛО: догоны 0-{DOGON_GAMES} для #{target}")
 
         if msg_id and original_text:
-            # ❌ МЕНЯЕМ ТОЛЬКО ПЕРВУЮ СТРОКУ
             lines = original_text.split('\n')
             lines[0] = f"🎯 Игра: #N{target} ❌"
             new_text = '\n'.join(lines)
@@ -1344,6 +1323,91 @@ def get_game_data(game_id):
 
 
 # =====================================================================
+# API GET ACTIVE GAMES (ДЛЯ ИСТОРИИ)
+# =====================================================================
+
+def get_active_games():
+    url = (
+        f"{BASE_URL}/service-api/"
+        "main-live-feed/v3/games1x2"
+        "?cfView=3"
+        "&count=40"
+        "&fcountry=190"
+        "&gr=415"
+        "&grMode=4"
+        "&lng=ru"
+        "&ref=7"
+        "&selectedMs=10.146.1643503"
+    )
+
+    try:
+        response = SESSION.get(url, timeout=10)
+
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+
+        if isinstance(data, list):
+            games = data
+        elif isinstance(data, dict):
+            games = data.get("Value", [])
+        else:
+            games = []
+
+        result = []
+
+        for game in games:
+            if not isinstance(game, dict):
+                continue
+
+            liga = game.get("liga", {})
+
+            if str(liga.get("id", "")) != str(LEAGUE_ID):
+                continue
+
+            if not game.get("id"):
+                continue
+
+            result.append(game)
+
+        return result
+
+    except Exception as e:
+        print(f"❌ API games: {e}", flush=True)
+        return []
+
+
+# =====================================================================
+# PROCESS GAME (ТОЛЬКО ДЛЯ ИСТОРИИ, БЕЗ ПРОГНОЗОВ)
+# =====================================================================
+
+def process_game(active_game):
+    """ТОЛЬКО ДЛЯ ИСТОРИИ! Прогнозы НЕ создаются!"""
+    gid = str(active_game.get("id", ""))
+
+    if not gid:
+        return
+
+    # Получаем номер игры (для информации)
+    game_number = None
+    if "gameNumber" in active_game:
+        game_number = int(active_game["gameNumber"])
+    elif "number" in active_game:
+        game_number = int(active_game["number"])
+    else:
+        game_number = get_game_number()
+
+    # ТОЛЬКО СОХРАНЯЕМ В ИСТОРИЮ, БЕЗ ПРОГНОЗОВ
+    raw = get_game_data(gid)
+    if raw:
+        parsed = parse_game_data(gid, raw)
+        if parsed:
+            parsed["game_number"] = game_number
+            add_or_update_game(parsed)
+
+
+# =====================================================================
 # CLEANUP
 # =====================================================================
 
@@ -1363,7 +1427,7 @@ def main():
     global history, predictions
 
     print("\n==================================================")
-    print("🚀 БОТ — ПРОГНОЗЫ ПО ID ИЗ КАНАЛА")
+    print("🚀 БОТ — ПРОГНОЗЫ ПО ID ИЗ КАНАЛА + ИСТОРИЯ ИЗ API")
     print("==================================================")
 
     history = load_history()
@@ -1371,7 +1435,8 @@ def main():
 
     print(f"📚 История: {len(history)} игр")
     print(f"📊 Прогнозов: {len(predictions)}")
-    print("📡 Источник ID: ТВОЙ КАНАЛ СТАТИСТИКИ")
+    print("📡 Источник прогнозов: ТВОЙ КАНАЛ СТАТИСТИКИ")
+    print("📡 Источник истории: API")
     print("==================================================\n")
 
     offset = get_offset()
@@ -1381,8 +1446,24 @@ def main():
         start = time.time()
 
         try:
+            # ✅ 1. ОПРАШИВАЕМ API ДЛЯ ИСТОРИИ
+            games = get_active_games()
+            if games:
+                print(f"📡 API: {len(games)} игр")
+
+            for game in games:
+                try:
+                    process_game(game)  # ТОЛЬКО ДЛЯ ИСТОРИИ!
+                except Exception as e:
+                    print(f"❌ Ошибка API: {e}")
+
+            # ✅ 2. ЧИТАЕМ КАНАЛ ДЛЯ ПРОГНОЗОВ
             offset = process_telegram_updates(offset)
+
+            # ✅ 3. ПРОВЕРЯЕМ ПРОГНОЗЫ
             check_predictions()
+
+            # ✅ 4. ЧИСТИМ СТАРЫЕ
             cleanup_predictions()
 
             elapsed = time.time() - start
