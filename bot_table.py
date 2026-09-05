@@ -1171,6 +1171,7 @@ def check_predictions():
         target = entry.get("target_number")
         predicted_cards = entry.get("predicted_cards", [])
         msg_id = entry.get("message_id")
+        original_text = entry.get("original_text", "")
 
         if not target or not predicted_cards or not msg_id:
             continue
@@ -1209,8 +1210,12 @@ def check_predictions():
 
             print(f"✅ ЗАШЛО на #{found['num']} | догон {found['dogon']} | {found['card']}")
 
-            if msg_id:
-                telegram_edit(msg_id, f"🎯 #N{entry['target_number']}\n✅ ЗАШЛО на #{found['num']}\n🃏 {found['card']}")
+            if msg_id and original_text:
+                # ✅ МЕНЯЕМ ТОЛЬКО ПЕРВУЮ СТРОКУ
+                lines = original_text.split('\n')
+                lines[0] = f"🎯 Игра: #N{target} ✅"
+                new_text = '\n'.join(lines)
+                telegram_edit(msg_id, new_text)
 
             atomic_save_json(PREDICTIONS_FILE, predictions)
             continue
@@ -1224,8 +1229,12 @@ def check_predictions():
 
         print(f"❌ НЕ ЗАШЛО: догоны 0-{DOGON_GAMES} для #{target}")
 
-        if msg_id:
-            telegram_edit(msg_id, f"🎯 #N{entry['target_number']}\n❌ НЕ ЗАШЛО")
+        if msg_id and original_text:
+            # ❌ МЕНЯЕМ ТОЛЬКО ПЕРВУЮ СТРОКУ
+            lines = original_text.split('\n')
+            lines[0] = f"🎯 Игра: #N{target} ❌"
+            new_text = '\n'.join(lines)
+            telegram_edit(msg_id, new_text)
 
         atomic_save_json(PREDICTIONS_FILE, predictions)
 
