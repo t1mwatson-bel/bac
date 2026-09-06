@@ -105,6 +105,8 @@ RANKS = {
 history = []
 predictions = []
 games_cache = {}
+# Трекер игр для надёжного отслеживания финального STATE=5
+tracked_games = {}
 last_prediction_time = 0
 processed_numbers = set()
 
@@ -1472,27 +1474,111 @@ def get_active_games():
 # PROCESS GAME (ТОЛЬКО ДЛЯ ИСТОРИИ, БЕЗ ПРОГНОЗОВ)
 # =====================================================================
 
-def process_game(active_game):
-    """Получает игру из API и сохраняет только финальную версию STATE=5."""
-    gid = str(active_game.get("id", ""))
-    if not gid:
-        return
-
+def inspect_game_state(gid, active_game=None, final_attempt=False):
+    """Запрашивает игру напрямую и возвращает последнее состояние P1/P2/STATE."""
     raw = get_game_data(gid)
     if not raw:
-        return
+        return None
+
+    player, dealer, state = extract_game_sc(raw)
+    if state is None:
+        return None
+
+    info = tracked_games.setdefault(str(gid), {
+        "game_id": str(gid),
+        "first_seen": datetime.now(MOSCOW_TZ).isoformat(),
+        "last_state": None,
+        "player": [],
+        "dealer": [],
+        "game_number": None,
+        "final_attempts": 0,
+    })
+
+    if active_game:
+        game_number = active_game.get("gameNumber", active_game.get("number"))
+        if game_number is not None:
+            info["game_number"] = game_number
+
+    info["last_state"] = str(state)
+    info["player"] = player
+    info["dealer"] = dealer
+    info["last_seen"] = datetime.now(MOSCOW_TZ).isoformat()
+
+    print(
+        f"🎮 ID={gid} | STATE={state} | P1={len(player)} | P2={len(dealer)}"
+        + (" | финальная проверка" if final_attempt else ""),
+        flush=True
+    )
+    return raw, state
+
+
+def save_finished_game(gid, raw, active_game=None):
+    """Сохраняет финальную игру STATE=5."""
+    if game_exists(gid):
+        tracked_games.pop(str(gid), None)
+        return False
 
     parsed = parse_game_data(gid, raw)
     if not parsed:
-        return
+        return False
 
-    game_number = active_game.get("gameNumber", active_game.get("number"))
+    game_number = None
+    if active_game:
+        game_number = active_game.get("gameNumber", active_game.get("number"))
+    if game_number is None:
+        game_number = tracked_games.get(str(gid), {}).get("game_number")
+
     try:
         parsed["game_number"] = int(game_number) if game_number is not None else get_game_number()
     except (TypeError, ValueError):
         parsed["game_number"] = get_game_number()
 
-    add_or_update_game(parsed)
+    ok = add_or_update_game(parsed)
+    if ok:
+        tracked_games.pop(str(gid), None)
+    return ok
+
+
+def process_game(active_game):
+    """Отслеживает игру и немедленно сохраняет её при STATE=5."""
+    gid = str(active_game.get("id", ""))
+    if not gid or game_exists(gid):
+        return
+
+    result = inspect_game_state(gid, active_game=active_game)
+    if not result:
+        return
+
+    raw, state = result
+    if str(state) == "5":
+        print(f"🏁 ID={gid} завершена (STATE=5)", flush=True)
+        save_finished_game(gid, raw, active_game)
+
+
+def finalize_disappeared_games(active_ids):
+    """Если игра исчезла из live feed, несколько раз проверяем её напрямую.
+    Это предотвращает потерю STATE=5 между двумя опросами списка игр.
+    """
+    for gid in list(tracked_games.keys()):
+        if gid in active_ids or game_exists(gid):
+            continue
+
+        info = tracked_games.get(gid, {})
+        attempts = int(info.get("final_attempts", 0))
+        if attempts >= 3:
+            print(f"⚠️ ID={gid} исчезла, STATE=5 не получен после 3 проверок", flush=True)
+            tracked_games.pop(gid, None)
+            continue
+
+        info["final_attempts"] = attempts + 1
+        result = inspect_game_state(gid, final_attempt=True)
+        if not result:
+            continue
+
+        raw, state = result
+        if str(state) == "5":
+            print(f"🏁 ID={gid} найдена завершённой после исчезновения из feed", flush=True)
+            save_finished_game(gid, raw)
 
 
 # =====================================================================
@@ -1539,11 +1625,30 @@ def main():
             if games:
                 print(f"📡 API: {len(games)} игр")
 
+            active_ids = set()
             for game in games:
                 try:
+                    gid = str(game.get("id", ""))
+                    if gid:
+                        active_ids.add(gid)
                     process_game(game)  # ТОЛЬКО ДЛЯ ИСТОРИИ!
                 except Exception as e:
-                    print(f"❌ Ошибка API: {e}")
+                    print(f"❌ Ошибка API: {e}", flush=True)
+
+            # Если STATE=5 проскочил между опросами active feed — проверяем исчезнувшие игры.
+            finalize_disappeared_games(active_ids)
+
+            # Не держим трекер бесконечно при проблемах API.
+            cutoff_tracker = datetime.now(MOSCOW_TZ) - timedelta(minutes=15)
+            for gid in list(tracked_games.keys()):
+                try:
+                    seen = datetime.fromisoformat(tracked_games[gid].get("last_seen", tracked_games[gid]["first_seen"]))
+                    if seen.tzinfo is None:
+                        seen = MOSCOW_TZ.localize(seen)
+                    if seen < cutoff_tracker:
+                        tracked_games.pop(gid, None)
+                except Exception:
+                    pass
 
             # ✅ 2. ЧИТАЕМ КАНАЛ ДЛЯ ПРОГНОЗОВ
             offset = process_telegram_updates(offset)
