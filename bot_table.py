@@ -68,7 +68,7 @@ MIN_ID1_MATCHES = 3
 MIN_ID2_MATCHES = 2
 MIN_SEQUENCE_MATCHES = 2
 
-MIN_FORECAST_PROBABILITY = 0.10
+MIN_FORECAST_PROBABILITY = 0.25   # 25% — оставляем как было
 MIN_LEADER_GAP = 0.01
 MIN_ACTIVE_METHODS = 1
 
@@ -246,21 +246,21 @@ def game_exists(gid):
 
 
 # =====================================================================
-# ADD GAME TO HISTORY (НОВАЯ ФУНКЦИЯ)
+# ADD GAME TO HISTORY (НОВАЯ ФУНКЦИЯ С АВТО-ОЧИСТКОЙ)
 # =====================================================================
 
 def add_game_to_history(game_data):
     """
-    Добавляет игру в историю с авто-очисткой старых данных
+    Добавляет игру в историю с авто-очисткой старых данных (хранит 2880 игр = 48 часов)
     """
     global history
-    
+
     # Максимум игр за 48 часов (1440 * 2)
     MAX_GAMES = 2880
-    
+
     # Проверяем, есть ли уже такая игра
     game_id = str(game_data.get("game_id", ""))
-    
+
     if game_id:
         # Ищем и обновляем существующую
         for i, game in enumerate(history):
@@ -269,16 +269,16 @@ def add_game_to_history(game_data):
                 atomic_save_json(DATA_FILE, history)
                 print(f"🔄 Обновлена игра | ID={game_id}")
                 return
-    
+
     # Добавляем новую игру в конец
     history.append(game_data)
-    
+
     # Если игр больше максимума — удаляем самые старые
     if len(history) > MAX_GAMES:
         removed = len(history) - MAX_GAMES
         history = history[removed:]  # Удаляем первые N записей (самые старые)
         print(f"🧹 Удалено {removed} старых игр (осталось {MAX_GAMES})")
-    
+
     # Сохраняем
     atomic_save_json(DATA_FILE, history)
     print(f"💾 Добавлена игра | Всего: {len(history)} | ID={game_id}")
@@ -488,22 +488,6 @@ def parse_game_data(game_id, raw):
         "id_last_digit": str(game_id)[-1],
         "id_last_two": str(game_id)[-2:] if len(str(game_id)) >= 2 else ""
     }
-
-
-# =====================================================================
-# MERGE / SAVE GAME (ОБНОВЛЕНО)
-# =====================================================================
-
-def add_or_update_game(game):
-    """Сохраняет игру через add_game_to_history"""
-    gid = str(game.get("game_id", ""))
-    
-    if not gid:
-        return False
-    
-    # Используем новую функцию
-    add_game_to_history(game)
-    return True
 
 
 # =====================================================================
@@ -1063,7 +1047,7 @@ def save_offset(offset):
 
 
 # =====================================================================
-# PROCESS TELEGRAM UPDATES
+# PROCESS TELEGRAM UPDATES (ОБНОВЛЕНО: сохранение завершённых игр в историю)
 # =====================================================================
 
 def process_telegram_updates(offset):
@@ -1414,11 +1398,11 @@ def get_active_games():
 
 
 # =====================================================================
-# PROCESS GAME (ОБНОВЛЕНО)
+# PROCESS GAME (ОБНОВЛЕНО: используем add_game_to_history)
 # =====================================================================
 
 def process_game(active_game):
-    """Обрабатывает игру из API и сохраняет в историю"""
+    """Обрабатывает игру из API и сохраняет в историю через add_game_to_history"""
     gid = str(active_game.get("id", ""))
 
     if not gid:
