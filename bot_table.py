@@ -246,6 +246,45 @@ def game_exists(gid):
 
 
 # =====================================================================
+# ADD GAME TO HISTORY (НОВАЯ ФУНКЦИЯ)
+# =====================================================================
+
+def add_game_to_history(game_data):
+    """
+    Добавляет игру в историю с авто-очисткой старых данных
+    """
+    global history
+    
+    # Максимум игр за 48 часов (1440 * 2)
+    MAX_GAMES = 2880
+    
+    # Проверяем, есть ли уже такая игра
+    game_id = str(game_data.get("game_id", ""))
+    
+    if game_id:
+        # Ищем и обновляем существующую
+        for i, game in enumerate(history):
+            if str(game.get("game_id", "")) == game_id:
+                history[i] = game_data
+                atomic_save_json(DATA_FILE, history)
+                print(f"🔄 Обновлена игра | ID={game_id}")
+                return
+    
+    # Добавляем новую игру в конец
+    history.append(game_data)
+    
+    # Если игр больше максимума — удаляем самые старые
+    if len(history) > MAX_GAMES:
+        removed = len(history) - MAX_GAMES
+        history = history[removed:]  # Удаляем первые N записей (самые старые)
+        print(f"🧹 Удалено {removed} старых игр (осталось {MAX_GAMES})")
+    
+    # Сохраняем
+    atomic_save_json(DATA_FILE, history)
+    print(f"💾 Добавлена игра | Всего: {len(history)} | ID={game_id}")
+
+
+# =====================================================================
 # DEEP PARSING
 # =====================================================================
 
@@ -452,42 +491,18 @@ def parse_game_data(game_id, raw):
 
 
 # =====================================================================
-# MERGE / SAVE GAME
+# MERGE / SAVE GAME (ОБНОВЛЕНО)
 # =====================================================================
 
 def add_or_update_game(game):
-    global history
-
-    gid = str(game.get("game_id"))
-
+    """Сохраняет игру через add_game_to_history"""
+    gid = str(game.get("game_id", ""))
+    
     if not gid:
         return False
-
-    idx = find_game_index(gid)
-
-    if idx != -1:
-        old = history[idx]
-
-        old_cards = len(old.get("player_cards", [])) + len(old.get("dealer_cards", []))
-        new_cards = len(game.get("player_cards", [])) + len(game.get("dealer_cards", []))
-
-        if new_cards >= old_cards:
-            history[idx] = game
-            atomic_save_json(DATA_FILE, history)
-            print(f"🔄 Игра обновлена | ID={gid} | карт={new_cards}", flush=True)
-
-        return False
-
-    history.append(game)
-
-    if len(history) > MAX_HISTORY_GAMES:
-        history = history[-MAX_HISTORY_GAMES:]
-        print(f"♻️ История ограничена {MAX_HISTORY_GAMES}", flush=True)
-
-    atomic_save_json(DATA_FILE, history)
-
-    print(f"💾 Новая игра | ID={gid} | P1={card_to_text(game.get('first_player_card'))} | Всего={len(history)}", flush=True)
-
+    
+    # Используем новую функцию
+    add_game_to_history(game)
     return True
 
 
@@ -1084,11 +1099,31 @@ def process_telegram_updates(offset):
 
             text = post.get("text", "")
 
-            # ✅ СОХРАНЯЕМ ЗАВЕРШЕННЫЕ ИГРЫ В КЭШ
+            # ✅ СОХРАНЯЕМ ЗАВЕРШЕННЫЕ ИГРЫ В КЭШ И ИСТОРИЮ
             parsed = parse_cards_from_message(text)
             if parsed:
                 games_cache[parsed["game_number"]] = text
-                print(f"💾 КЭШ: #{parsed['game_number']} -> {parsed['cards']}")
+                
+                # Сохраняем завершенную игру в историю
+                game_data = {
+                    "game_id": None,
+                    "game_number": parsed["game_number"],
+                    "timestamp_msk": datetime.now(MOSCOW_TZ).strftime("%H:%M:%S.%f")[:-3],
+                    "state": "finished",
+                    "player_cards": [],
+                    "dealer_cards": [],
+                    "all_cards": parsed["cards"],
+                    "total_cards": len(parsed["cards"]),
+                    "source": "telegram"
+                }
+                
+                # Пытаемся найти game_id из текста
+                id_match = re.search(r"ID:\s*(\d+)", text)
+                if id_match:
+                    game_data["game_id"] = id_match.group(1)
+                
+                add_game_to_history(game_data)
+                print(f"💾 Сохранена завершенная игра #N{parsed['game_number']} из канала")
 
             # ✅ ИЩЕМ НОВУЮ ИГРУ (С ОЖИДАНИЕМ)
             if "⏳ Ожидание игры" in text:
@@ -1379,17 +1414,17 @@ def get_active_games():
 
 
 # =====================================================================
-# PROCESS GAME (ТОЛЬКО ДЛЯ ИСТОРИИ, БЕЗ ПРОГНОЗОВ)
+# PROCESS GAME (ОБНОВЛЕНО)
 # =====================================================================
 
 def process_game(active_game):
-    """ТОЛЬКО ДЛЯ ИСТОРИИ! Прогнозы НЕ создаются!"""
+    """Обрабатывает игру из API и сохраняет в историю"""
     gid = str(active_game.get("id", ""))
 
     if not gid:
         return
 
-    # Получаем номер игры (для информации)
+    # Получаем номер игры
     game_number = None
     if "gameNumber" in active_game:
         game_number = int(active_game["gameNumber"])
@@ -1398,13 +1433,14 @@ def process_game(active_game):
     else:
         game_number = get_game_number()
 
-    # ТОЛЬКО СОХРАНЯЕМ В ИСТОРИЮ, БЕЗ ПРОГНОЗОВ
+    # Получаем данные игры
     raw = get_game_data(gid)
     if raw:
         parsed = parse_game_data(gid, raw)
         if parsed:
             parsed["game_number"] = game_number
-            add_or_update_game(parsed)
+            # ✅ СОХРАНЯЕМ ЧЕРЕЗ НОВУЮ ФУНКЦИЮ С АВТО-ОЧИСТКОЙ
+            add_game_to_history(parsed)
 
 
 # =====================================================================
@@ -1436,7 +1472,8 @@ def main():
     print(f"📚 История: {len(history)} игр")
     print(f"📊 Прогнозов: {len(predictions)}")
     print("📡 Источник прогнозов: ТВОЙ КАНАЛ СТАТИСТИКИ")
-    print("📡 Источник истории: API")
+    print("📡 Источник истории: API + Telegram")
+    print("🗑️ Авто-очистка: хранятся только последние 2880 игр (48 часов)")
     print("==================================================\n")
 
     offset = get_offset()
@@ -1453,7 +1490,7 @@ def main():
 
             for game in games:
                 try:
-                    process_game(game)  # ТОЛЬКО ДЛЯ ИСТОРИИ!
+                    process_game(game)
                 except Exception as e:
                     print(f"❌ Ошибка API: {e}")
 
