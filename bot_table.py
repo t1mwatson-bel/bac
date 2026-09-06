@@ -1512,26 +1512,81 @@ def inspect_game_state(gid, active_game=None, final_attempt=False):
     return raw, state
 
 
-def save_finished_game(gid, raw, active_game=None):
-    """Сохраняет финальную игру STATE=5."""
+def build_game_from_cached_cards(gid, info):
+    """Создаёт запись игры из последнего финального кэша P1/P2 (STATE=4)."""
+    player = info.get("player", []) or []
+    dealer = info.get("dealer", []) or []
+    if not player and not dealer:
+        return None
+
+    now = datetime.now(MOSCOW_TZ)
+    all_cards = []
+    sequence = []
+    pos = 1
+
+    # Сохраняем порядок в привычном для истории формате.
+    for i in range(max(len(player), len(dealer))):
+        if i < len(player):
+            card = player[i]
+            all_cards.append(card)
+            sequence.append({"position": pos, "who": "P", "rank": card["rank"], "suit": card["suit"]})
+            pos += 1
+        if i < len(dealer):
+            card = dealer[i]
+            all_cards.append(card)
+            sequence.append({"position": pos, "who": "D", "rank": card["rank"], "suit": card["suit"]})
+            pos += 1
+
+    game_number = info.get("game_number")
+    try:
+        game_number = int(game_number) if game_number is not None else get_game_number()
+    except (TypeError, ValueError):
+        game_number = get_game_number()
+
+    return {
+        "game_id": str(gid),
+        "timestamp": now.isoformat(),
+        "timestamp_msk": now.strftime("%H:%M:%S.%f")[:-3],
+        "state": str(info.get("last_state", "4")),
+        "game_number": game_number,
+        "player_cards": player,
+        "dealer_cards": dealer,
+        "player_suits": [c["suit"] for c in player],
+        "player_ranks": [c["rank"] for c in player],
+        "dealer_suits": [c["suit"] for c in dealer],
+        "dealer_ranks": [c["rank"] for c in dealer],
+        "all_suits": [c["suit"] for c in all_cards],
+        "all_ranks": [c["rank"] for c in all_cards],
+        "sequence": sequence,
+        "total_cards": len(all_cards),
+        "first_player_card": player[0] if player else None,
+        "id_last_digit": str(gid)[-1],
+        "id_last_two": str(gid)[-2:] if len(str(gid)) >= 2 else ""
+    }
+
+
+def save_finished_game(gid, raw=None, active_game=None, from_cache=False):
+    """Сохраняет игру либо по STATE=5, либо из финального кэша STATE=4."""
     if game_exists(gid):
         tracked_games.pop(str(gid), None)
         return False
 
-    parsed = parse_game_data(gid, raw)
+    info = tracked_games.get(str(gid), {})
+
+    if from_cache:
+        parsed = build_game_from_cached_cards(gid, info)
+    else:
+        parsed = parse_game_data(gid, raw)
+
     if not parsed:
         return False
 
-    game_number = None
     if active_game:
         game_number = active_game.get("gameNumber", active_game.get("number"))
-    if game_number is None:
-        game_number = tracked_games.get(str(gid), {}).get("game_number")
-
-    try:
-        parsed["game_number"] = int(game_number) if game_number is not None else get_game_number()
-    except (TypeError, ValueError):
-        parsed["game_number"] = get_game_number()
+        try:
+            parsed["game_number"] = int(game_number) if game_number is not None else parsed.get("game_number", get_game_number())
+        except (TypeError, ValueError):
+            pass
 
     ok = add_or_update_game(parsed)
     if ok:
@@ -1540,7 +1595,7 @@ def save_finished_game(gid, raw, active_game=None):
 
 
 def process_game(active_game):
-    """Отслеживает игру и немедленно сохраняет её при STATE=5."""
+    """Отслеживает игру. STATE=4 фиксирует финальный P1/P2, STATE=5 сохраняет сразу."""
     gid = str(active_game.get("id", ""))
     if not gid or game_exists(gid):
         return
@@ -1553,20 +1608,34 @@ def process_game(active_game):
     if str(state) == "5":
         print(f"🏁 ID={gid} завершена (STATE=5)", flush=True)
         save_finished_game(gid, raw, active_game)
+    elif str(state) == "4":
+        print(f"📌 ID={gid} STATE=4 — финальные P1/P2 зафиксированы, ждём исчезновения", flush=True)
 
 
 def finalize_disappeared_games(active_ids):
-    """Если игра исчезла из live feed, несколько раз проверяем её напрямую.
-    Это предотвращает потерю STATE=5 между двумя опросами списка игр.
-    """
+    """При исчезновении игры сохраняет кэш STATE=4. STATE=5 остаётся мгновенным сохранением."""
     for gid in list(tracked_games.keys()):
         if gid in active_ids or game_exists(gid):
             continue
 
         info = tracked_games.get(gid, {})
+        last_state = str(info.get("last_state", ""))
+
+        # По фактическому поведению API STATE=5 может не появиться в live feed.
+        # Если последним увиденным состоянием был 4, карты уже финальные.
+        if last_state == "4":
+            print(
+                f"🏁 ID={gid} исчезла из feed после STATE=4 — сохраняем финальный кэш "
+                f"P1={len(info.get('player', []))} | P2={len(info.get('dealer', []))}",
+                flush=True
+            )
+            if save_finished_game(gid, from_cache=True):
+                print(f"✅ ID={gid} сохранена из кэша STATE=4", flush=True)
+            continue
+
         attempts = int(info.get("final_attempts", 0))
         if attempts >= 3:
-            print(f"⚠️ ID={gid} исчезла, STATE=5 не получен после 3 проверок", flush=True)
+            print(f"⚠️ ID={gid} исчезла с последним STATE={last_state}; финального STATE=4/5 нет", flush=True)
             tracked_games.pop(gid, None)
             continue
 
@@ -1577,8 +1646,11 @@ def finalize_disappeared_games(active_ids):
 
         raw, state = result
         if str(state) == "5":
-            print(f"🏁 ID={gid} найдена завершённой после исчезновения из feed", flush=True)
+            print(f"🏁 ID={gid} найдена завершённой после исчезновения (STATE=5)", flush=True)
             save_finished_game(gid, raw)
+        elif str(state) == "4":
+            # Следующий проход цикла увидит исчезнувшую STATE=4 и сохранит кэш.
+            info["last_state"] = "4"
 
 
 # =====================================================================
