@@ -790,7 +790,7 @@ def make_prediction_message(entry):
 
     return (
         f"🎯 <b>Игра: #N{target_number}</b>\n\n"
-        f"🃏 <b>{cards_text}</b>\n\n
+        f"🃏 <b>{cards_text}</b>\n\n"
         
     )
 
