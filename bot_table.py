@@ -790,11 +790,7 @@ def make_prediction_message(entry):
 
     return (
         f"🎯 <b>Игра: #N{target_number}</b>\n\n"
-        f"🃏 <b>{cards_text}</b>\n\n"
-        f"📊 Паттерн: первая карта игрока "
-        f"{source_card}\n"
-        f"🔗 Источник: #N{source_number}\n"
-        f"⏩ Смещение: +{PREDICTION_OFFSET} игр"
+        f"🃏 <b>{cards_text}</b>\n\n
     )
 
 
