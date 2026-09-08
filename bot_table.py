@@ -610,13 +610,13 @@ def calculate_score(cards):
             score += 9
 
         elif card.startswith("J"):
-            score += 10
+            score += 2
 
         elif card.startswith("Q"):
-            score += 10
+            score += 3
 
         elif card.startswith("K"):
-            score += 10
+            score += 4
 
         elif card.startswith("A"):
             score += 11
