@@ -1101,110 +1101,65 @@ def build_trigger_predictions(game):
     if not game:
         return []
 
-    player_cards = game.get(
-        "player_cards",
-        []
-    )
+    player_cards = game.get("player_cards", [])
+    dealer_cards = game.get("dealer_cards", [])
 
-    dealer_cards = game.get(
-        "dealer_cards",
-        []
-    )
-
-    # РОВНО ТРИ КАРТЫ У ИГРОКА
+    # 1. У игрока РОВНО 3 карты
     if len(player_cards) != 3:
         return []
 
     if not dealer_cards:
         return []
 
-    player_score = game.get(
-        "player_score"
-    )
+    player_score = game.get("player_score")
+    dealer_score = game.get("dealer_score")
 
-    dealer_score = game.get(
-        "dealer_score"
-    )
-
-    if (
-        player_score is None
-        or dealer_score is None
-    ):
+    if player_score is None or dealer_score is None:
         return []
 
-    # Первая карта игрока -> МАСТЬ
-    player_first = normalize_card_string(
-        player_cards[0]
-    )
-
-    # Первая карта дилера -> РАНГ
-    dealer_first = normalize_card_string(
-        dealer_cards[0]
-    )
-
-    if not player_first:
-        return []
-
+    # 2. Первая карта дилера — J/Q/K/A (ОБЯЗАТЕЛЬНОЕ УСЛОВИЕ!)
+    dealer_first = normalize_card_string(dealer_cards[0])
     if not dealer_first:
         return []
 
-    player_match = re.match(
-        r"(10|[2-9AJQK])([♠♣♦♥])",
-        player_first
-    )
-
-    dealer_match = re.match(
-        r"(10|[2-9AJQK])([♠♣♦♥])",
-        dealer_first
-    )
-
-    if not player_match:
-        return []
-
+    dealer_match = re.match(r"(10|[2-9AJQK])([♠♣♦♥])", dealer_first)
     if not dealer_match:
         return []
 
-    # Масть игрока
-    source_suit = player_match.group(2)
+    dealer_rank = dealer_match.group(1)
 
-    # Ранг дилера
-    source_rank = dealer_match.group(1)
+    # Ранг должен быть J, Q, K или A
+    if dealer_rank not in ["J", "Q", "K", "A"]:
+        return []  # ❌ НЕ ТРИГГЕР
 
-    predicted_card = (
-        f"{source_rank}{source_suit}"
-    )
-
-    # Первое смещение:
-    # последние цифры
-    offset_1 = second_digit_difference(
-        player_score,
-        dealer_score
-    )
-
-    # Второе смещение:
-    # разница очков
-    offset_2 = abs(
-        int(player_score)
-        - int(dealer_score)
-    )
-
-    if offset_1 is None:
+    # 3. Первая карта игрока -> МАСТЬ
+    player_first = normalize_card_string(player_cards[0])
+    if not player_first:
         return []
 
-    if offset_1 <= 0:
+    player_match = re.match(r"(10|[2-9AJQK])([♠♣♦♥])", player_first)
+    if not player_match:
+        return []
+
+    source_suit = player_match.group(2)      # масть с первой карты игрока
+    source_rank = dealer_rank                # ранг с первой карты дилера (уже J/Q/K/A)
+
+    predicted_card = f"{source_rank}{source_suit}"
+
+    # 4. Смещения
+    offset_1 = second_digit_difference(player_score, dealer_score)
+    offset_2 = abs(int(player_score) - int(dealer_score))
+
+    if offset_1 is None or offset_1 <= 0:
         return []
 
     if offset_2 <= 0:
         return []
 
-    source_number = int(
-        game.get("game_number")
-    )
-
+    source_number = int(game.get("game_number"))
     results = []
 
     target_1 = source_number + offset_1
-
     results.append({
         "prediction_type": "digits",
         "offset": offset_1,
@@ -1213,11 +1168,7 @@ def build_trigger_predictions(game):
     })
 
     target_2 = source_number + offset_2
-
-    # Если обе формулы дали одну игру —
-    # второй одинаковый прогноз не нужен.
     if target_2 != target_1:
-
         results.append({
             "prediction_type": "score",
             "offset": offset_2,
