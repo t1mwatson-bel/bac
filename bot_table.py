@@ -710,6 +710,15 @@ def parse_finished_game(
         return None
 
     value = data.get("Value")
+sc = value.get("SC", {})
+
+for item in sc.get("S", []):
+    if item.get("Key") == "P1":
+        ...
+    elif item.get("Key") == "P2":
+        ...
+    elif item.get("Key") == "STATE":
+        ...
 
     if not isinstance(value, dict):
         return None
