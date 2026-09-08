@@ -721,6 +721,7 @@ for item in sc.get("S", []):
         ...
 
     if not isinstance(value, dict):
+        
         return None
 
     sc = value.get(
