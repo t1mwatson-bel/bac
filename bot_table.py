@@ -880,9 +880,6 @@ def make_prediction_message(
         f"🎯 Игра: "
         f"<b>#N{prediction['target_number']}</b>\n"
 
-        f"📌 Триггер: "
-        f"#N{prediction['trigger_number']}\n\n"
-
         f"🃏 <b>{cards[0]}</b>\n"
         f"🃏 <b>{cards[1]}</b>\n\n"
 
