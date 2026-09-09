@@ -652,9 +652,9 @@ def get_trigger_prediction(game):
     Триггер:
 
     P1:
-        6 / J -> J
-        7 / Q -> Q
-        8 / K -> K
+        6 -> J
+        7 -> Q
+        8 -> K
 
     D1:
         обязательно 10
