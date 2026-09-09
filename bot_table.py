@@ -1,4 +1,4 @@
-import os
+
 import sys
 import re
 import json
@@ -730,16 +730,10 @@ def get_trigger_prediction(game):
         return None
 
     rank_mapping = {
-
-        "6": "J",
-        "J": "J",
-
-        "7": "Q",
-        "Q": "Q",
-
-        "8": "K",
-        "K": "K",
-    }
+    "6": "J",
+    "7": "Q",
+    "8": "K",
+}
 
     predicted_rank = rank_mapping.get(
         first_player_rank
@@ -1030,12 +1024,10 @@ def check_prediction_cards(
     predicted_cards
 ):
     """
-    Проверяем ТОЛЬКО Player.
+    Проверяем Player и Dealer.
 
-    Dealer не учитывается.
-
-    Если карта найдена у Player —
-    сразу PLUS.
+    Если прогнозируемая карта найдена
+    у Player ИЛИ у Dealer — сразу PLUS.
     """
 
     player_cards = game.get(
@@ -1043,22 +1035,27 @@ def check_prediction_cards(
         []
     )
 
-    actual_player_cards = []
+    dealer_cards = game.get(
+        "dealer_cards",
+        []
+    )
 
-    for card in player_cards:
+    actual_cards = []
+
+    for card in player_cards + dealer_cards:
 
         text = card_to_text(
             card
         )
 
         if text:
-            actual_player_cards.append(
+            actual_cards.append(
                 text
             )
 
     for predicted in predicted_cards:
 
-        if predicted in actual_player_cards:
+        if predicted in actual_cards:
 
             return predicted
 
@@ -1300,7 +1297,7 @@ def check_predictions():
                 print(
                     f"🎯 Карта "
                     f"{found_card} "
-                    f"найдена у Player "
+                    f"найдена у Player или Dealer "
                     f"в #N{game_number}",
                     flush=True
                 )
@@ -1431,63 +1428,6 @@ def check_predictions():
 
     if changed:
         save_predictions()
-
-
-# =====================================================================
-# KEEP MOST COMPLETE GAME VERSION
-# =====================================================================
-
-def choose_more_complete_game(old_game, new_game):
-    """Не даёт неполному обновлению затереть полную версию игры."""
-
-    if not old_game:
-        return new_game
-
-    if not new_game:
-        return old_game
-
-    old_player = len(old_game.get("player_cards", []))
-    new_player = len(new_game.get("player_cards", []))
-
-    old_dealer = len(old_game.get("dealer_cards", []))
-    new_dealer = len(new_game.get("dealer_cards", []))
-
-    # Если новая версия короче хотя бы по одной стороне —
-    # оставляем уже полученную более полную версию.
-    if new_player < old_player or new_dealer < old_dealer:
-        return old_game
-
-    # Если карт столько же или больше — принимаем новую версию.
-    return new_game
-
-
-def choose_more_complete_text(old_text, new_text):
-    """Для pending_games сохраняем текст самой полной версии игры."""
-
-    if not old_text:
-        return new_text
-
-    if not new_text:
-        return old_text
-
-    old_game = parse_game_message(old_text)
-    new_game = parse_game_message(new_text)
-
-    if not old_game:
-        return new_text
-
-    if not new_game:
-        return old_text
-
-    selected = choose_more_complete_game(
-        old_game,
-        new_game
-    )
-
-    if selected is old_game:
-        return old_text
-
-    return new_text
 
 
 # =====================================================================
@@ -1689,33 +1629,17 @@ def process_telegram_updates(
 
             if game_number in pending_games:
 
-                old_text = pending_games[
-                    game_number
-                ].get("text", "")
-
-                selected_text = choose_more_complete_text(
-                    old_text,
-                    text
-                )
-
                 pending_games[
                     game_number
-                ]["text"] = selected_text
+                ]["text"] = text
 
-                if selected_text == text:
-                    print(
-                        f"🔄 Обновлена игра "
-                        f"#N{game_number} "
-                        f"до окончания "
-                        f"{FINALIZE_WAIT_SECONDS} секунд",
-                        flush=True
-                    )
-                else:
-                    print(
-                        f"🔒 #N{game_number} — получено неполное "
-                        f"обновление, оставляем более полную версию",
-                        flush=True
-                    )
+                print(
+                    f"🔄 Обновлена игра "
+                    f"#N{game_number} "
+                    f"до окончания "
+                    f"{FINALIZE_WAIT_SECONDS} секунд",
+                    flush=True
+                )
 
                 continue
 
@@ -1728,32 +1652,16 @@ def process_telegram_updates(
 
                 if game:
 
-                    old_game = games_cache.get(
-                        game_number
-                    )
-
-                    selected_game = choose_more_complete_game(
-                        old_game,
-                        game
-                    )
-
                     games_cache[
                         game_number
-                    ] = selected_game
+                    ] = game
 
-                    if selected_game is game:
-                        print(
-                            f"🔄 Обновлена "
-                            f"завершённая "
-                            f"игра #N{game_number}",
-                            flush=True
-                        )
-                    else:
-                        print(
-                            f"🔒 #N{game_number} — получено неполное "
-                            f"обновление, оставляем более полную версию",
-                            flush=True
-                        )
+                    print(
+                        f"🔄 Обновлена "
+                        f"завершённая "
+                        f"игра #N{game_number}",
+                        flush=True
+                    )
 
                 continue
 
