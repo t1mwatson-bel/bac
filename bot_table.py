@@ -681,7 +681,7 @@ def get_trigger_prediction(game):
         []
     )
 
-    if len(player) < 3:
+    if len(player) < 1:
         return None
 
     if len(dealer) < 1:
@@ -712,28 +712,16 @@ def get_trigger_prediction(game):
         dealer[0].get("rank")
     )
 
-    third_player_rank = normalize_rank(
-        player[2].get("rank")
-    )
-
     # Первая карта Dealer = 10.
     if first_dealer_rank != "10":
         return None
 
-    # Третья карта Player только 6/7/8/9.
-    if third_player_rank not in {
-        "6",
-        "7",
-        "8",
-        "9",
-    }:
-        return None
-
     rank_mapping = {
-    "6": "J",
-    "7": "Q",
-    "8": "K",
-}
+
+        "6": "J",
+        "7": "Q",
+        "8": "K",
+    }
 
     predicted_rank = rank_mapping.get(
         first_player_rank
@@ -1024,10 +1012,12 @@ def check_prediction_cards(
     predicted_cards
 ):
     """
-    Проверяем Player и Dealer.
+    Проверяем ТОЛЬКО Player.
 
-    Если прогнозируемая карта найдена
-    у Player ИЛИ у Dealer — сразу PLUS.
+    Dealer не учитывается.
+
+    Если карта найдена у Player —
+    сразу PLUS.
     """
 
     player_cards = game.get(
@@ -1035,27 +1025,22 @@ def check_prediction_cards(
         []
     )
 
-    dealer_cards = game.get(
-        "dealer_cards",
-        []
-    )
+    actual_player_cards = []
 
-    actual_cards = []
-
-    for card in player_cards + dealer_cards:
+    for card in player_cards:
 
         text = card_to_text(
             card
         )
 
         if text:
-            actual_cards.append(
+            actual_player_cards.append(
                 text
             )
 
     for predicted in predicted_cards:
 
-        if predicted in actual_cards:
+        if predicted in actual_player_cards:
 
             return predicted
 
@@ -1297,7 +1282,7 @@ def check_predictions():
                 print(
                     f"🎯 Карта "
                     f"{found_card} "
-                    f"найдена у Player или Dealer "
+                    f"найдена у Player "
                     f"в #N{game_number}",
                     flush=True
                 )
