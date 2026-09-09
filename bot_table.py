@@ -1,4 +1,4 @@
-import os
+
 import sys
 import re
 import json
@@ -644,12 +644,12 @@ def add_game_offset(
 
 
 # =====================================================================
-# TRIGGER
+# ALGORITHM: ПОВТОРЕНИЕ
 # =====================================================================
 
-def get_trigger_prediction(game):
+def get_repeat_prediction(game):
     """
-    Триггер:
+    Алгоритм "Повторение".
 
     P1:
         6 -> J
@@ -659,348 +659,273 @@ def get_trigger_prediction(game):
     D1:
         обязательно 10
 
-    P3:
-        только 6 / 7 / 8 / 9
-
     Исключения для игры-триггера:
         P = 21
         D = 21
         #X
 
     Цель:
-        +3 игры.
+        всегда +3 игры.
     """
 
-    player = game.get(
-        "player_cards",
-        []
-    )
+    player = game.get("player_cards", [])
+    dealer = game.get("dealer_cards", [])
 
-    dealer = game.get(
-        "dealer_cards",
-        []
-    )
-
-    if len(player) < 1:
+    if len(player) < 1 or len(dealer) < 1:
         return None
 
-    if len(dealer) < 1:
-        return None
-
-    # Ничья.
     if game.get("is_draw"):
         return None
 
-    # 21 по Cyber 21.
-    if game.get(
-        "player_score"
-    ) == 21:
-
+    if game.get("player_score") == 21:
         return None
 
-    if game.get(
-        "dealer_score"
-    ) == 21:
-
+    if game.get("dealer_score") == 21:
         return None
 
-    first_player_rank = normalize_rank(
-        player[0].get("rank")
-    )
+    first_player_rank = normalize_rank(player[0].get("rank"))
+    first_dealer_rank = normalize_rank(dealer[0].get("rank"))
 
-    first_dealer_rank = normalize_rank(
-        dealer[0].get("rank")
-    )
-
-    # Первая карта Dealer = 10.
     if first_dealer_rank != "10":
         return None
 
     rank_mapping = {
-
         "6": "J",
         "7": "Q",
         "8": "K",
     }
 
-    predicted_rank = rank_mapping.get(
-        first_player_rank
-    )
-
+    predicted_rank = rank_mapping.get(first_player_rank)
     if not predicted_rank:
         return None
 
-    # Масти по количеству карт Player.
     suit_pairs = {
-
-        2: [
-            "♠️",
-            "♦️"
-        ],
-
-        3: [
-            "♣️",
-            "♥️"
-        ],
-
-        4: [
-            "♥️",
-            "♣️"
-        ],
-
-        5: [
-            "♦️",
-            "♠️"
-        ],
+        2: ["♠️", "♦️"],
+        3: ["♣️", "♥️"],
+        4: ["♥️", "♣️"],
+        5: ["♦️", "♠️"],
     }
 
     player_count = len(player)
-
-    predicted_suits = suit_pairs.get(
-        player_count
-    )
-
+    predicted_suits = suit_pairs.get(player_count)
     if not predicted_suits:
-
-        print(
-            f"⏭️ #N{game['game_number']} — "
-            f"для {player_count} карт Player "
-            f"нет пары мастей",
-            flush=True
-        )
-
         return None
 
     predicted_cards = [
-
-        f"{predicted_rank}"
-        f"{predicted_suits[0]}",
-
-        f"{predicted_rank}"
-        f"{predicted_suits[1]}",
+        f"{predicted_rank}{predicted_suits[0]}",
+        f"{predicted_rank}{predicted_suits[1]}",
     ]
 
     return {
-
-        "trigger_number":
-            game["game_number"],
-
-        "trigger_game_id":
-            game.get("game_id"),
-
-        "target_number":
-            add_game_offset(
-                game["game_number"],
-                FORECAST_OFFSET
-            ),
-
-        "predicted_rank":
-            predicted_rank,
-
-        "predicted_suits":
-            predicted_suits,
-
-        "predicted_cards":
-            predicted_cards,
-
-        "trigger_player":
-            [
-                card_to_text(c)
-                for c in player
-            ],
-
-        "trigger_dealer":
-            [
-                card_to_text(c)
-                for c in dealer
-            ],
-
-        "trigger_player_score":
-            game["player_score"],
-
-        "trigger_dealer_score":
-            game["dealer_score"],
-
-        "status":
-            "pending",
-
-        "created_at":
-            datetime.now(
-                MOSCOW_TZ
-            ).isoformat(),
-
-        "result_game":
-            None,
-
-        "found_card":
-            None,
-
-        "dogon":
-            None,
-
-        "message_id":
-            None,
+        "algorithm": "повторение",
+        "trigger_number": game["game_number"],
+        "trigger_game_id": game.get("game_id"),
+        "target_number": add_game_offset(game["game_number"], FORECAST_OFFSET),
+        "predicted_rank": predicted_rank,
+        "predicted_suits": predicted_suits,
+        "predicted_cards": predicted_cards,
+        "trigger_player": [card_to_text(c) for c in player],
+        "trigger_dealer": [card_to_text(c) for c in dealer],
+        "trigger_player_score": game["player_score"],
+        "trigger_dealer_score": game["dealer_score"],
+        "status": "pending",
+        "created_at": datetime.now(MOSCOW_TZ).isoformat(),
+        "result_game": None,
+        "found_card": None,
+        "dogon": None,
+        "message_id": None,
     }
 
+
+# =====================================================================
+# ALGORITHM: ЕДИНИЦА
+# =====================================================================
+
+def get_unit_prediction(game):
+    """
+    Алгоритм "Единица".
+
+    Первая карта Player обязательно цифра:
+        6 -> J
+        7 -> Q
+        8 -> K
+        9 -> A
+
+    Масти по количеству карт Player:
+        2 -> ♥️♠️
+        3 -> ♦️♣️
+        4 -> ♥️♠️
+        5 -> ♦️♣️
+
+    Расстояние до цели:
+        2 карты -> +3
+        3 карты -> +4
+        4 карты -> +5
+        5 карт -> +6
+
+    Для алгоритма "Единица" первая карта Dealer
+    и третья карта Player не являются условиями.
+    """
+
+    player = game.get("player_cards", [])
+
+    if len(player) < 1:
+        return None
+
+    if game.get("is_draw"):
+        return None
+
+    if game.get("player_score") == 21:
+        return None
+
+    if game.get("dealer_score") == 21:
+        return None
+
+    first_player_rank = normalize_rank(player[0].get("rank"))
+
+    rank_mapping = {
+        "6": "J",
+        "7": "Q",
+        "8": "K",
+        "9": "A",
+    }
+
+    predicted_rank = rank_mapping.get(first_player_rank)
+    if not predicted_rank:
+        return None
+
+    suit_pairs = {
+        2: ["♥️", "♠️"],
+        3: ["♦️", "♣️"],
+        4: ["♥️", "♠️"],
+        5: ["♦️", "♣️"],
+    }
+
+    player_count = len(player)
+    predicted_suits = suit_pairs.get(player_count)
+    if not predicted_suits:
+        return None
+
+    target_offset = player_count + 1
+
+    predicted_cards = [
+        f"{predicted_rank}{predicted_suits[0]}",
+        f"{predicted_rank}{predicted_suits[1]}",
+    ]
+
+    return {
+        "algorithm": "единица",
+        "trigger_number": game["game_number"],
+        "trigger_game_id": game.get("game_id"),
+        "target_number": add_game_offset(game["game_number"], target_offset),
+        "target_offset": target_offset,
+        "predicted_rank": predicted_rank,
+        "predicted_suits": predicted_suits,
+        "predicted_cards": predicted_cards,
+        "trigger_player": [card_to_text(c) for c in player],
+        "trigger_dealer": [card_to_text(c) for c in game.get("dealer_cards", [])],
+        "trigger_player_score": game["player_score"],
+        "trigger_dealer_score": game["dealer_score"],
+        "status": "pending",
+        "created_at": datetime.now(MOSCOW_TZ).isoformat(),
+        "result_game": None,
+        "found_card": None,
+        "dogon": None,
+        "message_id": None,
+    }
+
+
+# =====================================================================
+# TRIGGERS / CREATE PREDICTION
+# =====================================================================
+
+def get_algorithm_predictions(game):
+    return [
+        prediction
+        for prediction in (
+            get_repeat_prediction(game),
+            get_unit_prediction(game),
+        )
+        if prediction
+    ]
 
 # =====================================================================
 # PREDICTION MESSAGE
 # =====================================================================
 
-def make_prediction_message(
-    prediction
-):
-
-    cards = prediction[
-        "predicted_cards"
-    ]
+def make_prediction_message(prediction):
+    cards = prediction["predicted_cards"]
+    algorithm = prediction.get("algorithm", "повторение")
+    target_offset = prediction.get("target_offset", FORECAST_OFFSET)
 
     return (
-
         f"🔮 <b>ТОЧНАЯ КАРТА</b>\n\n"
-
-        f"🎯 Игра: "
-        f"<b>#N{prediction['target_number']}</b>\n"
-
+        f"🧠 Алгоритм: <b>{algorithm}</b>\n"
+        f"🎯 Игра: <b>#N{prediction['target_number']}</b>\n"
         f"🃏 <b>{cards[0]}</b>\n"
         f"🃏 <b>{cards[1]}</b>\n\n"
-
-        f"⏩ Прогноз: "
-        f"<b>+{FORECAST_OFFSET}</b>\n"
-
-        f"🔄 Догон: "
-        f"<b>{DOGON_GAMES}</b>"
+        f"⏩ Прогноз: <b>+{target_offset}</b>\n"
+        f"🔄 Догон: <b>{DOGON_GAMES}</b>"
     )
 
 
 # =====================================================================
-# CREATE PREDICTION
+# CREATE PREDICTIONS
 # =====================================================================
+
+def create_predictions(game):
+    game_number = game["game_number"]
+
+    for prediction in get_algorithm_predictions(game):
+        algorithm = prediction["algorithm"]
+        trigger_key = (algorithm, game_number)
+
+        if trigger_key in processed_triggers:
+            continue
+
+        target_number = prediction["target_number"]
+
+        # Не создаём второй активный прогноз на ту же целевую игру
+        # внутри ОДНОГО алгоритма. Разные алгоритмы могут иметь одну цель.
+        already_exists = any(
+            entry.get("algorithm") == algorithm
+            and entry.get("target_number") == target_number
+            and entry.get("status") == "pending"
+            for entry in predictions
+        )
+
+        if already_exists:
+            processed_triggers.add(trigger_key)
+            continue
+
+        message = make_prediction_message(prediction)
+        message_id = telegram_send(message)
+
+        if not message_id:
+            print(
+                f"❌ Прогноз не отправлен — алгоритм {algorithm}, "
+                f"триггер #N{game_number}",
+                flush=True,
+            )
+            continue
+
+        prediction["message_id"] = message_id
+        predictions.append(prediction)
+        processed_triggers.add(trigger_key)
+        save_predictions()
+
+        print("", flush=True)
+        print("🔮 ПРОГНОЗ СОЗДАН", flush=True)
+        print(f"🧠 Алгоритм: {algorithm}", flush=True)
+        print(f"🎯 Цель: #N{target_number}", flush=True)
+        print(f"🃏 {prediction['predicted_cards'][0]}", flush=True)
+        print(f"🃏 {prediction['predicted_cards'][1]}", flush=True)
+        print(f"📌 Триггер: #N{game_number}", flush=True)
+
 
 def create_prediction(game):
-
-    game_number = game[
-        "game_number"
-    ]
-
-    if game_number in processed_triggers:
-        return
-
-    prediction = get_trigger_prediction(
-        game
-    )
-
-    if not prediction:
-
-        processed_triggers.add(
-            game_number
-        )
-
-        print(
-            f"⏭️ #{game_number} — не триггер",
-            flush=True
-        )
-
-        return
-
-    target_number = prediction[
-        "target_number"
-    ]
-
-    # Не создаём второй активный прогноз
-    # на ту же целевую игру.
-    for entry in predictions:
-
-        if (
-            entry.get(
-                "target_number"
-            )
-            == target_number
-
-            and entry.get(
-                "status"
-            )
-            == "pending"
-        ):
-
-            print(
-                f"⏭️ Прогноз на "
-                f"#N{target_number} "
-                f"уже существует",
-                flush=True
-            )
-
-            processed_triggers.add(
-                game_number
-            )
-
-            return
-
-    message = make_prediction_message(
-        prediction
-    )
-
-    message_id = telegram_send(
-        message
-    )
-
-    if not message_id:
-
-        print(
-            "❌ Прогноз не отправлен — "
-            "триггер не помечаем обработанным",
-            flush=True
-        )
-
-        return
-
-    prediction[
-        "message_id"
-    ] = message_id
-
-    predictions.append(
-        prediction
-    )
-
-    save_predictions()
-
-    processed_triggers.add(
-        game_number
-    )
-
-    print(
-        "",
-        flush=True
-    )
-
-    print(
-        "🔮 ПРОГНОЗ СОЗДАН",
-        flush=True
-    )
-
-    print(
-        f"🎯 Цель: "
-        f"#N{target_number}",
-        flush=True
-    )
-
-    print(
-        f"🃏 "
-        f"{prediction['predicted_cards'][0]}",
-        flush=True
-    )
-
-    print(
-        f"🃏 "
-        f"{prediction['predicted_cards'][1]}",
-        flush=True
-    )
-
-    print(
-        f"📌 Триггер: "
-        f"#N{game_number}",
-        flush=True
-    )
+    """Совместимый вызов: создаёт прогнозы обоих алгоритмов."""
+    create_predictions(game)
 
 
 # =====================================================================
@@ -1068,6 +993,10 @@ def make_result_message(
             f"🎯 Игра: "
             f"<b>#N{target}</b> "
             f"{'✅' if result == 'win' else '❌'}"
+        ),
+        (
+            f"🧠 Алгоритм: "
+            f"<b>{prediction.get('algorithm', 'повторение')}</b>"
         ),
 
         "",
