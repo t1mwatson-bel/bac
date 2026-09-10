@@ -742,14 +742,8 @@ def get_repeat_prediction(game):
 # =====================================================================
 
 def get_algorithm_predictions(game):
-    return [
-        prediction
-        for prediction in (
-            get_repeat_prediction(game),
-            get_unit_prediction(game),
-        )
-        if prediction
-    ]
+    prediction = get_repeat_prediction(game)
+    return [prediction] if prediction else []
 
 # =====================================================================
 # PREDICTION MESSAGE
