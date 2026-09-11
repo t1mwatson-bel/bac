@@ -673,7 +673,7 @@ def get_repeat_prediction(game):
     player = game.get("player_cards", [])
     dealer = game.get("dealer_cards", [])
 
-    if len(player) < 1 or len(dealer) < 1):
+    if len(player) < 1 or len(dealer) < 1:
         return None
 
     if game.get("is_draw"):
