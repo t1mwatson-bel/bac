@@ -665,13 +665,15 @@ def get_repeat_prediction(game):
         #X
 
     Цель:
-        всегда +3 игры.
+        количество карт в игре + 1.
+        То есть если в триггере 7 карт:
+        пропускаем 7 игр и прогнозируем на следующую, +8.
     """
 
     player = game.get("player_cards", [])
     dealer = game.get("dealer_cards", [])
 
-    if len(player) < 1 or len(dealer) < 1:
+    if len(player) < 1 or len(dealer) < 1):
         return None
 
     if game.get("is_draw"):
@@ -716,11 +718,24 @@ def get_repeat_prediction(game):
         f"{predicted_rank}{predicted_suits[1]}",
     ]
 
+    # Количество карт в триггерной игре:
+    # например, 4 карты игрока + 3 карты дилера = 7.
+    #
+    # Пропускаем 7 следующих игр:
+    # 1313, 1314, 1315, 1316, 1317, 1318, 1319
+    #
+    # Прогноз ставим на следующую:
+    # 1320
+    target_offset = len(player) + len(dealer) + 1
+
     return {
         "algorithm": "повторение",
         "trigger_number": game["game_number"],
         "trigger_game_id": game.get("game_id"),
-        "target_number": add_game_offset(game["game_number"], FORECAST_OFFSET),
+        "target_number": add_game_offset(
+            game["game_number"],
+            target_offset
+        ),
         "predicted_rank": predicted_rank,
         "predicted_suits": predicted_suits,
         "predicted_cards": predicted_cards,
