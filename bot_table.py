@@ -52,11 +52,8 @@ POLL_INTERVAL = 2.0
 # чтобы Telegram успел дописать все карты.
 FINALIZE_WAIT_SECONDS = 30
 
-# #N492 -> #N495
-FORECAST_OFFSET = 3
-
-# Целевая игра + 4 догона.
-DOGON_GAMES = 4
+# Догоны: 0, 1, 2, 3 — то есть целевая + 3 следующих.
+DOGON_GAMES = 3
 
 
 # =====================================================================
@@ -268,6 +265,8 @@ def parse_game_message(text):
 
     Напечатанные очки перед скобками НЕ используем.
     Считаем Cyber 21 самостоятельно.
+
+    У дилера может быть 0 карт — тогда вторая скобка пустая.
     """
 
     if not text:
@@ -304,7 +303,9 @@ def parse_game_message(text):
         dealer_text
     )
 
-    if not player_cards or not dealer_cards:
+    # У игрока карты обязательны.
+    # У дилера может быть 0 карт — это нормально.
+    if not player_cards:
         return None
 
     player_score = cyber21_score(
@@ -644,101 +645,71 @@ def add_game_offset(
 
 
 # =====================================================================
-# ALGORITHM: ПОВТОРЕНИЕ
+# ALGORITHM: ПОСЛЕДНЯЯ 10
 # =====================================================================
 
-def get_repeat_prediction(game):
+def get_last_card_prediction(game):
     """
-    Алгоритм "Повторение".
+    Алгоритм "Последняя 10".
 
-    P1:
-        6 -> J
-        7 -> Q
-        8 -> K
+    Триггер:
+        - карты только у игрока
+        - у дилера 0 карт ()
+        - последняя карта игрока — 10
+        - есть знак ✅
 
-    D1:
-        обязательно 10
+    Целевая игра (догон 0):
+        game_number + количество карт игрока
 
-    Исключения для игры-триггера:
-        P = 21
-        D = 21
-        #X
+    Масть:
+        масть десятки из триггера
 
-    Цель:
-        количество карт в игре + 1.
-        То есть если в триггере 7 карт:
-        пропускаем 7 игр и прогнозируем на следующую, +8.
+    Догоны: 0, 1, 2, 3
     """
 
     player = game.get("player_cards", [])
     dealer = game.get("dealer_cards", [])
 
-    if len(player) < 1 or len(dealer) < 1:
+    # У игрока должны быть карты
+    if not player:
         return None
 
-    if game.get("is_draw"):
+    # У дилера должно быть 0 карт
+    if dealer:
         return None
 
-    if game.get("player_score") == 21:
+    # Последняя карта игрока должна быть 10
+    last_card = player[-1]
+    last_rank = normalize_rank(last_card.get("rank"))
+
+    if last_rank != "10":
         return None
 
-    if game.get("dealer_score") == 21:
+    # В игре должен быть знак ✅
+    if "✅" not in game.get("raw_text", ""):
         return None
 
-    first_player_rank = normalize_rank(player[0].get("rank"))
-    first_dealer_rank = normalize_rank(dealer[0].get("rank"))
+    # Масть десятки
+    suit = normalize_suit(last_card.get("suit"))
 
-    if first_dealer_rank != "10":
+    if not suit:
         return None
 
-    rank_mapping = {
-        "6": "J",
-        "7": "Q",
-        "8": "K",
-    }
-
-    predicted_rank = rank_mapping.get(first_player_rank)
-    if not predicted_rank:
-        return None
-
-    suit_pairs = {
-        2: ["♠️", "♦️"],
-        3: ["♣️", "♥️"],
-        4: ["♥️", "♣️"],
-        5: ["♦️", "♠️"],
-    }
-
-    player_count = len(player)
-    predicted_suits = suit_pairs.get(player_count)
-    if not predicted_suits:
-        return None
-
-    predicted_cards = [
-        f"{predicted_rank}{predicted_suits[0]}",
-        f"{predicted_rank}{predicted_suits[1]}",
-    ]
-
-    # Количество карт в триггерной игре:
-    # например, 4 карты игрока + 3 карты дилера = 7.
-    #
-    # Пропускаем 7 следующих игр:
-    # 1313, 1314, 1315, 1316, 1317, 1318, 1319
-    #
-    # Прогноз ставим на следующую:
-    # 1320
-    target_offset = len(player) + len(dealer) + 1
+    # Целевая игра = номер триггера + количество карт игрока
+    target_offset = len(player)
+    target_number = add_game_offset(
+        game["game_number"],
+        target_offset
+    )
 
     return {
-        "algorithm": "повторение",
+        "algorithm": "последняя 10",
         "trigger_number": game["game_number"],
         "trigger_game_id": game.get("game_id"),
-        "target_number": add_game_offset(
-            game["game_number"],
-            target_offset
-        ),
-        "predicted_rank": predicted_rank,
-        "predicted_suits": predicted_suits,
-        "predicted_cards": predicted_cards,
+        "target_number": target_number,
+        "predicted_rank": "10",
+        "predicted_suits": [suit],
+        "predicted_cards": [f"10{suit}"],
         "trigger_player": [card_to_text(c) for c in player],
         "trigger_dealer": [card_to_text(c) for c in dealer],
         "trigger_player_score": game["player_score"],
@@ -749,6 +720,7 @@ def get_repeat_prediction(game):
         "found_card": None,
         "dogon": None,
         "message_id": None,
+        "target_offset": target_offset,
     }
 
 
@@ -757,7 +729,7 @@ def get_repeat_prediction(game):
 # =====================================================================
 
 def get_algorithm_predictions(game):
-    prediction = get_repeat_prediction(game)
+    prediction = get_last_card_prediction(game)
     return [prediction] if prediction else []
 
 # =====================================================================
@@ -766,15 +738,14 @@ def get_algorithm_predictions(game):
 
 def make_prediction_message(prediction):
     cards = prediction["predicted_cards"]
-    algorithm = prediction.get("algorithm", "повторение")
-    target_offset = prediction.get("target_offset", FORECAST_OFFSET)
+    algorithm = prediction.get("algorithm", "последняя 10")
+    target_offset = prediction.get("target_offset", 0)
 
     return (
         f"🔮 <b>ТОЧНАЯ КАРТА</b>\n\n"
         f"🧠 Алгоритм: <b>{algorithm}</b>\n"
         f"🎯 Игра: <b>#N{prediction['target_number']}</b>\n"
-        f"🃏 <b>{cards[0]}</b>\n"
-        f"🃏 <b>{cards[1]}</b>\n\n"
+        f"🃏 <b>{cards[0]}</b>\n\n"
         f"⏩ Прогноз: <b>+{target_offset}</b>\n"
         f"🔄 Догон: <b>{DOGON_GAMES}</b>"
     )
@@ -830,7 +801,6 @@ def create_predictions(game):
         print(f"🧠 Алгоритм: {algorithm}", flush=True)
         print(f"🎯 Цель: #N{target_number}", flush=True)
         print(f"🃏 {prediction['predicted_cards'][0]}", flush=True)
-        print(f"🃏 {prediction['predicted_cards'][1]}", flush=True)
         print(f"📌 Триггер: #N{game_number}", flush=True)
 
 
@@ -910,15 +880,14 @@ def make_result_message(
         ),
         (
             f"🧠 Алгоритм: "
-            f"<b>{prediction.get('algorithm', 'повторение')}</b>"
+            f"<b>{prediction.get('algorithm', 'последняя 10')}</b>"
         ),
 
         "",
 
         (
             f"🃏 Прогноз: "
-            f"<b>{prediction['predicted_cards'][0]}</b> / "
-            f"<b>{prediction['predicted_cards'][1]}</b>"
+            f"<b>{prediction['predicted_cards'][0]}</b>"
         ),
     ]
 
@@ -972,35 +941,11 @@ def make_result_message(
 
 def check_predictions():
     """
-    ГЛАВНОЕ ПРАВИЛО ПРОВЕРКИ:
+    Прогноз проверяется строго последовательно:
+    целевая игра, затем догоны 1, 2, 3.
 
-    Отсутствие игры в games_cache
-    НЕ означает минус.
-
-    Прогноз:
-
-        #N948
-        #N949
-        #N950
-        #N951
-        #N952
-
-    проверяется строго последовательно.
-
-    Если #N948 ещё нет:
-        ЖДЁМ.
-
-    Если #N948 есть:
-        проверяем.
-
-    Если карты нет:
-        ждём #N949.
-
-    И так далее.
-
-    Минус только тогда, когда ВСЕ
-    5 игр реально появились и были
-    зафиксированы.
+    Минус — только если все 4 игры реально появились,
+    и ни в одной не было нужной карты.
     """
 
     changed = False
@@ -1063,16 +1008,10 @@ def check_predictions():
                     flush=True
                 )
 
-                # ВАЖНО:
-                #
-                # Никакого MINUS.
-                # Никакого перехода через отсутствующую игру.
-                #
-                # Ждём именно эту игру.
                 break
 
             # =========================================================
-            # ИГРА ЕСТЬ — ПРОВЕРЯЕМ PLAYER
+            # ИГРА ЕСТЬ — ПРОВЕРЯЕМ PLAYER И DEALER
             # =========================================================
 
             found_card = check_prediction_cards(
@@ -1125,8 +1064,7 @@ def check_predictions():
                 print(
                     f"🎯 Карта "
                     f"{found_card} "
-                    f"найдена у Player "
-                    f"в #N{game_number}",
+                    f"найдена в #N{game_number}",
                     flush=True
                 )
 
@@ -1137,7 +1075,6 @@ def check_predictions():
 
                 changed = True
 
-                # Прогноз закрыт.
                 all_games_checked = False
 
                 break
@@ -1153,25 +1090,6 @@ def check_predictions():
                 print(
                     f"🔰 #N{game_number} — "
                     f"#X, нужной карты нет → "
-                    f"переходим к следующему",
-                    flush=True
-                )
-
-            elif (
-                game.get(
-                    "player_score"
-                ) == 21
-
-                or
-
-                game.get(
-                    "dealer_score"
-                ) == 21
-            ):
-
-                print(
-                    f"21 в #N{game_number}, "
-                    f"нужной карты нет → "
                     f"переходим к следующему",
                     flush=True
                 )
@@ -1196,13 +1114,8 @@ def check_predictions():
         # =============================================================
         # СЮДА ПОПАДАЕМ ТОЛЬКО ЕСЛИ:
         #
-        # #N948 есть
-        # #N949 есть
-        # #N950 есть
-        # #N951 есть
-        # #N952 есть
-        #
-        # И НИ В ОДНОЙ НЕТ НУЖНОЙ КАРТЫ.
+        # целевая + все догоны реально появились,
+        # и ни в одной нет нужной карты.
         # =============================================================
 
         prediction[
@@ -1627,14 +1540,16 @@ def main():
     )
 
     print(
-        f"🎯 Смещение прогноза: "
-        f"+{FORECAST_OFFSET}",
+        "🧠 Алгоритм: последняя 10 "
+        "(карты только у игрока, "
+        "у дилера 0 карт, есть ✅)",
         flush=True
     )
 
     print(
         f"🔄 Догонов: "
-        f"{DOGON_GAMES}",
+        f"{DOGON_GAMES} "
+        f"(0, 1, 2, ..., {DOGON_GAMES})",
         flush=True
     )
 
