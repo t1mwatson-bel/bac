@@ -55,19 +55,6 @@ FINALIZE_WAIT_SECONDS = 30
 # Догоны: 0, 1, 2, 3 — то есть целевая + 3 следующих.
 DOGON_GAMES = 3
 
-# Отсеивать ли прогноз, если туз встречается ПОСЛЕ десятки.
-# Открытый вопрос — решается на статистике.
-# False = не отсеиваем (по умолчанию)
-# True  = отсеиваем
-REJECT_ACE_AFTER_TEN = False
-
-# Отсеивать ли прогноз, если триггерная десятка стоит ВТОРОЙ картой.
-# Такие сигналы слабые: уходят в задержку на 4-м догоне
-# или вообще не заходят.
-# False = не отсеиваем
-# True  = отсеиваем (по умолчанию)
-REJECT_TEN_SECOND_CARD = True
-
 
 # =====================================================================
 # TELEGRAM
@@ -409,141 +396,69 @@ def add_game_offset(number, offset):
 
 
 # =====================================================================
-# ALGORITHM: ТРИГГЕРНАЯ 10 → РАНГ ПЕРВОЙ КАРТЫ ИГРОКА
+# ALGORITHM: ПОСЛЕДНЯЯ 10 → ДИЛЕР БЕЗ КАРТ
 # =====================================================================
 
-def get_rank_prediction(game):
+def get_last_card_prediction(game):
     """
-    Алгоритм "Триггерная 10 → ранг первой карты игрока".
+    Алгоритм "Последняя 10 → дилер без карт".
 
-    ЦЕЛЬ:
-        - ранг первой карты игрока (любая: 6...A)
-
-    ТРИГГЕР:
-        - первая десятка в общем порядке карт,
-          НО НЕ первая карта игрока.
-
-    Почему так:
-        - если первая карта игрока — 10,
-          она является ЦЕЛЬЮ и НЕ считается триггером;
-        - триггер — следующая десятка в игре;
-        - если после первой карты игрока десяток нет — триггера нет.
-
-    Если первая карта игрока — НЕ 10:
-        - триггер — первая десятка в игре.
-
-    Отсев по позиции триггера:
-        - если триггерная десятка стоит ВТОРОЙ картой (ten_index == 1)
-          и REJECT_TEN_SECOND_CARD = True → прогноз отсеивается.
-        - такие сигналы слабые: уходят в задержку на 4-м догоне
-          или вообще не заходят.
-
-    Отсев по тузу:
-        - смотрим промежуток между первой картой игрока
-          и найденной триггерной десяткой (не включая их самих)
-        - если в промежутке есть туз — прогноз отсеивается
-        - туз первой картой игрока — это цель, не отсев
-        - туз ПОСЛЕ триггерной десятки — регулируется флагом
-          REJECT_ACE_AFTER_TEN
+    Триггер:
+        - карты только у игрока
+        - у дилера 0 карт ()
+        - последняя карта игрока — 10
+        - есть знак ✅
 
     Целевая игра (догон 0):
-        game_number + (индекс триггерной десятки) + 1
+        game_number + количество карт игрока
+
+    Прогноз:
+        у дилера в целевой игре будет 0 карт.
 
     Проверка:
-        и у игрока, И у дилера.
+        смотрим ТОЛЬКО на дилера — пустой ли у него список карт.
 
-    Догоны: 0OND, 1, 2, 3_C
+    Догоны: 0, 1, 2, 3
     """
 
-    player = game.get("ARDplayer_cards", [])
-    and dealer = game.get("dealer_c tenards", [])
+    player = game.get("player_cards", [])
+    dealer = game.get("dealer_cards", [])
 
-    if not player_index:
+    if not player:
         return None
 
-    # Общий порядок карт: сначала игрок, потом дилер.
-    all_cards = list(player) + list(dealer)
-
-    # Целевой ранг = ранг первой карты игрока.
-    target_rank = normalize_rank(player[0].get("rank"))
-
-    if not target_rank:
+    if dealer:
         return None
 
-    # Ищем первую десятку, НАЧИНАЯ СО ВТОРОЙ ПОЗИЦИИ.
-    # Первая позиция — это цель, её не считаем триггером.
-    ten_index = None
-    for idx in range(1, len(all_cards)):
-        if normalize_rank(all_cards[idx].get("rank")) == "10":
-            ten_index = idx
-            break
+    last_card = player[-1]
+    last_rank = normalize_rank(last_card.get("rank"))
 
-    # Нет триггерной десятки — нет прогноза.
-    if ten_index is None:
+    if last_rank != "10":
         return None
 
-    # Отсев: триггер второй картой (ten_index == 1).
-    if REJECT_TEN_SEC == 1:
-        print(
-            f"🚫 #N{game['game_number']}: "
-            f"триггер второй картой — отсев "
-            f"(REJECT_TEN_SECOND_CARD=True)",
-            flush=True,
-        )
+    if "✅" not in game.get("raw_text", ""):
         return None
 
-    # Промежуток между первой картой игрока и триггерной десяткой.
-    # all_cards[0] — первая карта игрока (цель).
-    # all_cards[ten_index] — триггерная десятка.
-    # Промежуток: all_cards[1:ten_index].
-    middle_cards = all_cards[1:ten_index]
-
-    # Отсев: туз в промежутке.
-    for card in middle_cards:
-        if normalize_rank(card.get("rank")) == "A":
-            print(
-                f"🚫 #N{game['game_number']}: "
-                f"туз в промежутке до десятки — отсев",
-                flush=True,
-            )
-            return None
-
-    # Отсев: туз после триггерной десятки (если включён флаг).
-    if REJECT_ACE_AFTER_TEN:
-        after_ten = all_cards[ten_index + 1:]
-
-        for card in after_ten:
-            if normalize_rank(card.get("rank")) == "A":
-                print(
-                    f"🚫 #N{game['game_number']}: "
-                    f"туз после десятки — отсев "
-                    f"(REJECT_ACE_AFTER_TEN=True)",
-                    flush=True,
-                )
-                return None
-
-    # Целевая игра: номер + индекс триггерной десятки + 1.
-    target_offset = ten_index + 1
+    target_offset = len(player)
     target_number = add_game_offset(game["game_number"], target_offset)
 
     return {
-        "algorithm": "триггерная 10 → ранг",
+        "algorithm": "последняя 10 → дилер без карт",
         "trigger_number": game["game_number"],
         "trigger_game_id": game.get("game_id"),
         "target_number": target_number,
-        "predicted_rank": target_rank,
+        "prediction": "dealer_empty",
         "trigger_player": [card_to_text(c) for c in player],
         "trigger_dealer": [card_to_text(c) for c in dealer],
         "trigger_player_score": game["player_score"],
         "trigger_dealer_score": game["dealer_score"],
-        "ten_index": ten_index,
-        "target_offset": target_offset,
         "status": "pending",
         "created_at": datetime.now(MOSCOW_TZ).isoformat(),
         "result_game": None,
         "found_card": None,
         "dogon": None,
         "message_id": None,
+        "target_offset": target_offset,
     }
 
 
@@ -552,7 +467,7 @@ def get_rank_prediction(game):
 # =====================================================================
 
 def get_algorithm_predictions(game):
-    prediction = get_rank_prediction(game)
+    prediction = get_last_card_prediction(game)
     return [prediction] if prediction else []
 
 
@@ -561,10 +476,9 @@ def get_algorithm_predictions(game):
 # =====================================================================
 
 def make_prediction_message(prediction):
-    rank = prediction["predicted_rank"]
     target = prediction["target_number"]
 
-    return f"🎯 Игра: <b>#N{target}</b> {rank}"
+    return f"🎯 Игра: <b>#N{target}</b> — дилер 0 карт"
 
 
 # =====================================================================
@@ -614,7 +528,7 @@ def create_predictions(game):
         print("🔮 ПРОГНОЗ СОЗДАН", flush=True)
         print(f"🧠 Алгоритм: {algorithm}", flush=True)
         print(f"🎯 Цель: #N{target_number}", flush=True)
-        print(f"🃏 Ранг: {prediction['predicted_rank']}", flush=True)
+        print(f"🃏 Прогноз: дилер 0 карт", flush=True)
         print(f"📌 Триггер: #N{game_number}", flush=True)
 
 
@@ -623,31 +537,21 @@ def create_prediction(game):
 
 
 # =====================================================================
-# CHECK PREDICTION RANK
+# CHECK DEALER EMPTY
 # =====================================================================
 
-def check_prediction_rank(game, predicted_rank):
+def check_prediction_dealer_empty(game):
     """
-    Проверяем РАНГ у игрока И у дилера.
+    Проверяем ТОЛЬКО дилера.
+    У дилера должен быть пустой список карт.
 
-    Достаточно одного совпадения.
-    Порядок: сначала игрок, потом дилер.
+    Возвращает "dealer_empty" если зашло, иначе None.
     """
 
-    player_cards = game.get("player_cards", [])
     dealer_cards = game.get("dealer_cards", [])
 
-    for card in player_cards:
-        rank = normalize_rank(card.get("rank"))
-
-        if rank == predicted_rank:
-            return card_to_text(card)
-
-    for card in dealer_cards:
-        rank = normalize_rank(card.get("rank"))
-
-        if rank == predicted_rank:
-            return card_to_text(card)
+    if not dealer_cards:
+        return "dealer_empty"
 
     return None
 
@@ -657,11 +561,10 @@ def check_prediction_rank(game, predicted_rank):
 # =====================================================================
 
 def make_result_message(prediction, result):
-    rank = prediction["predicted_rank"]
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
-    return f"🎯 Игра: <b>#N{target}</b> {rank}{mark}"
+    return f"🎯 Игра: <b>#N{target}</b> — дилер 0 карт{mark}"
 
 
 # =====================================================================
@@ -674,8 +577,7 @@ def check_predictions():
     целевая игра, затем догоны 1, 2, 3.
 
     Минус — только если все 4 игры реально появились,
-    и ни в одной (ни у игрока, ни у дилера)
-    не было нужного ранга.
+    и ни в одной у дилера не было 0 карт.
     """
 
     changed = False
@@ -687,10 +589,6 @@ def check_predictions():
 
         target = prediction.get("target_number")
         if not target:
-            continue
-
-        predicted_rank = prediction.get("predicted_rank")
-        if not predicted_rank:
             continue
 
         all_games_checked = True
@@ -710,13 +608,13 @@ def check_predictions():
                 )
                 break
 
-            # Игра есть — проверяем ранг у игрока и дилера.
-            found_card = check_prediction_rank(game, predicted_rank)
+            # Игра есть — проверяем дилера.
+            found = check_prediction_dealer_empty(game)
 
-            if found_card:
+            if found:
                 prediction["status"] = "win"
                 prediction["result_game"] = game_number
-                prediction["found_card"] = found_card
+                prediction["found_card"] = found
                 prediction["dogon"] = dogon
 
                 telegram_edit(
@@ -727,9 +625,8 @@ def check_predictions():
                 print("", flush=True)
                 print(f"✅ PLUS #N{target}", flush=True)
                 print(
-                    f"🎯 Ранг {predicted_rank} "
-                    f"найден в #N{game_number} "
-                    f"({found_card})",
+                    f"🎯 Дилер 0 карт "
+                    f"в #N{game_number}",
                     flush=True,
                 )
                 print(f"🔄 Догон: {dogon}", flush=True)
@@ -738,15 +635,15 @@ def check_predictions():
                 all_games_checked = False
                 break
 
-            # Ранга нет — переходим к следующей игре.
+            # Дилер взял карты — переходим к следующей игре.
             if game.get("is_draw"):
                 print(
-                    f"🔰 #N{game_number} — #X, ранга нет → дальше",
+                    f"🔰 #N{game_number} — #X, дилер взял карты → дальше",
                     flush=True,
                 )
             else:
                 print(
-                    f"🔍 #N{game_number} — ранга нет → дальше",
+                    f"🔍 #N{game_number} — дилер взял карты → дальше",
                     flush=True,
                 )
 
@@ -754,7 +651,7 @@ def check_predictions():
         if not all_games_checked:
             continue
 
-        # Все игры проверены, ранга нигде не было — минус.
+        # Все игры проверены, дилер везде брал карты — минус.
         prediction["status"] = "lose"
         prediction["result_game"] = add_game_offset(target, DOGON_GAMES)
         prediction["dogon"] = DOGON_GAMES
@@ -955,31 +852,15 @@ def main():
     print("📡 Игры: CHANNEL_STATS", flush=True)
     print(f"⏳ Финализация: {FINALIZE_WAIT_SECONDS} сек", flush=True)
     print(
-        "🧠 Алгоритм: триггерная 10 → ранг первой карты игрока",
-        flush=True,
-    )
-    print(
-        "🚫 Отсев по тузу до десятки: ВКЛ",
-        flush=True,
-    )
-    print(
-        f"🚫 Отсев по тузу после десятки: "
-        f"{'ВКЛ' if REJECT_ACE_AFTER_TEN else 'ВЫКЛ'}",
-        flush=True,
-    )
-    print(
-        f"🚫 Отсев триггера второй картой: "
-        f"{'ВКЛ' if REJECT_TEN_SECOND_CARD else 'ВЫКЛ'}",
+        "🧠 Алгоритм: последняя 10 → дилер без карт "
+        "(карты только у игрока, у дилера 0 карт, есть ✅)",
         flush=True,
     )
     print(
         f"🔄 Догонов: {DOGON_GAMES} (0, 1, 2, ..., {DOGON_GAMES})",
         flush=True,
     )
-    print(
-        "🎯 Прогноз: ранг, проверка у игрока + дилера",
-        flush=True,
-    )
+    print("🎯 Прогноз: дилер 0 карт, проверка только у дилера", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
