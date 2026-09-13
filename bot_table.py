@@ -91,10 +91,10 @@ telegram_offset = 0
 # =====================================================================
 
 SUITS = {
-    "\u2660": "\u2660\ufe0f",
-    "\u2663": "\u2663\ufe0f",
-    "\u2666": "\u2666\ufe0f",
-    "\u2665": "\u2665\ufe0f",
+    "♠": "♠️",
+    "♣": "♣️",
+    "♦": "♦️",
+    "♥": "♥️",
 }
 
 
@@ -177,7 +177,7 @@ def cyber21_score(cards):
 
 CARD_RE = re.compile(
     r"(10|[6-9AJQK])\s*"
-    r"(\u2660|\u2663|\u2666|\u2665)"
+    r"(♠|♣|♦|♥)"
     r"\ufe0f?"
 )
 
@@ -396,12 +396,12 @@ def add_game_offset(number, offset):
 
 
 # =====================================================================
-# ALGORITHM: ПОСЛЕДНЯЯ 10 → ДИЛЕР БЕЗ КАРТ
+# ALGORITHM: ПОСЛЕДНЯЯ 10
 # =====================================================================
 
 def get_last_card_prediction(game):
     """
-    Алгоритм "Последняя 10 → дилер без карт".
+    Алгоритм "Последняя 10".
 
     Триггер:
         - карты только у игрока
@@ -413,10 +413,7 @@ def get_last_card_prediction(game):
         game_number + количество карт игрока
 
     Прогноз:
-        у дилера в целевой игре будет 0 карт.
-
-    Проверка:
-        смотрим ТОЛЬКО на дилера — пустой ли у него список карт.
+        ТОЛЬКО МАСТЬ десятки. Без ранга.
 
     Догоны: 0, 1, 2, 3
     """
@@ -439,15 +436,20 @@ def get_last_card_prediction(game):
     if "✅" not in game.get("raw_text", ""):
         return None
 
+    suit = normalize_suit(last_card.get("suit"))
+
+    if not suit:
+        return None
+
     target_offset = len(player)
     target_number = add_game_offset(game["game_number"], target_offset)
 
     return {
-        "algorithm": "последняя 10 → дилер без карт",
+        "algorithm": "последняя 10",
         "trigger_number": game["game_number"],
         "trigger_game_id": game.get("game_id"),
         "target_number": target_number,
-        "prediction": "dealer_empty",
+        "predicted_suit": suit,
         "trigger_player": [card_to_text(c) for c in player],
         "trigger_dealer": [card_to_text(c) for c in dealer],
         "trigger_player_score": game["player_score"],
@@ -476,9 +478,10 @@ def get_algorithm_predictions(game):
 # =====================================================================
 
 def make_prediction_message(prediction):
+    suit = prediction["predicted_suit"]
     target = prediction["target_number"]
 
-    return f"🎯 Игра: <b>#N{target}</b> — дилер 0 карт"
+    return f"🎯 Игра: <b>#N{target}</b> {suit}"
 
 
 # =====================================================================
@@ -528,7 +531,7 @@ def create_predictions(game):
         print("🔮 ПРОГНОЗ СОЗДАН", flush=True)
         print(f"🧠 Алгоритм: {algorithm}", flush=True)
         print(f"🎯 Цель: #N{target_number}", flush=True)
-        print(f"🃏 Прогноз: дилер 0 карт", flush=True)
+        print(f"🃏 Масть: {prediction['predicted_suit']}", flush=True)
         print(f"📌 Триггер: #N{game_number}", flush=True)
 
 
@@ -537,21 +540,24 @@ def create_prediction(game):
 
 
 # =====================================================================
-# CHECK DEALER EMPTY
+# CHECK PLAYER SUIT
 # =====================================================================
 
-def check_prediction_dealer_empty(game):
+def check_prediction_suit(game, predicted_suit):
     """
-    Проверяем ТОЛЬКО дилера.
-    У дилера должен быть пустой список карт.
+    Проверяем ТОЛЬКО карты игрока.
+    Дилер не участвует.
 
-    Возвращает "dealer_empty" если зашло, иначе None.
+    Ищем любую карту игрока с нужной мастью.
     """
 
-    dealer_cards = game.get("dealer_cards", [])
+    player_cards = game.get("player_cards", [])
 
-    if not dealer_cards:
-        return "dealer_empty"
+    for card in player_cards:
+        suit = normalize_suit(card.get("suit"))
+
+        if suit == predicted_suit:
+            return card_to_text(card)
 
     return None
 
@@ -561,10 +567,11 @@ def check_prediction_dealer_empty(game):
 # =====================================================================
 
 def make_result_message(prediction, result):
+    suit = prediction["predicted_suit"]
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
-    return f"🎯 Игра: <b>#N{target}</b> — дилер 0 карт{mark}"
+    return f"🎯 Игра: <b>#N{target}</b> {suit}{mark}"
 
 
 # =====================================================================
@@ -577,7 +584,7 @@ def check_predictions():
     целевая игра, затем догоны 1, 2, 3.
 
     Минус — только если все 4 игры реально появились,
-    и ни в одной у дилера не было 0 карт.
+    и ни в одной у игрока не было нужной масти.
     """
 
     changed = False
@@ -589,6 +596,10 @@ def check_predictions():
 
         target = prediction.get("target_number")
         if not target:
+            continue
+
+        predicted_suit = prediction.get("predicted_suit")
+        if not predicted_suit:
             continue
 
         all_games_checked = True
@@ -608,13 +619,13 @@ def check_predictions():
                 )
                 break
 
-            # Игра есть — проверяем дилера.
-            found = check_prediction_dealer_empty(game)
+            # Игра есть — проверяем масть у игрока.
+            found_card = check_prediction_suit(game, predicted_suit)
 
-            if found:
+            if found_card:
                 prediction["status"] = "win"
                 prediction["result_game"] = game_number
-                prediction["found_card"] = found
+                prediction["found_card"] = found_card
                 prediction["dogon"] = dogon
 
                 telegram_edit(
@@ -625,8 +636,9 @@ def check_predictions():
                 print("", flush=True)
                 print(f"✅ PLUS #N{target}", flush=True)
                 print(
-                    f"🎯 Дилер 0 карт "
-                    f"в #N{game_number}",
+                    f"🎯 Масть {predicted_suit} "
+                    f"найдена у игрока в #N{game_number} "
+                    f"({found_card})",
                     flush=True,
                 )
                 print(f"🔄 Догон: {dogon}", flush=True)
@@ -635,15 +647,15 @@ def check_predictions():
                 all_games_checked = False
                 break
 
-            # Дилер взял карты — переходим к следующей игре.
+            # Масти нет — переходим к следующей игре.
             if game.get("is_draw"):
                 print(
-                    f"🔰 #N{game_number} — #X, дилер взял карты → дальше",
+                    f"🔰 #N{game_number} — #X, масти нет → дальше",
                     flush=True,
                 )
             else:
                 print(
-                    f"🔍 #N{game_number} — дилер взял карты → дальше",
+                    f"🔍 #N{game_number} — масти нет → дальше",
                     flush=True,
                 )
 
@@ -651,7 +663,7 @@ def check_predictions():
         if not all_games_checked:
             continue
 
-        # Все игры проверены, дилер везде брал карты — минус.
+        # Все игры проверены, масти нигде не было — минус.
         prediction["status"] = "lose"
         prediction["result_game"] = add_game_offset(target, DOGON_GAMES)
         prediction["dogon"] = DOGON_GAMES
@@ -852,7 +864,7 @@ def main():
     print("📡 Игры: CHANNEL_STATS", flush=True)
     print(f"⏳ Финализация: {FINALIZE_WAIT_SECONDS} сек", flush=True)
     print(
-        "🧠 Алгоритм: последняя 10 → дилер без карт "
+        "🧠 Алгоритм: последняя 10 "
         "(карты только у игрока, у дилера 0 карт, есть ✅)",
         flush=True,
     )
@@ -860,7 +872,7 @@ def main():
         f"🔄 Догонов: {DOGON_GAMES} (0, 1, 2, ..., {DOGON_GAMES})",
         flush=True,
     )
-    print("🎯 Прогноз: дилер 0 карт, проверка только у дилера", flush=True)
+    print("🎯 Прогноз: только масть, проверка только у игрока", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
