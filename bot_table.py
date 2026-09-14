@@ -6,7 +6,7 @@ import time
 import requests
 import pytz
 
-from datetime import datetime
+from datetime import datetime, time as dtime
 
 
 # =====================================================================
@@ -55,6 +55,51 @@ FINALIZE_WAIT_SECONDS = 30
 # Догоны: 0, 1, 2, 3 — то есть целевая + 3 следующих.
 DOGON_GAMES = 3
 
+# =====================================================================
+# РАСПИСАНИЕ СНА
+# =====================================================================
+# С 23:59 до 09:00 бот НЕ создаёт новые прогнозы.
+# Перед сном — ждёт закрытия всех pending-прогнозов.
+# Чтение игр и проверка pending продолжаются.
+
+SLEEP_HOUR = 23
+SLEEP_MINUTE = 59
+
+WAKE_HOUR = 9
+WAKE_MINUTE = 0
+
+
+def is_sleep_time(now=None):
+    """
+    Проверяет, находится ли текущее время в "режиме сна".
+
+    Сон: с 23:59 до 09:00 (по Москве).
+    """
+
+    if now is None:
+        now = datetime.now(MOSCOW_TZ)
+
+    current = now.time()
+
+    sleep_start = dtime(SLEEP_HOUR, SLEEP_MINUTE)
+    wake_start = dtime(WAKE_HOUR, WAKE_MINUTE)
+
+    # Сон через полночь: 23:59 — 00:00 — 09:00
+    if sleep_start <= current or current < wake_start:
+        return True
+
+    return False
+
+
+def has_pending_predictions():
+    """Есть ли открытые (pending) прогнозы."""
+
+    for p in predictions:
+        if p.get("status") == "pending":
+            return True
+
+    return False
+
 
 # =====================================================================
 # TELEGRAM
@@ -85,16 +130,21 @@ processed_triggers = set()
 predictions = []
 telegram_offset = 0
 
+# Флаг: сейчас бот "спит" и не создаёт новые прогнозы.
+# Включается в 23:59, выключается в 09:00,
+# НО только после закрытия всех pending-прогнозов.
+sleeping = False
+
 
 # =====================================================================
 # CARD NORMALIZATION
 # =====================================================================
 
 SUITS = {
-    "♠": "♠️",
-    "♣": "♣️",
-    "♦": "♦️",
-    "♥": "♥️",
+    "\u2660": "\u2660\ufe0f",
+    "\u2663": "\u2663\ufe0f",
+    "\u2666": "\u2666\ufe0f",
+    "\u2665": "\u2665\ufe0f",
 }
 
 
@@ -177,7 +227,7 @@ def cyber21_score(cards):
 
 CARD_RE = re.compile(
     r"(10|[6-9AJQK])\s*"
-    r"(♠|♣|♦|♥)"
+    r"(\u2660|\u2663|\u2666|\u2665)"
     r"\ufe0f?"
 )
 
@@ -240,6 +290,9 @@ def parse_game_message(text):
 
     is_draw = bool(re.search(r"#X\b", text))
 
+    # #O — маркер "очко" (21). Такие игры не идут в триггер.
+    is_ochko = bool(re.search(r"#O\b", text))
+
     return {
         "game_number": game_number,
         "game_id": game_id,
@@ -251,6 +304,7 @@ def parse_game_message(text):
         "dealer_score": dealer_score,
 
         "is_draw": is_draw,
+        "is_ochko": is_ochko,
 
         "raw_text": text,
     }
@@ -272,6 +326,9 @@ def log_game(game):
 
     if game.get("is_draw"):
         print("🔰 #X — НИЧЬЯ", flush=True)
+
+    if game.get("is_ochko"):
+        print("⭕ #O — ОЧКО (21), пропускаем триггер", flush=True)
 
     print("────────────────────────────────────", flush=True)
 
@@ -408,6 +465,7 @@ def get_last_card_prediction(game):
         - у дилера 0 карт ()
         - последняя карта игрока — 10
         - есть знак ✅
+        - НЕТ знака #O (очко / 21 очко у игрока)
 
     Целевая игра (догон 0):
         game_number + количество карт игрока
@@ -425,6 +483,14 @@ def get_last_card_prediction(game):
         return None
 
     if dealer:
+        return None
+
+    # #O — очко (21). Такие игры не идут в триггер.
+    if game.get("is_ochko"):
+        print(
+            f"⭕ #N{game['game_number']}: #O (очко) — пропуск триггера",
+            flush=True,
+        )
         return None
 
     last_card = player[-1]
@@ -719,6 +785,15 @@ def finalize_pending_games():
 
         games_cache[game_number] = game
         log_game(game)
+
+        # Если бот спит — новые прогнозы не создаём.
+        if sleeping:
+            print(
+                f"😴 #N{game_number}: бот спит — прогноз не создаём",
+                flush=True,
+            )
+            continue
+
         create_prediction(game)
 
 
@@ -827,6 +902,55 @@ def process_telegram_updates(offset):
 
 
 # =====================================================================
+# SLEEP / WAKE LOGIC
+# =====================================================================
+
+def update_sleep_state():
+    """
+    Обновляет состояние сна.
+
+    Логика:
+        - Если сейчас время сна (23:59–09:00):
+            - ставим флаг "засыпаю".
+            - ждём, пока все pending-прогнозы закроются.
+            - как только они закрыты — sleeping = True.
+        - Если сейчас не время сна:
+            - sleeping = False.
+    """
+
+    global sleeping
+
+    now = datetime.now(MOSCOW_TZ)
+
+    sleep_now = is_sleep_time(now)
+
+    if sleep_now:
+        if not sleeping:
+            if has_pending_predictions():
+                print(
+                    "😴 Время сна. Ждём закрытия открытых прогнозов...",
+                    flush=True,
+                )
+            else:
+                sleeping = True
+                print(
+                    "😴 Время сна. Открытых прогнозов нет. "
+                    "Новые не создаём до 09:00.",
+                    flush=True,
+                )
+        elif has_pending_predictions():
+            # Кто-то мог появиться pending снова — ждём.
+            sleeping = False
+    else:
+        if sleeping:
+            sleeping = False
+            print(
+                "☀️ 09:00 — бот проснулся. Снова создаём прогнозы.",
+                flush=True,
+            )
+
+
+# =====================================================================
 # CLEANUP
 # =====================================================================
 
@@ -869,6 +993,16 @@ def main():
         flush=True,
     )
     print(
+        "⭕ Фильтр #O: игры с очком (21) — пропуск триггера",
+        flush=True,
+    )
+    print(
+        f"😴 Сон: с {SLEEP_HOUR:02d}:{SLEEP_MINUTE:02d} "
+        f"до {WAKE_HOUR:02d}:{WAKE_MINUTE:02d} "
+        f"(с проверкой открытых прогнозов)",
+        flush=True,
+    )
+    print(
         f"🔄 Догонов: {DOGON_GAMES} (0, 1, 2, ..., {DOGON_GAMES})",
         flush=True,
     )
@@ -884,6 +1018,8 @@ def main():
 
     while True:
         try:
+            update_sleep_state()
+
             telegram_offset = process_telegram_updates(telegram_offset)
             finalize_pending_games()
             check_predictions()
