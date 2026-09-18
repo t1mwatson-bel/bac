@@ -906,48 +906,34 @@ def process_telegram_updates(offset):
 # =====================================================================
 
 def update_sleep_state():
-    """
-    Обновляет состояние сна.
-
-    Логика:
-        - Если сейчас время сна (23:59–09:00):
-            - ставим флаг "засыпаю".
-            - ждём, пока все pending-прогнозы закроются.
-            - как только они закрыты — sleeping = True.
-        - Если сейчас не время сна:
-            - sleeping = False.
-    """
-
-    global sleeping
-
+    global sleeping, telegram_offset
     now = datetime.now(MOSCOW_TZ)
-
     sleep_now = is_sleep_time(now)
 
     if sleep_now:
         if not sleeping:
             if has_pending_predictions():
-                print(
-                    "😴 Время сна. Ждём закрытия открытых прогнозов...",
-                    flush=True,
-                )
+                print("😴 Время сна. Ждём закрытия открытых прогнозов...", flush=True)
             else:
                 sleeping = True
-                print(
-                    "😴 Время сна. Открытых прогнозов нет. "
-                    "Новые не создаём до 09:00.",
-                    flush=True,
-                )
+                print("😴 Время сна. Открытых прогнозов нет.", flush=True)
         elif has_pending_predictions():
-            # Кто-то мог появиться pending снова — ждём.
             sleeping = False
     else:
         if sleeping:
             sleeping = False
-            print(
-                "☀️ 09:00 — бот проснулся. Снова создаём прогнозы.",
-                flush=True,
-            )
+            print("☀️ 09:00 — бот проснулся.", flush=True)
+
+            # ✅ УДАЛЯЕМ OFFSET ПРИ ПРОБУЖДЕНИИ
+            try:
+                if os.path.exists(OFFSET_FILE):
+                    os.remove(OFFSET_FILE)
+                    print(f"🗑️ Offset удалён — перечитываем канал с начала", flush=True)
+            except Exception as e:
+                print(f"⚠️ Не удалось удалить offset: {e}", flush=True)
+
+            # Сбрасываем offset в 0 — перечитаем канал
+            telegram_offset = 0
 
 
 # =====================================================================
@@ -1010,7 +996,19 @@ def main():
     print("==================================================", flush=True)
 
     load_predictions()
-    telegram_offset = load_offset()
+
+    # ✅ При старте в "ночное время" — удаляем offset
+    now = datetime.now(MOSCOW_TZ)
+    if is_sleep_time(now):
+        try:
+            if os.path.exists(OFFSET_FILE):
+                os.remove(OFFSET_FILE)
+                print("🗑️ Ночной старт — offset удалён", flush=True)
+        except Exception as e:
+            print(f"⚠️ Не удалось удалить offset: {e}", flush=True)
+        telegram_offset = 0
+    else:
+        telegram_offset = load_offset()
 
     print(f"📌 Telegram offset: {telegram_offset}", flush=True)
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
