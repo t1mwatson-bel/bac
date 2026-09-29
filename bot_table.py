@@ -55,6 +55,99 @@ FINALIZE_WAIT_SECONDS = 30
 # Догоны: 0, 1, 2, 3 — то есть целевая + 3 следующих.
 DOGON_GAMES = 3
 
+# ⚠️ ИСПРАВЛЕНО: цикл нумерации игр — 720, а не 1440.
+GAME_CYCLE = 720
+
+
+# =====================================================================
+# НОЧНАЯ ОЧИСТКА (03:00)
+# =====================================================================
+
+CLEANUP_HOUR = 3
+CLEANUP_MINUTE = 0
+
+last_cleanup_date = None
+
+
+def should_cleanup_now(now=None):
+    """Проверяет, наступило ли время ночной очистки (03:00)."""
+
+    global last_cleanup_date
+
+    if now is None:
+        now = datetime.now(MOSCOW_TZ)
+
+    if last_cleanup_date == now.date():
+        return False
+
+    cleanup_time = dtime(CLEANUP_HOUR, CLEANUP_MINUTE)
+
+    if now.time() >= cleanup_time:
+        return True
+
+    return False
+
+
+def cleanup_nightly():
+    """
+    Ночная очистка кэша (03:00).
+
+    Чистит:
+      - games_cache
+      - pending_games
+      - processed_triggers
+
+    Прогнозы:
+      - pending → expired (не удаляются, остаются для статистики)
+    """
+
+    global games_cache, pending_games, processed_triggers, predictions
+    global last_cleanup_date
+
+    now = datetime.now(MOSCOW_TZ)
+
+    print("", flush=True)
+    print("🧹 НОЧНАЯ ОЧИСТКА (03:00)", flush=True)
+
+    # 1. Кэш игр
+    games_count = len(games_cache)
+    games_cache.clear()
+    print(f"   🗑️ games_cache: удалено {games_count} игр", flush=True)
+
+    # 2. Pending игры
+    pending_count = len(pending_games)
+    pending_games.clear()
+    print(f"   🗑️ pending_games: удалено {pending_count}", flush=True)
+
+    # 3. Обработанные триггеры
+    triggers_count = len(processed_triggers)
+    processed_triggers.clear()
+    print(f"   🗑️ processed_triggers: удалено {triggers_count}", flush=True)
+
+    # 4. Висящие прогнозы → expired (НЕ удаляем — для статистики)
+    expired_count = 0
+
+    for p in predictions:
+        if p.get("status") == "pending":
+            p["status"] = "expired"
+            p["closed_at"] = now.isoformat()
+            p["close_reason"] = "nightly_cleanup"
+            expired_count += 1
+
+    if expired_count:
+        save_predictions()
+
+    print(
+        f"   🗑️ predictions: pending → expired — {expired_count}",
+        flush=True,
+    )
+
+    last_cleanup_date = now.date()
+
+    print("✅ Ночная очистка завершена", flush=True)
+    print("", flush=True)
+
+
 # =====================================================================
 # РАСПИСАНИЕ СНА
 # =====================================================================
@@ -70,11 +163,7 @@ WAKE_MINUTE = 0
 
 
 def is_sleep_time(now=None):
-    """
-    Проверяет, находится ли текущее время в "режиме сна".
-
-    Сон: с 23:59 до 09:00 (по Москве).
-    """
+    """Сон: с 23:59 до 09:00 (по Москве)."""
 
     if now is None:
         now = datetime.now(MOSCOW_TZ)
@@ -84,7 +173,6 @@ def is_sleep_time(now=None):
     sleep_start = dtime(SLEEP_HOUR, SLEEP_MINUTE)
     wake_start = dtime(WAKE_HOUR, WAKE_MINUTE)
 
-    # Сон через полночь: 23:59 — 00:00 — 09:00
     if sleep_start <= current or current < wake_start:
         return True
 
@@ -130,9 +218,6 @@ processed_triggers = set()
 predictions = []
 telegram_offset = 0
 
-# Флаг: сейчас бот "спит" и не создаёт новые прогнозы.
-# Включается в 23:59, выключается в 09:00,
-# НО только после закрытия всех pending-прогнозов.
 sleeping = False
 
 
@@ -277,8 +362,6 @@ def parse_game_message(text):
     player_cards = parse_cards(player_text)
     dealer_cards = parse_cards(dealer_text)
 
-    # У игрока карты обязательны.
-    # У дилера может быть 0 карт — это нормально.
     if not player_cards:
         return None
 
@@ -289,8 +372,6 @@ def parse_game_message(text):
     game_id = id_match.group(1) if id_match else None
 
     is_draw = bool(re.search(r"#X\b", text))
-
-    # #O — маркер "очко" (21). Такие игры не идут в триггер.
     is_ochko = bool(re.search(r"#O\b", text))
 
     return {
@@ -449,7 +530,8 @@ def telegram_edit(message_id, text):
 # =====================================================================
 
 def add_game_offset(number, offset):
-    return ((int(number) - 1 + int(offset)) % 1440) + 1
+    """⚠️ ИСПРАВЛЕНО: цикл 720, а не 1440."""
+    return ((int(number) - 1 + int(offset)) % GAME_CYCLE) + 1
 
 
 # =====================================================================
@@ -485,7 +567,6 @@ def get_last_card_prediction(game):
     if dealer:
         return None
 
-    # #O — очко (21). Такие игры не идут в триггер.
     if game.get("is_ochko"):
         print(
             f"⭕ #N{game['game_number']}: #O (очко) — пропуск триггера",
@@ -556,10 +637,14 @@ def make_prediction_message(prediction):
 
 def create_predictions(game):
     game_number = game["game_number"]
+    game_id = game.get("game_id")
 
     for prediction in get_algorithm_predictions(game):
         algorithm = prediction["algorithm"]
-        trigger_key = (algorithm, game_number)
+
+        # ⚠️ Ключ триггера — по ID игры, а не по номеру.
+        # Это защищает от повторной обработки при цикличности.
+        trigger_key = (algorithm, game_id or game_number)
 
         if trigger_key in processed_triggers:
             continue
@@ -598,7 +683,7 @@ def create_predictions(game):
         print(f"🧠 Алгоритм: {algorithm}", flush=True)
         print(f"🎯 Цель: #N{target_number}", flush=True)
         print(f"🃏 Масть: {prediction['predicted_suit']}", flush=True)
-        print(f"📌 Триггер: #N{game_number}", flush=True)
+        print(f"📌 Триггер: #N{game_number} (ID: {game_id})", flush=True)
 
 
 def create_prediction(game):
@@ -675,7 +760,6 @@ def check_predictions():
             game_number = add_game_offset(target, dogon)
             game = games_cache.get(game_number)
 
-            # Игра ещё не появилась — ждём.
             if not game:
                 all_games_checked = False
 
@@ -685,7 +769,6 @@ def check_predictions():
                 )
                 break
 
-            # Игра есть — проверяем масть у игрока.
             found_card = check_prediction_suit(game, predicted_suit)
 
             if found_card:
@@ -713,7 +796,6 @@ def check_predictions():
                 all_games_checked = False
                 break
 
-            # Масти нет — переходим к следующей игре.
             if game.get("is_draw"):
                 print(
                     f"🔰 #N{game_number} — #X, масти нет → дальше",
@@ -725,11 +807,9 @@ def check_predictions():
                     flush=True,
                 )
 
-        # Не все игры ещё получены — ждём.
         if not all_games_checked:
             continue
 
-        # Все игры проверены, масти нигде не было — минус.
         prediction["status"] = "lose"
         prediction["result_game"] = add_game_offset(target, DOGON_GAMES)
         prediction["dogon"] = DOGON_GAMES
@@ -786,7 +866,6 @@ def finalize_pending_games():
         games_cache[game_number] = game
         log_game(game)
 
-        # Если бот спит — новые прогнозы не создаём.
         if sleeping:
             print(
                 f"😴 #N{game_number}: бот спит — прогноз не создаём",
@@ -907,16 +986,23 @@ def process_telegram_updates(offset):
 
 def update_sleep_state():
     global sleeping, telegram_offset
+
     now = datetime.now(MOSCOW_TZ)
     sleep_now = is_sleep_time(now)
 
     if sleep_now:
         if not sleeping:
             if has_pending_predictions():
-                print("😴 Время сна. Ждём закрытия открытых прогнозов...", flush=True)
+                print(
+                    "😴 Время сна. Ждём закрытия открытых прогнозов...",
+                    flush=True,
+                )
             else:
                 sleeping = True
-                print("😴 Время сна. Открытых прогнозов нет.", flush=True)
+                print(
+                    "😴 Время сна. Открытых прогнозов нет.",
+                    flush=True,
+                )
         elif has_pending_predictions():
             sleeping = False
     else:
@@ -924,16 +1010,8 @@ def update_sleep_state():
             sleeping = False
             print("☀️ 09:00 — бот проснулся.", flush=True)
 
-            # ✅ УДАЛЯЕМ OFFSET ПРИ ПРОБУЖДЕНИИ
-            try:
-                if os.path.exists(OFFSET_FILE):
-                    os.remove(OFFSET_FILE)
-                    print(f"🗑️ Offset удалён — перечитываем канал с начала", flush=True)
-            except Exception as e:
-                print(f"⚠️ Не удалось удалить offset: {e}", flush=True)
-
-            # Сбрасываем offset в 0 — перечитаем канал
-            telegram_offset = 0
+            # ⚠️ ИСПРАВЛЕНО: offset НЕ удаляем и НЕ сбрасываем.
+            # Это защищает от повторного чтения канала и дублей.
 
 
 # =====================================================================
@@ -989,26 +1067,21 @@ def main():
         flush=True,
     )
     print(
+        f"🧹 Ночная очистка: {CLEANUP_HOUR:02d}:{CLEANUP_MINUTE:02d} "
+        f"(кэш + pending → expired)",
+        flush=True,
+    )
+    print(
         f"🔄 Догонов: {DOGON_GAMES} (0, 1, 2, ..., {DOGON_GAMES})",
         flush=True,
     )
+    print(f"🔁 Цикл нумерации игр: {GAME_CYCLE}", flush=True)
     print("🎯 Прогноз: только масть, проверка только у игрока", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
 
-    # ✅ При старте в "ночное время" — удаляем offset
-    now = datetime.now(MOSCOW_TZ)
-    if is_sleep_time(now):
-        try:
-            if os.path.exists(OFFSET_FILE):
-                os.remove(OFFSET_FILE)
-                print("🗑️ Ночной старт — offset удалён", flush=True)
-        except Exception as e:
-            print(f"⚠️ Не удалось удалить offset: {e}", flush=True)
-        telegram_offset = 0
-    else:
-        telegram_offset = load_offset()
+    telegram_offset = load_offset()
 
     print(f"📌 Telegram offset: {telegram_offset}", flush=True)
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
@@ -1017,6 +1090,10 @@ def main():
     while True:
         try:
             update_sleep_state()
+
+            # Ночная очистка в 03:00
+            if should_cleanup_now():
+                cleanup_nightly()
 
             telegram_offset = process_telegram_updates(telegram_offset)
             finalize_pending_games()
