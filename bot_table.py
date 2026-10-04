@@ -3,6 +3,9 @@ import sys
 import re
 import json
 import time
+import threading
+import http.server
+import socketserver
 import requests
 import pytz
 
@@ -1152,6 +1155,40 @@ __ROWS__
 
 
 # =====================================================================
+# ВЕБ-СЕРВЕР ДЛЯ СТАТИСТИКИ
+# =====================================================================
+
+def start_web_server():
+    port = int(os.getenv("PORT", 8000))
+
+    try:
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    except Exception:
+        pass
+
+    class StatsHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/", "/health"):
+                if os.path.exists(STATS_HTML_FILE):
+                    self.path = "/" + STATS_HTML_FILE
+                    return super().do_GET()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write("OK".encode("utf-8"))
+                return
+            return super().do_GET()
+
+        def log_message(self, format, *args):
+            pass    try:
+        with socketserver.TCPServer(("0.0.0.0", port), StatsHandler) as httpd:
+            print(f"🌐 Веб-сервер запущен: 0.0.0.0:{port}", flush=True)
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"⚠️ Ошибка веб-сервера на порту {port}: {e}", flush=True)
+
+
+# =====================================================================
 # MAIN
 # =====================================================================
 
@@ -1180,7 +1217,7 @@ def main():
         flush=True,
     )
     print(f"🔁 Цикл нумерации игр: {GAME_CYCLE}", flush=True)
-    print("📊 Генерация статистики: раз в час + при закрытии", flush=True)
+    print("📊 Статистика: http://0.0.0.0:PORT", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
@@ -1190,6 +1227,9 @@ def main():
     print(f"📌 Telegram offset: {telegram_offset}", flush=True)
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
     print("==================================================", flush=True)
+
+    # Веб-сервер в отдельном потоке
+    threading.Thread(target=start_web_server, daemon=True).start()
 
     # Первая генерация
     generate_stats()
