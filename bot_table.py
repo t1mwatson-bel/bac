@@ -45,6 +45,7 @@ MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
 PREDICTIONS_FILE = "twentyone_predictions.json"
 OFFSET_FILE = "telegram_offset.txt"
+STATS_HTML_FILE = "stats.html"
 
 POLL_INTERVAL = 2.0
 
@@ -765,6 +766,7 @@ def check_predictions():
 
     if changed:
         save_predictions()
+        generate_stats()
 
 
 # =====================================================================
@@ -970,18 +972,183 @@ def cleanup_predictions():
 
 
 # =====================================================================
-# STATS GENERATION
+# STATS HTML
 # =====================================================================
 
-def generate_stats_safe():
-    """Безопасная генерация статистики. Ошибка не валит бота."""
+def generate_stats():
+    from collections import Counter, defaultdict
+
+    total = len(predictions)
+    win = sum(1 for p in predictions if p.get("status") == "win")
+    lose = sum(1 for p in predictions if p.get("status") == "lose")
+    pending = sum(1 for p in predictions if p.get("status") == "pending")
+    expired = sum(1 for p in predictions if p.get("status") == "expired")
+
+    decided = win + lose
+    winrate = round(win / decided * 100, 1) if decided else 0.0
+
+    dogons = Counter()
+    dogons_win = Counter()
+    for p in predictions:
+        if p.get("status") in ("win", "lose"):
+            d = p.get("dogon")
+            if d is not None:
+                dogons[d] += 1
+                if p.get("status") == "win":
+                    dogons_win[d] += 1
+
+    suits = Counter()
+    suits_win = Counter()
+    for p in predictions:
+        s = p.get("predicted_suit")
+        if s:
+            suits[s] += 1
+            if p.get("status") == "win":
+                suits_win[s] += 1
+
+    days = defaultdict(lambda: {"win": 0, "lose": 0})
+    for p in predictions:
+        if p.get("status") not in ("win", "lose"):
+            continue
+        created = p.get("created_at") or ""
+        day = created[:10] if len(created) >= 10 else "?"
+        days[day][p["status"]] += 1
+
+    rows = []
+    for p in predictions[-30:][::-1]:
+        status = p.get("status", "?")
+        mark = {"win": "✅", "lose": "❌", "pending": "⏳",
+                "expired": "🗑️"}.get(status, "?")
+        target = p.get("target_number", "?")
+        suit = p.get("predicted_suit", "").replace("\ufe0f", "")
+        dogon = p.get("dogon")
+        dogon_str = f"Д{dogon}" if dogon is not None else ""
+        created = (p.get("created_at") or "")[:16].replace("T", " ")
+        rows.append(
+            f"<tr><td>{mark}</td><td>#N{target}</td><td>{suit}</td>"
+            f"<td>{dogon_str}</td><td>{status}</td><td>{created}</td></tr>"
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="6">Нет данных</td></tr>'
+
+    dogon_rows = ""
+    for d in sorted(dogons.keys()):
+        played = dogons[d]
+        won = dogons_win.get(d, 0)
+        wr = round(won / played * 100, 1) if played else 0
+        dogon_rows += (
+            f"<tr><td>Д{d}</td><td>{played}</td>"
+            f"<td>{won}</td><td>{wr}%</td></tr>"
+        )
+
+    suit_rows = ""
+    for s, cnt in suits.items():
+        won = suits_win.get(s, 0)
+        wr = round(won / cnt * 100, 1) if cnt else 0
+        s_clean = s.replace("\ufe0f", "")
+        suit_rows += (
+            f"<tr><td>{s_clean}</td><td>{cnt}</td>"
+            f"<td>{won}</td><td>{wr}%</td></tr>"
+        )
+
+    day_rows = ""
+    for day in sorted(days.keys(), reverse=True)[:30]:
+        d = days[day]
+        w, l = d["win"], d["lose"]
+        total_d = w + l
+        wr = round(w / total_d * 100, 1) if total_d else 0
+        day_rows += (
+            f"<tr><td>{day}</td><td>{total_d}</td>"
+            f"<td>{w}</td><td>{l}</td><td>{wr}%</td></tr>"
+        )
+
+    updated = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    html = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Cyber 21 — Статистика</title>
+<meta http-equiv="refresh" content="300">
+<style>
+body { font-family: Arial, sans-serif; background:#121212; color:#eaeaea; margin:0; padding:20px; }
+h1,h2 { color:#fff; }
+.cards { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:24px; }
+.card { background:#1e1e1e; padding:16px 20px; border-radius:10px; min-width:140px; }
+.card .label { font-size:12px; color:#888; text-transform:uppercase; }
+.card .value { font-size:26px; font-weight:bold; margin-top:4px; }
+.win { color:#4caf50; }
+.lose { color:#f44336; }
+.pending { color:#ffc107; }
+.expired { color:#888; }
+table { width:100%; border-collapse:collapse; background:#1e1e1e; border-radius:10px; overflow:hidden; margin-bottom:24px; }
+th,td { padding:8px 12px; text-align:left; border-bottom:1px solid #2a2a2a; font-size:14px; }
+th { background:#262626; color:#aaa; font-weight:normal; }
+.updated { color:#666; font-size:12px; margin-top:20px; }
+</style>
+</head>
+<body>
+
+<h1>📊 Cyber 21 — Статистика</h1>
+
+<div class="cards">
+<div class="card"><div class="label">Всего</div><div class="value">__TOTAL__</div></div>
+<div class="card"><div class="label">Плюсы</div><div class="value win">__WIN__</div></div>
+<div class="card"><div class="label">Минусы</div><div class="value lose">__LOSE__</div></div>
+<div class="card"><div class="label">В ожидании</div><div class="value pending">__PENDING__</div></div>
+<div class="card"><div class="label">Winrate</div><div class="value">__WINRATE__%</div></div>
+</div>
+
+<h2>🎯 По догонам</h2>
+<table>
+<tr><th>Догон</th><th>Сыграно</th><th>Плюсов</th><th>Winrate</th></tr>
+__DOGON_ROWS__
+</table>
+
+<h2>🃏 По мастям</h2>
+<table>
+<tr><th>Масть</th><th>Всего</th><th>Плюсов</th><th>Winrate</th></tr>
+__SUIT_ROWS__
+</table>
+
+<h2>📅 По дням</h2>
+<table>
+<tr><th>Дата</th><th>Всего</th><th>Плюсов</th><th>Минусов</th><th>Winrate</th></tr>
+__DAY_ROWS__
+</table>
+
+<h2>🕐 Последние 30 прогнозов</h2>
+<table>
+<tr><th></th><th>Игра</th><th>Масть</th><th>Догон</th><th>Статус</th><th>Создан</th></tr>
+__ROWS__
+</table>
+
+<div class="updated">Обновлено: __UPDATED__ (МСК)</div>
+
+</body>
+</html>"""
+
+    html = html.replace("__TOTAL__", str(total))
+    html = html.replace("__WIN__", str(win))
+    html = html.replace("__LOSE__", str(lose))
+    html = html.replace("__PENDING__", str(pending))
+    html = html.replace("__WINRATE__", str(winrate))
+    html = html.replace("__DOGON_ROWS__", dogon_rows or '<tr><td colspan="4">Нет данных</td></tr>')
+    html = html.replace("__SUIT_ROWS__", suit_rows or '<tr><td colspan="4">Нет данных</td></tr>')
+    html = html.replace("__DAY_ROWS__", day_rows or '<tr><td colspan="5">Нет данных</td></tr>')
+    html = html.replace("__ROWS__", rows_html)
+    html = html.replace("__UPDATED__", updated)
+
     try:
-        import generate_stats
-        generate_stats.generate()
-        return True
+        with open(STATS_HTML_FILE, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        print(
+            f"📊 Статистика: {total} прогнозов, "
+            f"+{win} / -{lose}, winrate {winrate}%",
+            flush=True,
+        )
     except Exception as e:
         print(f"⚠️ Ошибка генерации статистики: {e}", flush=True)
-        return False
 
 
 # =====================================================================
@@ -997,15 +1164,8 @@ def main():
     print("==================================================", flush=True)
     print("📡 Игры: CHANNEL_STATS", flush=True)
     print(f"⏳ Финализация: {FINALIZE_WAIT_SECONDS} сек", flush=True)
-    print(
-        "🧠 Алгоритм: последняя 10 "
-        "(карты только у игрока, у дилера 0 карт, есть ✅)",
-        flush=True,
-    )
-    print(
-        "⭕ Фильтр #O: игры с очком (21) — пропуск триггера",
-        flush=True,
-    )
+    print("🧠 Алгоритм: последняя 10", flush=True)
+    print("⭕ Фильтр #O: пропуск триггера", flush=True)
     print(
         f"😴 Сон: с {SLEEP_HOUR:02d}:{SLEEP_MINUTE:02d} "
         f"до {WAKE_HOUR:02d}:{WAKE_MINUTE:02d}",
@@ -1020,8 +1180,7 @@ def main():
         flush=True,
     )
     print(f"🔁 Цикл нумерации игр: {GAME_CYCLE}", flush=True)
-    print("🎯 Прогноз: только масть, проверка только у игрока", flush=True)
-    print("📊 Генерация статистики: раз в час", flush=True)
+    print("📊 Генерация статистики: раз в час + при закрытии", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
@@ -1032,9 +1191,8 @@ def main():
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
     print("==================================================", flush=True)
 
-    # Первая генерация при старте
-    generate_stats_safe()
-
+    # Первая генерация
+    generate_stats()
     last_stats_hour = datetime.now(MOSCOW_TZ).hour
 
     while True:
@@ -1050,19 +1208,10 @@ def main():
             cleanup_games_cache()
             cleanup_predictions()
 
-            # ============================================================
-            # ГЕНЕРАЦИЯ СТАТИСТИКИ РАЗ В ЧАС
-            # ============================================================
-
             now = datetime.now(MOSCOW_TZ)
-
             if last_stats_hour != now.hour:
-                if generate_stats_safe():
-                    last_stats_hour = now.hour
-                    print(
-                        f"📊 Статистика обновлена в {now.strftime('%H:%M')}",
-                        flush=True,
-                    )
+                generate_stats()
+                last_stats_hour = now.hour
 
             time.sleep(POLL_INTERVAL)
 
