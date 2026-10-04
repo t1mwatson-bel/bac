@@ -1179,8 +1179,7 @@ def start_web_server():
                 return
             return super().do_GET()
 
-        def log_message(self, format, *args):
-            pass    try:
+    try:
         with socketserver.TCPServer(("0.0.0.0", port), StatsHandler) as httpd:
             print(f"🌐 Веб-сервер запущен: 0.0.0.0:{port}", flush=True)
             httpd.serve_forever()
