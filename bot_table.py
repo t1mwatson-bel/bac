@@ -48,14 +48,10 @@ OFFSET_FILE = "telegram_offset.txt"
 
 POLL_INTERVAL = 2.0
 
-# После первого появления игры ждём 30 секунд,
-# чтобы Telegram успел дописать все карты.
 FINALIZE_WAIT_SECONDS = 30
 
-# Догоны: 0, 1, 2, 3 — то есть целевая + 3 следующих.
 DOGON_GAMES = 3
 
-# ⚠️ ИСПРАВЛЕНО: цикл нумерации игр — 720, а не 1440.
 GAME_CYCLE = 720
 
 
@@ -70,8 +66,6 @@ last_cleanup_date = None
 
 
 def should_cleanup_now(now=None):
-    """Проверяет, наступило ли время ночной очистки (03:00)."""
-
     global last_cleanup_date
 
     if now is None:
@@ -89,18 +83,6 @@ def should_cleanup_now(now=None):
 
 
 def cleanup_nightly():
-    """
-    Ночная очистка кэша (03:00).
-
-    Чистит:
-      - games_cache
-      - pending_games
-      - processed_triggers
-
-    Прогнозы:
-      - pending → expired (не удаляются, остаются для статистики)
-    """
-
     global games_cache, pending_games, processed_triggers, predictions
     global last_cleanup_date
 
@@ -109,22 +91,18 @@ def cleanup_nightly():
     print("", flush=True)
     print("🧹 НОЧНАЯ ОЧИСТКА (03:00)", flush=True)
 
-    # 1. Кэш игр
     games_count = len(games_cache)
     games_cache.clear()
     print(f"   🗑️ games_cache: удалено {games_count} игр", flush=True)
 
-    # 2. Pending игры
     pending_count = len(pending_games)
     pending_games.clear()
     print(f"   🗑️ pending_games: удалено {pending_count}", flush=True)
 
-    # 3. Обработанные триггеры
     triggers_count = len(processed_triggers)
     processed_triggers.clear()
     print(f"   🗑️ processed_triggers: удалено {triggers_count}", flush=True)
 
-    # 4. Висящие прогнозы → expired (НЕ удаляем — для статистики)
     expired_count = 0
 
     for p in predictions:
@@ -151,9 +129,6 @@ def cleanup_nightly():
 # =====================================================================
 # РАСПИСАНИЕ СНА
 # =====================================================================
-# С 23:59 до 09:00 бот НЕ создаёт новые прогнозы.
-# Перед сном — ждёт закрытия всех pending-прогнозов.
-# Чтение игр и проверка pending продолжаются.
 
 SLEEP_HOUR = 23
 SLEEP_MINUTE = 59
@@ -163,8 +138,6 @@ WAKE_MINUTE = 0
 
 
 def is_sleep_time(now=None):
-    """Сон: с 23:59 до 09:00 (по Москве)."""
-
     if now is None:
         now = datetime.now(MOSCOW_TZ)
 
@@ -180,8 +153,6 @@ def is_sleep_time(now=None):
 
 
 def has_pending_predictions():
-    """Есть ли открытые (pending) прогнозы."""
-
     for p in predictions:
         if p.get("status") == "pending":
             return True
@@ -530,7 +501,6 @@ def telegram_edit(message_id, text):
 # =====================================================================
 
 def add_game_offset(number, offset):
-    """⚠️ ИСПРАВЛЕНО: цикл 720, а не 1440."""
     return ((int(number) - 1 + int(offset)) % GAME_CYCLE) + 1
 
 
@@ -539,25 +509,6 @@ def add_game_offset(number, offset):
 # =====================================================================
 
 def get_last_card_prediction(game):
-    """
-    Алгоритм "Последняя 10".
-
-    Триггер:
-        - карты только у игрока
-        - у дилера 0 карт ()
-        - последняя карта игрока — 10
-        - есть знак ✅
-        - НЕТ знака #O (очко / 21 очко у игрока)
-
-    Целевая игра (догон 0):
-        game_number + количество карт игрока
-
-    Прогноз:
-        ТОЛЬКО МАСТЬ десятки. Без ранга.
-
-    Догоны: 0, 1, 2, 3
-    """
-
     player = game.get("player_cards", [])
     dealer = game.get("dealer_cards", [])
 
@@ -642,8 +593,6 @@ def create_predictions(game):
     for prediction in get_algorithm_predictions(game):
         algorithm = prediction["algorithm"]
 
-        # ⚠️ Ключ триггера — по ID игры, а не по номеру.
-        # Это защищает от повторной обработки при цикличности.
         trigger_key = (algorithm, game_id or game_number)
 
         if trigger_key in processed_triggers:
@@ -695,13 +644,6 @@ def create_prediction(game):
 # =====================================================================
 
 def check_prediction_suit(game, predicted_suit):
-    """
-    Проверяем ТОЛЬКО карты игрока.
-    Дилер не участвует.
-
-    Ищем любую карту игрока с нужной мастью.
-    """
-
     player_cards = game.get("player_cards", [])
 
     for card in player_cards:
@@ -730,14 +672,6 @@ def make_result_message(prediction, result):
 # =====================================================================
 
 def check_predictions():
-    """
-    Прогноз проверяется строго последовательно:
-    целевая игра, затем догоны 1, 2, 3.
-
-    Минус — только если все 4 игры реально появились,
-    и ни в одной у игрока не было нужной масти.
-    """
-
     changed = False
 
     for prediction in predictions:
@@ -1010,9 +944,6 @@ def update_sleep_state():
             sleeping = False
             print("☀️ 09:00 — бот проснулся.", flush=True)
 
-            # ⚠️ ИСПРАВЛЕНО: offset НЕ удаляем и НЕ сбрасываем.
-            # Это защищает от повторного чтения канала и дублей.
-
 
 # =====================================================================
 # CLEANUP
@@ -1039,6 +970,21 @@ def cleanup_predictions():
 
 
 # =====================================================================
+# STATS GENERATION
+# =====================================================================
+
+def generate_stats_safe():
+    """Безопасная генерация статистики. Ошибка не валит бота."""
+    try:
+        import generate_stats
+        generate_stats.generate()
+        return True
+    except Exception as e:
+        print(f"⚠️ Ошибка генерации статистики: {e}", flush=True)
+        return False
+
+
+# =====================================================================
 # MAIN
 # =====================================================================
 
@@ -1062,13 +1008,11 @@ def main():
     )
     print(
         f"😴 Сон: с {SLEEP_HOUR:02d}:{SLEEP_MINUTE:02d} "
-        f"до {WAKE_HOUR:02d}:{WAKE_MINUTE:02d} "
-        f"(с проверкой открытых прогнозов)",
+        f"до {WAKE_HOUR:02d}:{WAKE_MINUTE:02d}",
         flush=True,
     )
     print(
-        f"🧹 Ночная очистка: {CLEANUP_HOUR:02d}:{CLEANUP_MINUTE:02d} "
-        f"(кэш + pending → expired)",
+        f"🧹 Ночная очистка: {CLEANUP_HOUR:02d}:{CLEANUP_MINUTE:02d}",
         flush=True,
     )
     print(
@@ -1077,6 +1021,7 @@ def main():
     )
     print(f"🔁 Цикл нумерации игр: {GAME_CYCLE}", flush=True)
     print("🎯 Прогноз: только масть, проверка только у игрока", flush=True)
+    print("📊 Генерация статистики: раз в час", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
@@ -1087,11 +1032,15 @@ def main():
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
     print("==================================================", flush=True)
 
+    # Первая генерация при старте
+    generate_stats_safe()
+
+    last_stats_hour = datetime.now(MOSCOW_TZ).hour
+
     while True:
         try:
             update_sleep_state()
 
-            # Ночная очистка в 03:00
             if should_cleanup_now():
                 cleanup_nightly()
 
@@ -1100,6 +1049,20 @@ def main():
             check_predictions()
             cleanup_games_cache()
             cleanup_predictions()
+
+            # ============================================================
+            # ГЕНЕРАЦИЯ СТАТИСТИКИ РАЗ В ЧАС
+            # ============================================================
+
+            now = datetime.now(MOSCOW_TZ)
+
+            if last_stats_hour != now.hour:
+                if generate_stats_safe():
+                    last_stats_hour = now.hour
+                    print(
+                        f"📊 Статистика обновлена в {now.strftime('%H:%M')}",
+                        flush=True,
+                    )
 
             time.sleep(POLL_INTERVAL)
 
