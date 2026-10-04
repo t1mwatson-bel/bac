@@ -10,6 +10,7 @@ import requests
 import pytz
 
 from datetime import datetime, time as dtime
+from collections import Counter, defaultdict
 
 
 # =====================================================================
@@ -49,6 +50,7 @@ MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 PREDICTIONS_FILE = "twentyone_predictions.json"
 OFFSET_FILE = "telegram_offset.txt"
 STATS_HTML_FILE = "stats.html"
+BANK_FILE = "bank_state.json"
 
 POLL_INTERVAL = 2.0
 
@@ -57,6 +59,139 @@ FINALIZE_WAIT_SECONDS = 30
 DOGON_GAMES = 3
 
 GAME_CYCLE = 720
+
+
+# =====================================================================
+# БАНК / СТАВКИ
+# =====================================================================
+
+START_BALANCE = 20000
+
+# Множитель догона
+DOGON_MULT = 2.7
+
+# Коэффициент выигрыша
+WIN_COEF = 1.6
+
+# База по диапазону банка
+def get_base(balance):
+    if balance < 50000:
+        return 20000
+    if balance < 100000:
+        return 50000
+    if balance < 200000:
+        return 100000
+    if balance < 400000:
+        return 200000
+    return 400000
+
+
+def get_first_bet(balance):
+    base = get_base(balance)
+    return round(base * 0.0025, 2)  # 0.25%
+
+
+# Предупреждение при низком банке
+LOW_BALANCE_THRESHOLD = 5000
+
+
+DEFAULT_BANK = {
+    "balance": START_BALANCE,
+    "start_balance": START_BALANCE,
+    "current_bet": None,
+    "step": 0,
+    "history": [],
+    "last_updated": None,
+}
+
+
+def load_bank():
+    if not os.path.exists(BANK_FILE):
+        state = dict(DEFAULT_BANK)
+        state["current_bet"] = get_first_bet(state["balance"])
+        save_bank(state)
+        return state
+
+    try:
+        with open(BANK_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception as e:
+        print(f"⚠️ Ошибка чтения bank_state: {e}", flush=True)
+        state = dict(DEFAULT_BANK)
+
+    if not state.get("current_bet"):
+        state["current_bet"] = get_first_bet(state["balance"])
+
+    return state
+
+
+def save_bank(state):
+    state["last_updated"] = datetime.now(MOSCOW_TZ).isoformat()
+    tmp = BANK_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, BANK_FILE)
+    except Exception as e:
+        print(f"⚠️ Ошибка сохранения bank_state: {e}", flush=True)
+
+
+def reset_series(state):
+    state["step"] = 0
+    state["current_bet"] = get_first_bet(state["balance"])
+
+
+def apply_result(status, bet_amount):
+    """Обновляет банк после закрытия прогноза."""
+    state = load_bank()
+    bet = bet_amount if bet_amount else state.get("current_bet", 0)
+    profit = 0.0
+
+    if status == "win":
+        profit = bet * (WIN_COEF - 1)
+        state["balance"] += profit
+        reset_series(state)
+
+    elif status == "lose":
+        profit = -bet
+        state["balance"] += profit
+        state["current_bet"] = round(state["current_bet"] * DOGON_MULT, 2)
+        state["step"] += 1
+
+    elif status == "void":
+        profit = 0.0
+
+    state["history"].append({
+        "time": datetime.now(MOSCOW_TZ).isoformat(),
+        "status": status,
+        "bet": bet,
+        "profit": profit,
+        "balance_after": state["balance"],
+    })
+    state["history"] = state["history"][-500:]
+    save_bank(state)
+
+    if state["balance"] < LOW_BALANCE_THRESHOLD:
+        print(
+            f"⚠️⚠️⚠️ ВНИМАНИЕ: банк ниже {LOW_BALANCE_THRESHOLD} ₽ "
+            f"(сейчас {state['balance']:.0f} ₽)",
+            flush=True,
+        )
+        try:
+            telegram_send(
+                f"⚠️ <b>ВНИМАНИЕ</b>\n"
+                f"Банк упал ниже {LOW_BALANCE_THRESHOLD} ₽\n"
+                f"Текущий банк: <b>{state['balance']:.0f} ₽</b>"
+            )
+        except Exception:
+            pass
+
+    return state, profit
+
+
+def get_current_bet():
+    state = load_bank()
+    return state.get("current_bet", 0), state.get("step", 0), state.get("balance", 0)
 
 
 # =====================================================================
@@ -160,7 +295,6 @@ def has_pending_predictions():
     for p in predictions:
         if p.get("status") == "pending":
             return True
-
     return False
 
 
@@ -352,16 +486,12 @@ def parse_game_message(text):
     return {
         "game_number": game_number,
         "game_id": game_id,
-
         "player_cards": player_cards,
         "dealer_cards": dealer_cards,
-
         "player_score": player_score,
         "dealer_score": dealer_score,
-
         "is_draw": is_draw,
         "is_ochko": is_ochko,
-
         "raw_text": text,
     }
 
@@ -582,8 +712,13 @@ def get_algorithm_predictions(game):
 def make_prediction_message(prediction):
     suit = prediction["predicted_suit"]
     target = prediction["target_number"]
+    bet = prediction.get("bet_amount", 0)
+    step = prediction.get("bet_step", 0)
 
-    return f"🎯 Игра: <b>#N{target}</b> {suit}"
+    return (
+        f"🎯 Игра: <b>#N{target}</b> {suit}\n"
+        f"💰 Ставка: <b>{bet:.0f} ₽</b> (Д{step})"
+    )
 
 
 # =====================================================================
@@ -615,6 +750,11 @@ def create_predictions(game):
             processed_triggers.add(trigger_key)
             continue
 
+        # фиксируем ставку на момент создания прогноза
+        bet, step, _ = get_current_bet()
+        prediction["bet_amount"] = bet
+        prediction["bet_step"] = step
+
         message = make_prediction_message(prediction)
         message_id = telegram_send(message)
 
@@ -636,6 +776,7 @@ def create_predictions(game):
         print(f"🧠 Алгоритм: {algorithm}", flush=True)
         print(f"🎯 Цель: #N{target_number}", flush=True)
         print(f"🃏 Масть: {prediction['predicted_suit']}", flush=True)
+        print(f"💰 Ставка: {bet:.0f} ₽ (Д{step})", flush=True)
         print(f"📌 Триггер: #N{game_number} (ID: {game_id})", flush=True)
 
 
@@ -668,7 +809,16 @@ def make_result_message(prediction, result):
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
-    return f"🎯 Игра: <b>#N{target}</b> {suit}{mark}"
+    state = load_bank()
+    balance = state["balance"]
+    bet = prediction.get("bet_amount", 0)
+    step = prediction.get("dogon", 0)
+
+    return (
+        f"🎯 Игра: <b>#N{target}</b> {suit}{mark}\n"
+        f"💰 Ставка: {bet:.0f} ₽ (Д{step})\n"
+        f"🏦 Банк: <b>{balance:.0f} ₽</b>"
+    )
 
 
 # =====================================================================
@@ -700,7 +850,6 @@ def check_predictions():
 
             if not game:
                 all_games_checked = False
-
                 print(
                     f"⏳ #N{target}: ждём #N{game_number} (догон {dogon})",
                     flush=True,
@@ -714,6 +863,8 @@ def check_predictions():
                 prediction["result_game"] = game_number
                 prediction["found_card"] = found_card
                 prediction["dogon"] = dogon
+
+                apply_result("win", prediction.get("bet_amount", 0))
 
                 telegram_edit(
                     prediction.get("message_id"),
@@ -751,6 +902,8 @@ def check_predictions():
         prediction["status"] = "lose"
         prediction["result_game"] = add_game_offset(target, DOGON_GAMES)
         prediction["dogon"] = DOGON_GAMES
+
+        apply_result("lose", prediction.get("bet_amount", 0))
 
         telegram_edit(
             prediction.get("message_id"),
@@ -878,7 +1031,6 @@ def process_telegram_updates(offset):
 
             if game_number in pending_games:
                 pending_games[game_number]["text"] = text
-
                 print(
                     f"🔄 Обновлена игра #N{game_number} "
                     f"до окончания {FINALIZE_WAIT_SECONDS} секунд",
@@ -889,7 +1041,6 @@ def process_telegram_updates(offset):
             if game_number in games_cache:
                 if game:
                     games_cache[game_number] = game
-
                     print(
                         f"🔄 Обновлена завершённая игра #N{game_number}",
                         flush=True,
@@ -979,7 +1130,7 @@ def cleanup_predictions():
 # =====================================================================
 
 def generate_stats():
-    from collections import Counter, defaultdict
+    bank = load_bank()
 
     total = len(predictions)
     win = sum(1 for p in predictions if p.get("status") == "win")
@@ -989,6 +1140,19 @@ def generate_stats():
 
     decided = win + lose
     winrate = round(win / decided * 100, 1) if decided else 0.0
+
+    balance = bank.get("balance", START_BALANCE)
+    start_balance = bank.get("start_balance", START_BALANCE)
+    profit = balance - start_balance
+
+    total_staked = sum(
+        p.get("bet_amount", 0) for p in predictions
+        if p.get("status") in ("win", "lose")
+    )
+    roi = round(profit / total_staked * 100, 1) if total_staked else 0.0
+
+    current_bet = bank.get("current_bet", 0)
+    current_step = bank.get("step", 0)
 
     dogons = Counter()
     dogons_win = Counter()
@@ -1026,12 +1190,14 @@ def generate_stats():
         suit = p.get("predicted_suit", "").replace("\ufe0f", "")
         dogon = p.get("dogon")
         dogon_str = f"Д{dogon}" if dogon is not None else ""
+        bet = p.get("bet_amount", 0)
         created = (p.get("created_at") or "")[:16].replace("T", " ")
         rows.append(
             f"<tr><td>{mark}</td><td>#N{target}</td><td>{suit}</td>"
-            f"<td>{dogon_str}</td><td>{status}</td><td>{created}</td></tr>"
+            f"<td>{bet:.0f} ₽</td><td>{dogon_str}</td>"
+            f"<td>{status}</td><td>{created}</td></tr>"
         )
-    rows_html = "\n".join(rows) or '<tr><td colspan="6">Нет данных</td></tr>'
+    rows_html = "\n".join(rows) or '<tr><td colspan="7">Нет данных</td></tr>'
 
     dogon_rows = ""
     for d in sorted(dogons.keys()):
@@ -1066,6 +1232,8 @@ def generate_stats():
 
     updated = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
+    profit_class = "win" if profit >= 0 else "lose"
+
     html = """<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1094,11 +1262,15 @@ th { background:#262626; color:#aaa; font-weight:normal; }
 <h1>📊 Cyber 21 — Статистика</h1>
 
 <div class="cards">
+<div class="card"><div class="label">Баланс</div><div class="value">__BALANCE__ ₽</div></div>
+<div class="card"><div class="label">Профит</div><div class="value __PROFIT_CLASS__">__PROFIT__ ₽</div></div>
+<div class="card"><div class="label">Winrate</div><div class="value">__WINRATE__%</div></div>
+<div class="card"><div class="label">ROI</div><div class="value">__ROI__%</div></div>
 <div class="card"><div class="label">Всего</div><div class="value">__TOTAL__</div></div>
 <div class="card"><div class="label">Плюсы</div><div class="value win">__WIN__</div></div>
 <div class="card"><div class="label">Минусы</div><div class="value lose">__LOSE__</div></div>
 <div class="card"><div class="label">В ожидании</div><div class="value pending">__PENDING__</div></div>
-<div class="card"><div class="label">Winrate</div><div class="value">__WINRATE__%</div></div>
+<div class="card"><div class="label">Текущая ставка</div><div class="value">__CURRENT_BET__ ₽</div></div>
 </div>
 
 <h2>🎯 По догонам</h2>
@@ -1121,7 +1293,7 @@ __DAY_ROWS__
 
 <h2>🕐 Последние 30 прогнозов</h2>
 <table>
-<tr><th></th><th>Игра</th><th>Масть</th><th>Догон</th><th>Статус</th><th>Создан</th></tr>
+<tr><th></th><th>Игра</th><th>Масть</th><th>Ставка</th><th>Догон</th><th>Статус</th><th>Создан</th></tr>
 __ROWS__
 </table>
 
@@ -1130,11 +1302,16 @@ __ROWS__
 </body>
 </html>"""
 
+    html = html.replace("__BALANCE__", f"{balance:.0f}")
+    html = html.replace("__PROFIT__", f"{profit:+.0f}")
+    html = html.replace("__PROFIT_CLASS__", profit_class)
+    html = html.replace("__WINRATE__", str(winrate))
+    html = html.replace("__ROI__", str(roi))
     html = html.replace("__TOTAL__", str(total))
     html = html.replace("__WIN__", str(win))
     html = html.replace("__LOSE__", str(lose))
     html = html.replace("__PENDING__", str(pending))
-    html = html.replace("__WINRATE__", str(winrate))
+    html = html.replace("__CURRENT_BET__", f"{current_bet:.0f}")
     html = html.replace("__DOGON_ROWS__", dogon_rows or '<tr><td colspan="4">Нет данных</td></tr>')
     html = html.replace("__SUIT_ROWS__", suit_rows or '<tr><td colspan="4">Нет данных</td></tr>')
     html = html.replace("__DAY_ROWS__", day_rows or '<tr><td colspan="5">Нет данных</td></tr>')
@@ -1147,7 +1324,9 @@ __ROWS__
 
         print(
             f"📊 Статистика: {total} прогнозов, "
-            f"+{win} / -{lose}, winrate {winrate}%",
+            f"банк {balance:.0f} ₽, профит {profit:+.0f} ₽, "
+            f"winrate {winrate}%, ROI {roi}%, "
+            f"ставка {current_bet:.0f} ₽ (Д{current_step})",
             flush=True,
         )
     except Exception as e:
@@ -1216,7 +1395,8 @@ def main():
         flush=True,
     )
     print(f"🔁 Цикл нумерации игр: {GAME_CYCLE}", flush=True)
-    print("📊 Статистика: http://0.0.0.0:PORT", flush=True)
+    print(f"💰 Стартовый банк: {START_BALANCE} ₽", flush=True)
+    print(f"📈 Коэффициент: {WIN_COEF}, множитель догона: {DOGON_MULT}", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
@@ -1227,10 +1407,8 @@ def main():
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
     print("==================================================", flush=True)
 
-    # Веб-сервер в отдельном потоке
     threading.Thread(target=start_web_server, daemon=True).start()
 
-    # Первая генерация
     generate_stats()
     last_stats_hour = datetime.now(MOSCOW_TZ).hour
 
