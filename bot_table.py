@@ -67,13 +67,11 @@ GAME_CYCLE = 720
 
 START_BALANCE = 20000
 
-# Множитель догона
 DOGON_MULT = 2.7
 
-# Коэффициент выигрыша
 WIN_COEF = 1.6
 
-# База по диапазону банка
+
 def get_base(balance):
     if balance < 50000:
         return 20000
@@ -88,10 +86,9 @@ def get_base(balance):
 
 def get_first_bet(balance):
     base = get_base(balance)
-    return round(base * 0.0025, 2)  # 0.25%
+    return round(base * 0.0025, 2)
 
 
-# Предупреждение при низком банке
 LOW_BALANCE_THRESHOLD = 5000
 
 
@@ -136,12 +133,12 @@ def save_bank(state):
         print(f"⚠️ Ошибка сохранения bank_state: {e}", flush=True)
 
 
-def reset_series(state):
-    state["step"] = 0
-    state["current_bet"] = get_first_bet(state["balance"])
+def get_current_bet():
+    state = load_bank()
+    return state.get("current_bet", 0), state.get("step", 0), state.get("balance", 0)
 
 
-def apply_result(status, bet_amount):
+def apply_result(status, bet_amount, dogon=None):
     """Обновляет банк после закрытия прогноза."""
     state = load_bank()
     bet = bet_amount if bet_amount else state.get("current_bet", 0)
@@ -150,16 +147,14 @@ def apply_result(status, bet_amount):
     if status == "win":
         profit = bet * (WIN_COEF - 1)
         state["balance"] += profit
-        reset_series(state)
+        state["current_bet"] = get_first_bet(state["balance"])
+        state["step"] = 0
 
     elif status == "lose":
         profit = -bet
         state["balance"] += profit
-        state["current_bet"] = round(state["current_bet"] * DOGON_MULT, 2)
-        state["step"] += 1
-
-    elif status == "void":
-        profit = 0.0
+        state["current_bet"] = round(bet * DOGON_MULT, 2)
+        state["step"] = (dogon or 0) + 1
 
     state["history"].append({
         "time": datetime.now(MOSCOW_TZ).isoformat(),
@@ -187,11 +182,6 @@ def apply_result(status, bet_amount):
             pass
 
     return state, profit
-
-
-def get_current_bet():
-    state = load_bank()
-    return state.get("current_bet", 0), state.get("step", 0), state.get("balance", 0)
 
 
 # =====================================================================
@@ -750,9 +740,15 @@ def create_predictions(game):
             processed_triggers.add(trigger_key)
             continue
 
-        # фиксируем ставку на момент создания прогноза
+        # фиксируем все 4 ставки серии заранее
         bet, step, _ = get_current_bet()
-        prediction["bet_amount"] = bet
+        prediction["bets"] = [
+            round(bet, 2),
+            round(bet * DOGON_MULT, 2),
+            round(bet * DOGON_MULT ** 2, 2),
+            round(bet * DOGON_MULT ** 3, 2),
+        ]
+        prediction["bet_amount"] = prediction["bets"][0]
         prediction["bet_step"] = step
 
         message = make_prediction_message(prediction)
@@ -776,7 +772,14 @@ def create_predictions(game):
         print(f"🧠 Алгоритм: {algorithm}", flush=True)
         print(f"🎯 Цель: #N{target_number}", flush=True)
         print(f"🃏 Масть: {prediction['predicted_suit']}", flush=True)
-        print(f"💰 Ставка: {bet:.0f} ₽ (Д{step})", flush=True)
+        print(
+            f"💰 Ставки серии: "
+            f"Д0={prediction['bets'][0]:.0f} "
+            f"Д1={prediction['bets'][1]:.0f} "
+            f"Д2={prediction['bets'][2]:.0f} "
+            f"Д3={prediction['bets'][3]:.0f}",
+            flush=True,
+        )
         print(f"📌 Триггер: #N{game_number} (ID: {game_id})", flush=True)
 
 
@@ -811,8 +814,10 @@ def make_result_message(prediction, result):
 
     state = load_bank()
     balance = state["balance"]
-    bet = prediction.get("bet_amount", 0)
+
+    bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
     step = prediction.get("dogon", 0)
+    bet = bets[step] if step < len(bets) else bets[-1]
 
     return (
         f"🎯 Игра: <b>#N{target}</b> {suit}{mark}\n"
@@ -864,7 +869,9 @@ def check_predictions():
                 prediction["found_card"] = found_card
                 prediction["dogon"] = dogon
 
-                apply_result("win", prediction.get("bet_amount", 0))
+                bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
+                actual_bet = bets[dogon] if dogon < len(bets) else bets[-1]
+                apply_result("win", actual_bet, dogon)
 
                 telegram_edit(
                     prediction.get("message_id"),
@@ -879,7 +886,7 @@ def check_predictions():
                     f"({found_card})",
                     flush=True,
                 )
-                print(f"🔄 Догон: {dogon}", flush=True)
+                print(f"🔄 Догон: {dogon}, ставка: {actual_bet:.0f} ₽", flush=True)
 
                 changed = True
                 all_games_checked = False
@@ -903,7 +910,9 @@ def check_predictions():
         prediction["result_game"] = add_game_offset(target, DOGON_GAMES)
         prediction["dogon"] = DOGON_GAMES
 
-        apply_result("lose", prediction.get("bet_amount", 0))
+        bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
+        actual_bet = bets[DOGON_GAMES] if DOGON_GAMES < len(bets) else bets[-1]
+        apply_result("lose", actual_bet, DOGON_GAMES)
 
         telegram_edit(
             prediction.get("message_id"),
@@ -917,6 +926,7 @@ def check_predictions():
             f"#N{target} — #N{add_game_offset(target, DOGON_GAMES)}",
             flush=True,
         )
+        print(f"💰 Списано: {actual_bet:.0f} ₽ (Д{DOGON_GAMES})", flush=True)
 
         changed = True
 
@@ -1190,7 +1200,11 @@ def generate_stats():
         suit = p.get("predicted_suit", "").replace("\ufe0f", "")
         dogon = p.get("dogon")
         dogon_str = f"Д{dogon}" if dogon is not None else ""
-        bet = p.get("bet_amount", 0)
+
+        bets = p.get("bets") or [p.get("bet_amount", 0)]
+        dogon_idx = p.get("dogon") or 0
+        bet = bets[dogon_idx] if dogon_idx < len(bets) else bets[-1]
+
         created = (p.get("created_at") or "")[:16].replace("T", " ")
         rows.append(
             f"<tr><td>{mark}</td><td>#N{target}</td><td>{suit}</td>"
@@ -1407,9 +1421,9 @@ def main():
     print(f"📊 Загружено прогнозов: {len(predictions)}", flush=True)
     print("==================================================", flush=True)
 
+    generate_stats()
     threading.Thread(target=start_web_server, daemon=True).start()
 
-    generate_stats()
     last_stats_hour = datetime.now(MOSCOW_TZ).hour
 
     while True:
