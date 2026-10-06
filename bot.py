@@ -93,6 +93,26 @@ def generate_stats():
 
 
 # =====================================================================
+# ОБНОВЛЕНИЕ BETS У PENDING ПРОГНОЗОВ
+# =====================================================================
+
+def refresh_pending_bets():
+    """Обновляет ставки у pending-прогнозов после смены current_bet."""
+    new_bet, new_step, _ = bank_module.get_current_bet()
+
+    for p in predictions:
+        if p.get("status") == "pending" and not p.get("sent"):
+            p["bets"] = [
+                round(new_bet, 2),
+                round(new_bet * DOGON_MULT, 2),
+                round(new_bet * DOGON_MULT ** 2, 2),
+                round(new_bet * DOGON_MULT ** 3, 2),
+            ]
+            p["bet_amount"] = p["bets"][0]
+            p["bet_step"] = new_step
+
+
+# =====================================================================
 # НОЧНАЯ ОЧИСТКА (03:00)
 # =====================================================================
 
@@ -398,24 +418,14 @@ def check_predictions():
                 prediction["dogon"] = dogon
 
                 bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
-        actual_bet = bets[DOGON_GAMES] if DOGON_GAMES < len(bets) else bets[-1]
-        bank_module.apply_result(
-            "lose", actual_bet, DOGON_GAMES,
-            telegram_send_func=telegram_api.telegram_send,
-        )
+                actual_bet = bets[dogon] if dogon < len(bets) else bets[-1]
+                bank_module.apply_result(
+                    "win", actual_bet, dogon,
+                    telegram_send_func=telegram_api.telegram_send,
+                )
 
-        # 🛡️ обновляем ставки у ВСЕХ pending-прогнозов после смены current_bet
-        new_bet, new_step, _ = bank_module.get_current_bet()
-        for p in predictions:
-            if p.get("status") == "pending" and not p.get("sent"):
-                p["bets"] = [
-                    round(new_bet, 2),
-                    round(new_bet * DOGON_MULT, 2),
-                    round(new_bet * DOGON_MULT ** 2, 2),
-                    round(new_bet * DOGON_MULT ** 3, 2),
-                ]
-                p["bet_amount"] = p["bets"][0]
-                p["bet_step"] = new_step
+                # обновляем ставки у pending-прогнозов
+                refresh_pending_bets()
 
                 telegram_api.telegram_edit(
                     prediction.get("message_id"),
@@ -462,6 +472,9 @@ def check_predictions():
             "lose", actual_bet, DOGON_GAMES,
             telegram_send_func=telegram_api.telegram_send,
         )
+
+        # обновляем ставки у pending-прогнозов
+        refresh_pending_bets()
 
         telegram_api.telegram_edit(
             prediction.get("message_id"),
@@ -650,6 +663,7 @@ def main():
     print(f"💰 Стартовый банк: {START_BALANCE} ₽", flush=True)
     print(f"📈 Коэффициент: {WIN_COEF}, множитель догона: {DOGON_MULT}", flush=True)
     print("📤 Отправка прогноза: за 1 игру до цели", flush=True)
+    print("🛡️ Защита от каскада: 2 минуса подряд → сброс", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
