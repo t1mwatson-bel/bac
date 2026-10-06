@@ -35,6 +35,7 @@ DEFAULT_BANK = {
     "start_balance": START_BALANCE,
     "current_bet": None,
     "step": 0,
+    "cascade": 0,
     "history": [],
     "last_updated": None,
 }
@@ -56,6 +57,9 @@ def load_bank():
 
     if not state.get("current_bet"):
         state["current_bet"] = get_first_bet(state["balance"])
+
+    if "cascade" not in state:
+        state["cascade"] = 0
 
     return state
 
@@ -81,7 +85,7 @@ def get_current_bet():
 
 
 def apply_result(status, bet_amount, dogon=None, telegram_send_func=None):
-    """Обновляет банк после закрытия прогноза."""
+    """Обновляет банк после закрытия прогноза. С защитой от каскада."""
     state = load_bank()
     bet = bet_amount if bet_amount else state.get("current_bet", 0)
     profit = 0.0
@@ -91,15 +95,35 @@ def apply_result(status, bet_amount, dogon=None, telegram_send_func=None):
         state["balance"] += profit
         state["current_bet"] = get_first_bet(state["balance"])
         state["step"] = 0
+        state["cascade"] = 0
 
     elif status == "lose":
         profit = -bet
         state["balance"] += profit
-        state["current_bet"] = round(bet * DOGON_MULT, 2)
-        # если проиграли все догоны — новая серия с Д0
-        if (dogon or 0) >= DOGON_GAMES:
-            state["step"] = 0
+
+        is_full_minus = (dogon or 0) >= DOGON_GAMES
+
+        if is_full_minus:
+            # полный минус (Д3) — увеличиваем счётчик каскада
+            state["cascade"] = state.get("cascade", 0) + 1
+
+            if state["cascade"] >= 2:
+                # 2-й полный минус подряд — сброс на первую ставку
+                state["current_bet"] = get_first_bet(state["balance"])
+                state["step"] = 0
+                state["cascade"] = 0
+                print(
+                    "🛡️ ЗАЩИТА ОТ КАСКАДА: 2 минуса подряд → сброс на "
+                    f"{state['current_bet']:.0f} ₽",
+                    flush=True,
+                )
+            else:
+                # 1-й полный минус — новая серия с увеличенной ставкой
+                state["current_bet"] = round(bet * DOGON_MULT, 2)
+                state["step"] = 0
         else:
+            # обычный проигрыш догона — продолжаем серию
+            state["current_bet"] = round(bet * DOGON_MULT, 2)
             state["step"] = (dogon or 0) + 1
 
     state["history"].append({
@@ -108,6 +132,7 @@ def apply_result(status, bet_amount, dogon=None, telegram_send_func=None):
         "bet": bet,
         "profit": profit,
         "balance_after": state["balance"],
+        "cascade": state.get("cascade", 0),
     })
     state["history"] = state["history"][-500:]
     save_bank(state)
