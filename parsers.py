@@ -225,6 +225,21 @@ def get_last_card_prediction(game, cycle):
     if last_rank != "10":
         return None
 
+    # ---- ПРОВЕРКА: ровно ОДНА 10 у игрока ----
+    tens_count = 0
+
+    for card in player:
+        if normalize_rank(card.get("rank")) == "10":
+            tens_count += 1
+
+    if tens_count > 1:
+        print(
+            f"⚠️ #N{game['game_number']}: у игрока {tens_count} десяток — "
+            f"прогноз не даём",
+            flush=True,
+        )
+        return None
+
     if "✅" not in game.get("raw_text", ""):
         return None
 
