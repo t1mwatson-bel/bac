@@ -1,10 +1,4 @@
 import re
-from datetime import datetime
-
-from config import (
-    MOSCOW_TZ,
-    GAME_CYCLE
-)
 
 
 # =====================================================================
@@ -159,8 +153,6 @@ def parse_game_message(text):
 
     is_draw = bool(re.search(r"#X\b", text))
     is_ochko = bool(re.search(r"#O\b", text))
-    is_r = bool(re.search(r"#R\b", text))
-    is_finished = bool(re.search(r"✅", text))
 
     return {
         "game_number": game_number,
@@ -171,8 +163,6 @@ def parse_game_message(text):
         "dealer_score": dealer_score,
         "is_draw": is_draw,
         "is_ochko": is_ochko,
-        "is_r": is_r,
-        "is_finished": is_finished,
         "raw_text": text,
     }
 
@@ -195,10 +185,7 @@ def log_game(game):
         print("🔰 #X — НИЧЬЯ", flush=True)
 
     if game.get("is_ochko"):
-        print("⭕ #O — ОЧКО", flush=True)
-        
-    if game.get("is_r"):
-        print("⚠️ #R — АНОМАЛИЯ", flush=True)
+        print("⭕ #O — ОЧКО (21), пропускаем триггер", flush=True)
 
     print("────────────────────────────────────", flush=True)
 
@@ -212,7 +199,7 @@ def add_game_offset(number, offset, cycle):
 
 
 # =====================================================================
-# ALGORITHM: ПОСЛЕДНЯЯ 10 (С ФИЛЬТРАМИ)
+# ALGORITHM: ПОСЛЕДНЯЯ 10
 # =====================================================================
 
 def get_last_card_prediction(game, cycle):
@@ -222,37 +209,37 @@ def get_last_card_prediction(game, cycle):
     if not player:
         return None
 
-    # 1. У дилера должно быть 0 карт в триггере
     if dealer:
         return None
 
-    # 2. Нет очка в триггере
     if game.get("is_ochko"):
+        print(
+            f"⭕ #N{game['game_number']}: #O (очко) — пропуск триггера",
+            flush=True,
+        )
         return None
 
-    # 3. Последняя карта должна быть 10
     last_card = player[-1]
     last_rank = normalize_rank(last_card.get("rank"))
 
     if last_rank != "10":
         return None
 
-    # 4. Ровно ОДНА 10 у игрока
-    tens_count = sum(
-        1 for card in player 
-        if normalize_rank(card.get("rank")) == "10"
-    )
+    # ---- ПРОВЕРКА: ровно ОДНА 10 у игрока ----
+    tens_count = 0
+
+    for card in player:
+        if normalize_rank(card.get("rank")) == "10":
+            tens_count += 1
 
     if tens_count > 1:
-        print(f"⚠️ #N{game['game_number']}: >1 десятки — пропуск", flush=True)
-        return None
-        
-    # 5. У игрока минимум 3 карты (фильтр от триггера 192)
-    if len(player) < 3:
-        print(f"⚠️ #N{game['game_number']}: у игрока <3 карт — пропуск", flush=True)
+        print(
+            f"⚠️ #N{game['game_number']}: у игрока {tens_count} десяток — "
+            f"прогноз не даём",
+            flush=True,
+        )
         return None
 
-    # 6. Игра завершена
     if "✅" not in game.get("raw_text", ""):
         return None
 
@@ -263,6 +250,9 @@ def get_last_card_prediction(game, cycle):
 
     target_offset = len(player)
     target_number = add_game_offset(game["game_number"], target_offset, cycle)
+
+    from datetime import datetime
+    from config import MOSCOW_TZ
 
     return {
         "algorithm": "последняя 10",
