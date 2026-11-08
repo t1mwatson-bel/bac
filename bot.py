@@ -265,7 +265,7 @@ def make_result_message(prediction, result):
     mark = "✅" if result == "win" else "❌"
 
     algorithm = prediction.get("algorithm", "Bas_v2.0")
-state = bank_module.load_bank(algorithm)
+    state = bank_module.load_bank(algorithm)
     balance = state["balance"]
 
     bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
