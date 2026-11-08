@@ -270,11 +270,21 @@ def make_result_message(prediction, result):
     bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
     step = prediction.get("dogon", 0)
     bet = bets[step] if step < len(bets) else bets[-1]
+    
+    # Берем название алгоритма из прогноза (так же, как при отправке)
+    algorithm = prediction.get("algorithm", "unknown")
+    if algorithm == "последняя 10":
+        algo_text = "Bas_v2.0"
+    elif algorithm == "Full_v1.0":
+        algo_text = "Full_v1.0"
+    else:
+        algo_text = algorithm
 
     return (
         f"🎯 Игра: <b>#N{target}</b> {suit}{mark}\n"
         f"💰 Ставка: {bet:.0f} ₽ (Д{step})\n"
-        f"🏦 Банк: <b>{balance:.0f} ₽</b>"
+        f"🏦 Банк: <b>{balance:.0f} ₽</b>\n"
+        f"🧠 Алгоритм: <b>{algo_text}</b>"
     )
 
 
