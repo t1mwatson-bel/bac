@@ -212,7 +212,7 @@ def add_game_offset(number, offset, cycle):
 
 
 # =====================================================================
-# ALGORITHM: ПОСЛЕДНЯЯ 10 (С ФИЛЬТРАМИ)
+# ALGORITHM: ПОСЛЕДНЯЯ 10 (С ФИЛЬТРАМИ) - СТАРЫЙ АЛГОРИТМ
 # =====================================================================
 
 def get_last_card_prediction(game, cycle):
@@ -285,9 +285,91 @@ def get_last_card_prediction(game, cycle):
     }
 
 
+# =====================================================================
+# ALGORITHM: FULL_V1.0 (МАСТЬ ПО ПЕРВОЙ КАРТЕ, +10 ИГР) - НОВЫЙ
+# =====================================================================
+
+def get_full_v1_prediction(game, cycle):
+    player = game.get("player_cards", [])
+    dealer = game.get("dealer_cards", [])
+
+    if not player:
+        return None
+
+    # 1. У дилера должны быть карты
+    if not dealer:
+        return None
+
+    # 2. Нет аномалий (#R), ничьи (#X) и очка (#O)
+    if game.get("is_r") or game.get("is_draw") or game.get("is_ochko"):
+        return None
+
+    # 3. У игрока нет Туза (A) и Десятки (10)
+    for card in player:
+        rank = normalize_rank(card.get("rank"))
+        if rank in ("A", "10"):
+            return None
+
+    # 4. Берем первую карту игрока
+    first_card = player[0]
+    rank = normalize_rank(first_card.get("rank"))
+    
+    # 5. Таблица маппинга масти (Full_v1.0)
+    # Q -> ♦️, J/K -> ♥️, 2/4/6/8 -> ♠️, 3/5/7/9 -> ♣️
+    if rank == "Q":
+        predicted_suit = normalize_suit("♦")
+    elif rank in ("J", "K"):
+        predicted_suit = normalize_suit("♥")
+    elif rank in ("2", "4", "6", "8"):
+        predicted_suit = normalize_suit("♠")
+    elif rank in ("3", "5", "7", "9"):
+        predicted_suit = normalize_suit("♣")
+    else:
+        return None
+
+    # 6. Триггер и цель (+10 игр)
+    trigger_number = game["game_number"]
+    target_number = add_game_offset(trigger_number, 10, cycle)
+
+    return {
+        "algorithm": "Full_v1.0",
+        "trigger_number": trigger_number,
+        "trigger_game_id": game.get("game_id"),
+        "target_number": target_number,
+        "predicted_suit": predicted_suit,
+        "trigger_player": [card_to_text(c) for c in player],
+        "trigger_dealer": [card_to_text(c) for c in dealer],
+        "trigger_player_score": game["player_score"],
+        "trigger_dealer_score": game["dealer_score"],
+        "status": "pending",
+        "created_at": datetime.now(MOSCOW_TZ).isoformat(),
+        "result_game": None,
+        "found_card": None,
+        "dogon": None,
+        "message_id": None,
+        "sent": False,
+        "target_offset": 10,
+    }
+
+
+# =====================================================================
+# ОБЩАЯ ФУНКЦИЯ ЗАПУСКА АЛГОРИТМОВ
+# =====================================================================
+
 def get_algorithm_predictions(game, cycle):
-    prediction = get_last_card_prediction(game, cycle)
-    return [prediction] if prediction else []
+    predictions = []
+    
+    # 1. Старый алгоритм (Последняя 10)
+    p1 = get_last_card_prediction(game, cycle)
+    if p1:
+        predictions.append(p1)
+        
+    # 2. Новый алгоритм (Full_v1.0)
+    p2 = get_full_v1_prediction(game, cycle)
+    if p2:
+        predictions.append(p2)
+        
+    return predictions
 
 
 # =====================================================================
