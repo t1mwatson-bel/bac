@@ -264,7 +264,8 @@ def make_result_message(prediction, result):
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
-    state = bank_module.load_bank()
+    algorithm = prediction.get("algorithm", "Bas_v2.0")
+state = bank_module.load_bank(algorithm)
     balance = state["balance"]
 
     bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
@@ -318,7 +319,7 @@ def create_predictions(game):
             continue
 
         # фиксируем все 4 ставки серии заранее
-        bet, step, _ = bank_module.get_current_bet()
+        bet, step, _ = bank_module.get_current_bet(algorithm)
         prediction["bets"] = [
             round(bet, 2),
             round(bet * DOGON_MULT, 2),
@@ -441,9 +442,7 @@ def check_predictions():
 
                 bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
                 actual_bet = bets[dogon] if dogon < len(bets) else bets[-1]
-                bank_module.apply_result(
-                    "win", actual_bet, dogon,
-                    telegram_send_func=telegram_api.telegram_send,
+                bank_module.apply_result(algorithm, "win", actual_bet, dogon, telegram_send_func=telegram_api.telegram_send,
                 )
 
                 # обновляем ставки у pending-прогнозов
@@ -490,9 +489,7 @@ def check_predictions():
 
         bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
         actual_bet = bets[DOGON_GAMES] if DOGON_GAMES < len(bets) else bets[-1]
-        bank_module.apply_result(
-            "lose", actual_bet, DOGON_GAMES,
-            telegram_send_func=telegram_api.telegram_send,
+        bank_module.apply_result(algorithm, "lose", actual_bet, DOGON_GAMES, telegram_send_func=telegram_api.telegram_send,
         )
 
         # обновляем ставки у pending-прогнозов
