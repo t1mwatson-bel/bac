@@ -240,29 +240,22 @@ def make_prediction_message(prediction):
     target = prediction["target_number"]
     bet = prediction.get("bet_amount", 0)
     step = prediction.get("bet_step", 0)
+    
+    # Берем название алгоритма из прогноза
+    algorithm = prediction.get("algorithm", "unknown")
+
+    # Показываем только красивые названия, без внутренних деталей
+    if algorithm == "последняя 10":
+        algo_text = "Bas_v2.0"
+    elif algorithm == "Full_v1.0":
+        algo_text = "Full_v1.0"
+    else:
+        algo_text = algorithm
 
     return (
         f"🎯 Игра: <b>#N{target}</b> {suit}\n"
-        f"💰 Ставка: <b>{bet:.0f} ₽</b> (Д{step})"
-    )
-
-
-def make_result_message(prediction, result):
-    suit = prediction["predicted_suit"]
-    target = prediction["target_number"]
-    mark = "✅" if result == "win" else "❌"
-
-    state = bank_module.load_bank()
-    balance = state["balance"]
-
-    bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
-    step = prediction.get("dogon", 0)
-    bet = bets[step] if step < len(bets) else bets[-1]
-
-    return (
-        f"🎯 Игра: <b>#N{target}</b> {suit}{mark}\n"
-        f"💰 Ставка: {bet:.0f} ₽ (Д{step})\n"
-        f"🏦 Банк: <b>{balance:.0f} ₽</b>"
+        f"💰 Ставка: <b>{bet:.0f} ₽</b> (Д{step})\n"
+        f"🧠 Алгоритм: <b>{algo_text}</b>"
     )
 
 
