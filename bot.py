@@ -259,6 +259,25 @@ def make_prediction_message(prediction):
     )
 
 
+def make_result_message(prediction, result):
+    suit = prediction["predicted_suit"]
+    target = prediction["target_number"]
+    mark = "✅" if result == "win" else "❌"
+
+    state = bank_module.load_bank()
+    balance = state["balance"]
+
+    bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
+    step = prediction.get("dogon", 0)
+    bet = bets[step] if step < len(bets) else bets[-1]
+
+    return (
+        f"🎯 Игра: <b>#N{target}</b> {suit}{mark}\n"
+        f"💰 Ставка: {bet:.0f} ₽ (Д{step})\n"
+        f"🏦 Банк: <b>{balance:.0f} ₽</b>"
+    )
+
+
 # =====================================================================
 # CREATE PREDICTIONS
 # =====================================================================
@@ -656,7 +675,6 @@ def main():
     print(f"💰 Стартовый банк: {START_BALANCE} ₽", flush=True)
     print(f"📈 Коэффициент: {WIN_COEF}, множитель догона: {DOGON_MULT}", flush=True)
     print("📤 Отправка прогноза: за 1 игру до цели", flush=True)
-    print("🛡️ Защита от каскада: 2 минуса подряд → сброс", flush=True)
     print("==================================================", flush=True)
 
     load_predictions()
