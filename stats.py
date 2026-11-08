@@ -14,35 +14,42 @@ from config import (
 import bank as bank_module
 
 
-def generate_stats(predictions):
-    """Генерит stats.html из списка прогнозов + bank_state."""
-    bank = bank_module.load_bank()
+def generate_html_for_algorithm(algorithm, predictions, bank_state, file_name):
+    """Генерирует HTML-страницу для конкретного алгоритма."""
+    
+    # 1. Фильтруем прогнозы только для этого алгоритма
+    algo_predictions = [
+        p for p in predictions 
+        if p.get("algorithm") == algorithm or 
+        (algorithm == "Bas_v2.0" and p.get("algorithm") == "последняя 10")
+    ]
 
-    total = len(predictions)
-    win = sum(1 for p in predictions if p.get("status") == "win")
-    lose = sum(1 for p in predictions if p.get("status") == "lose")
-    pending = sum(1 for p in predictions if p.get("status") == "pending")
-    expired = sum(1 for p in predictions if p.get("status") == "expired")
+    total = len(algo_predictions)
+    win = sum(1 for p in algo_predictions if p.get("status") == "win")
+    lose = sum(1 for p in algo_predictions if p.get("status") == "lose")
+    pending = sum(1 for p in algo_predictions if p.get("status") == "pending")
+    expired = sum(1 for p in algo_predictions if p.get("status") == "expired")
 
     decided = win + lose
     winrate = round(win / decided * 100, 1) if decided else 0.0
 
-    balance = bank.get("balance", START_BALANCE)
-    start_balance = bank.get("start_balance", START_BALANCE)
+    balance = bank_state.get("balance", START_BALANCE)
+    start_balance = bank_state.get("start_balance", START_BALANCE)
     profit = balance - start_balance
 
     total_staked = sum(
-        p.get("bet_amount", 0) for p in predictions
+        p.get("bet_amount", 0) for p in algo_predictions
         if p.get("status") in ("win", "lose")
     )
     roi = round(profit / total_staked * 100, 1) if total_staked else 0.0
 
-    current_bet = bank.get("current_bet", 0)
-    current_step = bank.get("step", 0)
+    current_bet = bank_state.get("current_bet", 0)
+    current_step = bank_state.get("step", 0)
 
+    # Догоны
     dogons = Counter()
     dogons_win = Counter()
-    for p in predictions:
+    for p in algo_predictions:
         if p.get("status") in ("win", "lose"):
             d = p.get("dogon")
             if d is not None:
@@ -50,26 +57,37 @@ def generate_stats(predictions):
                 if p.get("status") == "win":
                     dogons_win[d] += 1
 
+    # Масти
     suits = Counter()
     suits_win = Counter()
-    for p in predictions:
+    for p in algo_predictions:
         s = p.get("predicted_suit")
         if s:
             suits[s] += 1
             if p.get("status") == "win":
                 suits_win[s] += 1
 
+    # Динамика по дням (на основе истории банка)
+    daily_balance = {}
+    history = bank_state.get("history", [])
+    for entry in history:
+        time_str = entry.get("time", "")
+        if len(time_str) >= 10:
+            day = time_str[:10]
+            daily_balance[day] = entry.get("balance_after", 0)
+
+    # Группировка прогнозов по дням
     days = defaultdict(lambda: {"win": 0, "lose": 0})
-    for p in predictions:
+    for p in algo_predictions:
         if p.get("status") not in ("win", "lose"):
             continue
         created = p.get("created_at") or ""
         day = created[:10] if len(created) >= 10 else "?"
         days[day][p["status"]] += 1
 
-    # последние 30 прогнозов
+    # Последние 30 прогнозов
     rows = []
-    for p in predictions[-30:][::-1]:
+    for p in algo_predictions[-30:][::-1]:
         status = p.get("status", "?")
         mark = {"win": "✅", "lose": "❌", "pending": "⏳",
                 "expired": "🗑️"}.get(status, "?")
@@ -110,15 +128,18 @@ def generate_stats(predictions):
             f"<td>{won}</td><td>{wr}%</td></tr>"
         )
 
+    # Таблица по дням (с балансом на конец дня)
     day_rows = ""
-    for day in sorted(days.keys(), reverse=True)[:30]:
-        d = days[day]
+    for day in sorted(set(list(days.keys()) + list(daily_balance.keys())), reverse=True)[:30]:
+        d = days.get(day, {"win": 0, "lose": 0})
         w, l = d["win"], d["lose"]
         total_d = w + l
         wr = round(w / total_d * 100, 1) if total_d else 0
+        day_bal = daily_balance.get(day, "-")
+        bal_str = f"{day_bal:.0f} ₽" if isinstance(day_bal, (int, float)) else day_bal
         day_rows += (
             f"<tr><td>{day}</td><td>{total_d}</td>"
-            f"<td>{w}</td><td>{l}</td><td>{wr}%</td></tr>"
+            f"<td>{w}</td><td>{l}</td><td>{wr}%</td><td>{bal_str}</td></tr>"
         )
 
     updated = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
@@ -128,7 +149,7 @@ def generate_stats(predictions):
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>__BRAND__ — Статистика</title>
+<title>__BRAND__ — __ALGO__</title>
 <meta http-equiv="refresh" content="300">
 <link rel="icon" type="image/png" href="__LOGO__">
 <style>
@@ -159,7 +180,7 @@ h1 {
     font-size: 22px;
     letter-spacing: 3px;
     text-transform: uppercase;
-    margin: 0 0 28px 0;
+    margin: 0 0 10px 0;
     text-shadow: 0 0 20px rgba(0, 179, 255, 0.5);
 }
 h2 {
@@ -272,6 +293,29 @@ tr:hover td { background: rgba(0, 179, 255, 0.05); }
     text-transform: uppercase;
     text-shadow: 0 0 15px rgba(0, 179, 255, 0.5);
 }
+.tabs {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.tab-btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #6a8db8;
+    border: 1px solid rgba(0, 179, 255, 0.25);
+    transition: 0.3s;
+}
+.tab-btn.active {
+    background: rgba(0, 179, 255, 0.2);
+    color: #00e5ff;
+    border-color: #00e5ff;
+}
+.tab-btn:hover {
+    color: #00e5ff;
+    border-color: #00e5ff;
+}
 @media (max-width: 600px) {
     .card { min-width: 110px; padding: 12px 14px; }
     .card .value { font-size: 20px; }
@@ -287,7 +331,12 @@ tr:hover td { background: rgba(0, 179, 255, 0.05); }
     <img src="__LOGO__" alt="__BRAND__">
 </div>
 
-<h1>__BRAND__ — Статистика</h1>
+<div class="tabs">
+    <a href="stats_bas.html" class="tab-btn __TAB_BAS__">Bas_v2.0</a>
+    <a href="stats_full.html" class="tab-btn __TAB_FULL__">Full_v1.0</a>
+</div>
+
+<h1>__BRAND__ — __ALGO__</h1>
 
 <div class="cards">
 <div class="card"><div class="label">Баланс</div><div class="value">__BALANCE__ ₽</div></div>
@@ -315,7 +364,7 @@ __SUIT_ROWS__
 
 <h2>📅 По дням</h2>
 <table>
-<tr><th>Дата</th><th>Всего</th><th>Плюсов</th><th>Минусов</th><th>Winrate</th></tr>
+<tr><th>Дата</th><th>Всего</th><th>Плюсов</th><th>Минусов</th><th>Winrate</th><th>Баланс на конец</th></tr>
 __DAY_ROWS__
 </table>
 
@@ -345,6 +394,7 @@ __ROWS__
     html = html.replace("__BRAND__", BRAND_NAME)
     html = html.replace("__LOGO__", LOGO_URL)
     html = html.replace("__BOT_LINK__", BOT_LINK)
+    html = html.replace("__ALGO__", algorithm)
     html = html.replace("__BALANCE__", f"{balance:.0f}")
     html = html.replace("__PROFIT__", f"{profit:+.0f}")
     html = html.replace("__PROFIT_CLASS__", profit_class)
@@ -357,20 +407,41 @@ __ROWS__
     html = html.replace("__CURRENT_BET__", f"{current_bet:.0f}")
     html = html.replace("__DOGON_ROWS__", dogon_rows or '<tr><td colspan="4">Нет данных</td></tr>')
     html = html.replace("__SUIT_ROWS__", suit_rows or '<tr><td colspan="4">Нет данных</td></tr>')
-    html = html.replace("__DAY_ROWS__", day_rows or '<tr><td colspan="5">Нет данных</td></tr>')
+    html = html.replace("__DAY_ROWS__", day_rows or '<tr><td colspan="6">Нет данных</td></tr>')
     html = html.replace("__ROWS__", rows_html)
     html = html.replace("__UPDATED__", updated)
 
-    try:
-        with open(STATS_HTML_FILE, "w", encoding="utf-8") as f:
-            f.write(html)
+    # Подсветка активной вкладки
+    if algorithm == "Bas_v2.0":
+        html = html.replace("__TAB_BAS__", "active")
+        html = html.replace("__TAB_FULL__", "")
+    else:
+        html = html.replace("__TAB_BAS__", "")
+        html = html.replace("__TAB_FULL__", "active")
 
-        print(
-            f"📊 Статистика: {total} прогнозов, "
-            f"банк {balance:.0f} ₽, профит {profit:+.0f} ₽, "
-            f"winrate {winrate}%, ROI {roi}%, "
-            f"ставка {current_bet:.0f} ₽ (Д{current_step})",
-            flush=True,
-        )
+    try:
+        with open(file_name, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"📊 [{algorithm}] Статистика сгенерирована: {file_name}", flush=True)
     except Exception as e:
-        print(f"⚠️ Ошибка генерации статистики: {e}", flush=True)
+        print(f"⚠️ Ошибка генерации {file_name}: {e}", flush=True)
+
+
+def generate_stats(predictions):
+    """Генерит две страницы статистики (Bas и Full)."""
+    
+    # Загружаем банки
+    bank_bas = bank_module.load_bank("Bas_v2.0")
+    bank_full = bank_module.load_bank("Full_v1.0")
+    
+    # Генерируем страницы
+    generate_html_for_algorithm("Bas_v2.0", predictions, bank_bas, "stats_bas.html")
+    generate_html_for_algorithm("Full_v1.0", predictions, bank_full, "stats_full.html")
+    
+    # Обновляем ссылку на основную статистику, если нужно
+    # (пока оставим stats.html как копию bas, чтобы не было 404)
+    try:
+        import shutil
+        shutil.copyfile("stats_bas.html", STATS_HTML_FILE)
+    except Exception:
+        pass
