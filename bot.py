@@ -264,7 +264,10 @@ def make_result_message(prediction, result):
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
+    # Берем название алгоритма из прогноза
     algorithm = prediction.get("algorithm", "Bas_v2.0")
+    
+    # Загружаем банк именно для этого алгоритма
     state = bank_module.load_bank(algorithm)
     balance = state["balance"]
 
@@ -272,8 +275,6 @@ def make_result_message(prediction, result):
     step = prediction.get("dogon", 0)
     bet = bets[step] if step < len(bets) else bets[-1]
     
-    # Берем название алгоритма из прогноза (так же, как при отправке)
-    algorithm = prediction.get("algorithm", "unknown")
     if algorithm == "последняя 10":
         algo_text = "Bas_v2.0"
     elif algorithm == "Full_v1.0":
