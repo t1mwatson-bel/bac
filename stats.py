@@ -293,29 +293,6 @@ tr:hover td { background: rgba(0, 179, 255, 0.05); }
     text-transform: uppercase;
     text-shadow: 0 0 15px rgba(0, 179, 255, 0.5);
 }
-.tabs {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-bottom: 20px;
-}
-.tab-btn {
-    padding: 10px 20px;
-    border-radius: 8px;
-    text-decoration: none;
-    color: #6a8db8;
-    border: 1px solid rgba(0, 179, 255, 0.25);
-    transition: 0.3s;
-}
-.tab-btn.active {
-    background: rgba(0, 179, 255, 0.2);
-    color: #00e5ff;
-    border-color: #00e5ff;
-}
-.tab-btn:hover {
-    color: #00e5ff;
-    border-color: #00e5ff;
-}
 @media (max-width: 600px) {
     .card { min-width: 110px; padding: 12px 14px; }
     .card .value { font-size: 20px; }
@@ -329,11 +306,6 @@ tr:hover td { background: rgba(0, 179, 255, 0.05); }
 
 <div class="logo-wrap">
     <img src="__LOGO__" alt="__BRAND__">
-</div>
-
-<div class="tabs">
-    <a href="stats_bas.html" class="tab-btn __TAB_BAS__">Bas_v2.0</a>
-    <a href="stats_full.html" class="tab-btn __TAB_FULL__">Full_v1.0</a>
 </div>
 
 <h1>__BRAND__ — __ALGO__</h1>
@@ -411,14 +383,6 @@ __ROWS__
     html = html.replace("__ROWS__", rows_html)
     html = html.replace("__UPDATED__", updated)
 
-    # Подсветка активной вкладки
-    if algorithm == "Bas_v2.0":
-        html = html.replace("__TAB_BAS__", "active")
-        html = html.replace("__TAB_FULL__", "")
-    else:
-        html = html.replace("__TAB_BAS__", "")
-        html = html.replace("__TAB_FULL__", "active")
-
     try:
         with open(file_name, "w", encoding="utf-8") as f:
             f.write(html)
@@ -428,20 +392,10 @@ __ROWS__
 
 
 def generate_stats(predictions):
-    """Генерит две страницы статистики (Bas и Full)."""
+    """Генерит страницу статистики (только для Bas_v2.0)."""
     
-    # Загружаем банки
-    bank_bas = bank_module.load_bank("Bas_v2.0")
-    bank_full = bank_module.load_bank("Full_v1.0")
+    # Загружаем единый банк
+    bank_state = bank_module.load_bank()
     
-    # Генерируем страницы
-    generate_html_for_algorithm("Bas_v2.0", predictions, bank_bas, "stats_bas.html")
-    generate_html_for_algorithm("Full_v1.0", predictions, bank_full, "stats_full.html")
-    
-    # Обновляем ссылку на основную статистику, если нужно
-    # (пока оставим stats.html как копию bas, чтобы не было 404)
-    try:
-        import shutil
-        shutil.copyfile("stats_bas.html", STATS_HTML_FILE)
-    except Exception:
-        pass
+    # Генерируем страницу сразу в файл из конфига
+    generate_html_for_algorithm("Bas_v2.0", predictions, bank_state, STATS_HTML_FILE)
