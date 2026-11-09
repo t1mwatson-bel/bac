@@ -92,26 +92,35 @@ def get_current_bet(algorithm="Bas_v2.0"):
 def apply_result(algorithm, status, bet_amount, dogon=None, telegram_send_func=None):
     """
     Обновляет банк после закрытия прогноза.
-    Догон сквозной: при проигрыше ставка продолжает умножаться без сброса.
+    Догон сквозной: при проигрыше ставка продолжает умножаться.
     """
     state = load_bank(algorithm)
     bet = bet_amount if bet_amount else state.get("current_bet", 0)
     profit = 0.0
 
     if status == "win":
+        # Чистая прибыль от выигрышной ставки
         profit = bet * (WIN_COEF - 1)
         state["balance"] += profit
-        # После выигрыша сбрасываем на первую ставку (цикл завершен)
+        # После выигрыша сбрасываем на первую ставку
         state["current_bet"] = get_first_bet(state["balance"])
         state["step"] = 0
 
     elif status == "lose":
-        profit = -bet
-        state["balance"] += profit
-        # СКВОЗНОЙ ДОГОН: всегда умножаем текущую ставку, ничего не сбрасываем
-        state["current_bet"] = round(bet * DOGON_MULT, 2)
-        # Шаг увеличиваем, чтобы знать, на каком мы догоне
-        state["step"] = (dogon if dogon is not None else state.get("step", 0)) + 1
+        is_full_minus = (dogon or 0) >= DOGON_GAMES
+
+        if is_full_minus:
+            # Проиграли ВСЮ серию (дошли до Д3) — списываем деньги
+            profit = -bet
+            state["balance"] += profit
+            # Новая серия (или продолжение, если хочешь сквозной)
+            state["current_bet"] = round(bet * DOGON_MULT, 2)
+            state["step"] = 0
+        else:
+            # Проиграли промежуточный шаг (Д0, Д1, Д2) — банк НЕ трогаем
+            profit = 0.0
+            state["current_bet"] = round(bet * DOGON_MULT, 2)
+            state["step"] = (dogon or 0) + 1
 
     state["history"].append({
         "time": datetime.now(MOSCOW_TZ).isoformat(),
@@ -120,7 +129,7 @@ def apply_result(algorithm, status, bet_amount, dogon=None, telegram_send_func=N
         "profit": profit,
         "balance_after": state["balance"],
     })
-    state["history"] = state["history"][-500:]  # Храним последние 500
+    state["history"] = state["history"][-500:]
     save_bank(state, algorithm)
 
     if state["balance"] < LOW_BALANCE_THRESHOLD:
