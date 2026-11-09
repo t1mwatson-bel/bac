@@ -11,11 +11,8 @@ from config import (
     LOW_BALANCE_THRESHOLD,
 )
 
-# Файлы для каждого алгоритма
-BANK_FILES = {
-    "Bas_v2.0": "bank_bas.json",
-    "Full_v1.0": "bank_full.json",
-}
+# Единый файл банка (так как остался один алгоритм)
+BANK_FILE = "bank_bas.json"
 
 
 def get_base(balance):
@@ -46,20 +43,19 @@ def get_default_bank():
     }
 
 
-def load_bank(algorithm="Bas_v2.0"):
-    file_path = BANK_FILES.get(algorithm, "bank_bas.json")
-
-    if not os.path.exists(file_path):
+def load_bank(algorithm=None):
+    # algorithm оставлен для совместимости, но игнорируется
+    if not os.path.exists(BANK_FILE):
         state = get_default_bank()
         state["current_bet"] = get_first_bet(state["balance"])
-        save_bank(state, algorithm)
+        save_bank(state)
         return state
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(BANK_FILE, "r", encoding="utf-8") as f:
             state = json.load(f)
     except Exception as e:
-        print(f"⚠️ Ошибка чтения {file_path}: {e}", flush=True)
+        print(f"⚠️ Ошибка чтения {BANK_FILE}: {e}", flush=True)
         state = get_default_bank()
 
     if not state.get("current_bet"):
@@ -68,20 +64,20 @@ def load_bank(algorithm="Bas_v2.0"):
     return state
 
 
-def save_bank(state, algorithm="Bas_v2.0"):
-    file_path = BANK_FILES.get(algorithm, "bank_bas.json")
+def save_bank(state, algorithm=None):
+    # algorithm оставлен для совместимости, но игнорируется
     state["last_updated"] = datetime.now(MOSCOW_TZ).isoformat()
-    tmp = file_path + ".tmp"
+    tmp = BANK_FILE + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, file_path)
+        os.replace(tmp, BANK_FILE)
     except Exception as e:
-        print(f"⚠️ Ошибка сохранения {file_path}: {e}", flush=True)
+        print(f"⚠️ Ошибка сохранения {BANK_FILE}: {e}", flush=True)
 
 
-def get_current_bet(algorithm="Bas_v2.0"):
-    state = load_bank(algorithm)
+def get_current_bet(algorithm=None):
+    state = load_bank()
     return (
         state.get("current_bet", 0),
         state.get("step", 0),
@@ -94,7 +90,7 @@ def apply_result(algorithm, status, bet_amount, dogon=None, telegram_send_func=N
     Обновляет банк после закрытия прогноза.
     Догон сквозной: при проигрыше ставка продолжает умножаться.
     """
-    state = load_bank(algorithm)
+    state = load_bank()
     bet = bet_amount if bet_amount else state.get("current_bet", 0)
     profit = 0.0
 
@@ -113,7 +109,7 @@ def apply_result(algorithm, status, bet_amount, dogon=None, telegram_send_func=N
             # Проиграли ВСЮ серию (дошли до Д3) — списываем деньги
             profit = -bet
             state["balance"] += profit
-            # Новая серия (или продолжение, если хочешь сквозной)
+            # Новая серия
             state["current_bet"] = round(bet * DOGON_MULT, 2)
             state["step"] = 0
         else:
@@ -130,18 +126,18 @@ def apply_result(algorithm, status, bet_amount, dogon=None, telegram_send_func=N
         "balance_after": state["balance"],
     })
     state["history"] = state["history"][-500:]
-    save_bank(state, algorithm)
+    save_bank(state)
 
     if state["balance"] < LOW_BALANCE_THRESHOLD:
         print(
-            f"⚠️⚠️⚠️ [{algorithm}] ВНИМАНИЕ: банк ниже {LOW_BALANCE_THRESHOLD} ₽ "
+            f"⚠️⚠️⚠️ ВНИМАНИЕ: банк ниже {LOW_BALANCE_THRESHOLD} ₽ "
             f"(сейчас {state['balance']:.0f} ₽)",
             flush=True,
         )
         if telegram_send_func:
             try:
                 telegram_send_func(
-                    f"⚠️ <b>ВНИМАНИЕ</b> [{algorithm}]\n"
+                    f"⚠️ <b>ВНИМАНИЕ</b>\n"
                     f"Банк упал ниже {LOW_BALANCE_THRESHOLD} ₽\n"
                     f"Текущий банк: <b>{state['balance']:.0f} ₽</b>"
                 )
