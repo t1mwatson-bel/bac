@@ -3,7 +3,9 @@ from datetime import datetime
 
 from config import (
     MOSCOW_TZ,
-    GAME_CYCLE
+    GAME_CYCLE,
+    ENABLE_LAST_10,
+    ENABLE_FULL_V1,
 )
 
 
@@ -359,15 +361,17 @@ def get_full_v1_prediction(game, cycle):
 def get_algorithm_predictions(game, cycle):
     predictions = []
     
-    # 1. Старый алгоритм (Последняя 10)
-    p1 = get_last_card_prediction(game, cycle)
-    if p1:
-        predictions.append(p1)
+    # 1. Старый алгоритм (Последняя 10) — если включен в конфиге
+    if ENABLE_LAST_10:
+        p1 = get_last_card_prediction(game, cycle)
+        if p1:
+            predictions.append(p1)
         
-    # 2. Новый алгоритм (Full_v1.0)
-    p2 = get_full_v1_prediction(game, cycle)
-    if p2:
-        predictions.append(p2)
+    # 2. Новый алгоритм (Full_v1.0) — если включен в конфиге
+    if ENABLE_FULL_V1:
+        p2 = get_full_v1_prediction(game, cycle)
+        if p2:
+            predictions.append(p2)
         
     return predictions
 
