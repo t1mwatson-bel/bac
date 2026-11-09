@@ -100,6 +100,7 @@ def refresh_pending_bets():
     """Обновляет ставки у pending-прогнозов после смены current_bet."""
     for p in predictions:
         if p.get("status") == "pending" and not p.get("sent"):
+            # Остался один алгоритм, но аргумент передаем для совместимости
             algorithm = p.get("algorithm", "Bas_v2.0")
             new_bet, new_step, _ = bank_module.get_current_bet(algorithm)
             
@@ -242,16 +243,8 @@ def make_prediction_message(prediction):
     bet = prediction.get("bet_amount", 0)
     step = prediction.get("bet_step", 0)
     
-    # Берем название алгоритма из прогноза
-    algorithm = prediction.get("algorithm", "unknown")
-
-    # Показываем только красивые названия, без внутренних деталей
-    if algorithm == "последняя 10":
-        algo_text = "Bas_v2.0"
-    elif algorithm == "Full_v1.0":
-        algo_text = "Full_v1.0"
-    else:
-        algo_text = algorithm
+    # Оставлен только один алгоритм
+    algo_text = "Bas_v2.0"
 
     return (
         f"🎯 Игра: <b>#N{target}</b> {suit}\n"
@@ -265,23 +258,16 @@ def make_result_message(prediction, result):
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
-    # Берем название алгоритма из прогноза
-    algorithm = prediction.get("algorithm", "Bas_v2.0")
-    
-    # Загружаем банк именно для этого алгоритма
-    state = bank_module.load_bank(algorithm)
+    # Загружаем общий банк
+    state = bank_module.load_bank()
     balance = state["balance"]
 
     bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
     step = prediction.get("dogon", 0)
     bet = bets[step] if step < len(bets) else bets[-1]
     
-    if algorithm == "последняя 10":
-        algo_text = "Bas_v2.0"
-    elif algorithm == "Full_v1.0":
-        algo_text = "Full_v1.0"
-    else:
-        algo_text = algorithm
+    # Оставлен только один алгоритм
+    algo_text = "Bas_v2.0"
 
     return (
         f"🎯 Игра: <b>#N{target}</b> {suit}{mark}\n"
@@ -419,7 +405,7 @@ def check_predictions():
         if not predicted_suit:
             continue
             
-        # Берем алгоритм для этого прогноза
+        # Берем алгоритм (для совместимости с bank.py)
         algorithm = prediction.get("algorithm", "Bas_v2.0")
 
         all_games_checked = True
@@ -448,7 +434,6 @@ def check_predictions():
                 bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
                 actual_bet = bets[dogon] if dogon < len(bets) else bets[-1]
                 
-                # Передаем algorithm
                 bank_module.apply_result(
                     algorithm, "win", actual_bet, dogon, 
                     telegram_send_func=telegram_api.telegram_send,
@@ -498,7 +483,6 @@ def check_predictions():
         bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
         actual_bet = bets[DOGON_GAMES] if DOGON_GAMES < len(bets) else bets[-1]
         
-        # Передаем algorithm
         bank_module.apply_result(
             algorithm, "lose", actual_bet, DOGON_GAMES, 
             telegram_send_func=telegram_api.telegram_send,
