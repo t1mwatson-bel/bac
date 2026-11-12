@@ -100,10 +100,9 @@ def refresh_pending_bets():
     """Обновляет ставки у pending-прогнозов после смены current_bet."""
     for p in predictions:
         if p.get("status") == "pending" and not p.get("sent"):
-            # Остался один алгоритм, но аргумент передаем для совместимости
             algorithm = p.get("algorithm", "Bas_v2.0")
             new_bet, new_step, _ = bank_module.get_current_bet(algorithm)
-            
+
             p["bets"] = [
                 round(new_bet, 2),
                 round(new_bet * DOGON_MULT, 2),
@@ -242,8 +241,7 @@ def make_prediction_message(prediction):
     target = prediction["target_number"]
     bet = prediction.get("bet_amount", 0)
     step = prediction.get("bet_step", 0)
-    
-    # Оставлен только один алгоритм
+
     algo_text = "Bas_v2.0"
 
     return (
@@ -258,15 +256,13 @@ def make_result_message(prediction, result):
     target = prediction["target_number"]
     mark = "✅" if result == "win" else "❌"
 
-    # Загружаем общий банк
     state = bank_module.load_bank()
     balance = state["balance"]
 
     bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
     step = prediction.get("dogon", 0)
     bet = bets[step] if step < len(bets) else bets[-1]
-    
-    # Оставлен только один алгоритм
+
     algo_text = "Bas_v2.0"
 
     return (
@@ -285,7 +281,10 @@ def create_predictions(game):
     game_number = game["game_number"]
     game_id = game.get("game_id")
 
-    for prediction in parsers.get_algorithm_predictions(game, GAME_CYCLE):
+    # ВАЖНО: передаём games_cache, чтобы парсер проверил N-1
+    for prediction in parsers.get_algorithm_predictions(
+        game, GAME_CYCLE, games_history=games_cache
+    ):
         algorithm = prediction["algorithm"]
 
         trigger_key = (algorithm, game_id or game_number)
@@ -317,7 +316,6 @@ def create_predictions(game):
         prediction["bet_amount"] = prediction["bets"][0]
         prediction["bet_step"] = step
 
-        # НЕ отправляем сразу — отправим за 1 игру до цели
         prediction["message_id"] = None
         prediction["sent"] = False
 
@@ -343,6 +341,63 @@ def create_predictions(game):
 
 def create_prediction(game):
     create_predictions(game)
+
+
+# =====================================================================
+# CANCEL PREDICTION IF N+1 HAS ANOMALY
+# =====================================================================
+
+def cancel_on_next_game_anomaly(game):
+    """Если игра N+1 относительно триггера содержит аномалию —
+    отменяем прогноз, который ещё pending."""
+    game_number = game["game_number"]
+
+    # сама игра N+1 не аномальна — ничего не делаем
+    if not parsers.has_anomaly(game):
+        return
+
+    changed = False
+
+    for prediction in predictions:
+        if prediction.get("status") != "pending":
+            continue
+
+        trigger = prediction.get("trigger_number")
+        if trigger is None:
+            continue
+
+        next_num = parsers.add_game_offset(trigger, 1, GAME_CYCLE)
+
+        if next_num != game_number:
+            continue
+
+        prediction["status"] = "cancelled"
+        prediction["closed_at"] = datetime.now(MOSCOW_TZ).isoformat()
+        prediction["close_reason"] = "anomaly_next_game"
+
+        if not prediction.get("sent"):
+            print(
+                f"🚫 Прогноз на #N{prediction['target_number']} отменён: "
+                f"аномалия в #N{game_number} (N+1 от триггера "
+                f"#N{trigger})",
+                flush=True,
+            )
+        else:
+            telegram_api.telegram_edit(
+                prediction.get("message_id"),
+                f"🚫 Отменён: аномалия в #N{game_number}",
+            )
+            print(
+                f"🚫 Отправленный прогноз на #N{prediction['target_number']} "
+                f"отменён: аномалия в #N{game_number}",
+                flush=True,
+            )
+
+        changed = True
+
+    if changed:
+        save_predictions()
+        generate_stats()
 
 
 # =====================================================================
@@ -404,8 +459,7 @@ def check_predictions():
         predicted_suit = prediction.get("predicted_suit")
         if not predicted_suit:
             continue
-            
-        # Берем алгоритм (для совместимости с bank.py)
+
         algorithm = prediction.get("algorithm", "Bas_v2.0")
 
         all_games_checked = True
@@ -433,9 +487,9 @@ def check_predictions():
 
                 bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
                 actual_bet = bets[dogon] if dogon < len(bets) else bets[-1]
-                
+
                 bank_module.apply_result(
-                    algorithm, "win", actual_bet, dogon, 
+                    algorithm, "win", actual_bet, dogon,
                     telegram_send_func=telegram_api.telegram_send,
                 )
 
@@ -482,9 +536,9 @@ def check_predictions():
 
         bets = prediction.get("bets") or [prediction.get("bet_amount", 0)]
         actual_bet = bets[DOGON_GAMES] if DOGON_GAMES < len(bets) else bets[-1]
-        
+
         bank_module.apply_result(
-            algorithm, "lose", actual_bet, DOGON_GAMES, 
+            algorithm, "lose", actual_bet, DOGON_GAMES,
             telegram_send_func=telegram_api.telegram_send,
         )
 
@@ -542,6 +596,9 @@ def finalize_pending_games():
 
         games_cache[game_number] = game
         parsers.log_game(game)
+
+        # N+1 от какого-то триггера — проверяем на аномалию и отменяем
+        cancel_on_next_game_anomaly(game)
 
         if sleeping:
             print(
@@ -602,6 +659,8 @@ def process_telegram_updates(offset):
                     f"🔄 Обновлена завершённая игра #N{game_number}",
                     flush=True,
                 )
+                # N+1 от какого-то триггера — проверяем на аномалию
+                cancel_on_next_game_anomaly(game)
             continue
 
         if re.search(r"[✅🔰]", text):
@@ -661,8 +720,9 @@ def main():
     print("==================================================", flush=True)
     print("📡 Игры: CHANNEL_STATS", flush=True)
     print(f"⏳ Финализация: {FINALIZE_WAIT_SECONDS} сек", flush=True)
-    print("🧠 Алгоритм: последняя 10", flush=True)
-    print("⭕ Фильтр #O: пропуск триггера", flush=True)
+    print("🧠 Алгоритм: Full_v1.0 (+10 игр)", flush=True)
+    print("⭕ Фильтр аномалий: #R/#O/#G/#X в триггере и N-1/N+1", flush=True)
+    print("🎰 Фильтр: у дилера должны быть карты", flush=True)
     print(
         f"😴 Сон: с {SLEEP_HOUR:02d}:{SLEEP_MINUTE:02d} "
         f"до {WAKE_HOUR:02d}:{WAKE_MINUTE:02d}",
