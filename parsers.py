@@ -162,6 +162,7 @@ def parse_game_message(text):
     is_draw = bool(re.search(r"#X\b", text))
     is_ochko = bool(re.search(r"#O\b", text))
     is_r = bool(re.search(r"#R\b", text))
+    is_g = bool(re.search(r"#G\b", text))
     is_finished = bool(re.search(r"✅", text))
 
     return {
@@ -174,6 +175,7 @@ def parse_game_message(text):
         "is_draw": is_draw,
         "is_ochko": is_ochko,
         "is_r": is_r,
+        "is_g": is_g,
         "is_finished": is_finished,
         "raw_text": text,
     }
@@ -198,7 +200,10 @@ def log_game(game):
 
     if game.get("is_ochko"):
         print("⭕ #O — ОЧКО", flush=True)
-        
+
+    if game.get("is_g"):
+        print("🟢 #G — АНОМАЛИЯ", flush=True)
+
     if game.get("is_r"):
         print("⚠️ #R — АНОМАЛИЯ", flush=True)
 
@@ -211,6 +216,22 @@ def log_game(game):
 
 def add_game_offset(number, offset, cycle):
     return ((int(number) - 1 + int(offset)) % cycle) + 1
+
+
+# =====================================================================
+# ANOMALY CHECK
+# =====================================================================
+
+def has_anomaly(game):
+    """Игра содержит любую из аномалий: #R, #O, #G, #X."""
+    if not game:
+        return True
+    return bool(
+        game.get("is_r")
+        or game.get("is_ochko")
+        or game.get("is_g")
+        or game.get("is_draw")
+    )
 
 
 # =====================================================================
@@ -241,14 +262,14 @@ def get_last_card_prediction(game, cycle):
 
     # 4. Ровно ОДНА 10 у игрока
     tens_count = sum(
-        1 for card in player 
+        1 for card in player
         if normalize_rank(card.get("rank")) == "10"
     )
 
     if tens_count > 1:
         print(f"⚠️ #N{game['game_number']}: >1 десятки — пропуск", flush=True)
         return None
-        
+
     # 5. У игрока минимум 3 карты (фильтр от триггера 192)
     if len(player) < 3:
         print(f"⚠️ #N{game['game_number']}: у игрока <3 карт — пропуск", flush=True)
@@ -288,35 +309,63 @@ def get_last_card_prediction(game, cycle):
 
 
 # =====================================================================
-# ALGORITHM: FULL_V1.0 (МАСТЬ ПО ПЕРВОЙ КАРТЕ, +10 ИГР) - НОВЫЙ
+# ALGORITHM: FULL_V1.0 (МАСТЬ ПО ПЕРВОЙ КАРТЕ, +10 ИГР)
 # =====================================================================
 
-def get_full_v1_prediction(game, cycle):
+def get_full_v1_prediction(game, cycle, games_history=None):
     player = game.get("player_cards", [])
     dealer = game.get("dealer_cards", [])
 
     if not player:
         return None
 
-    # 1. У дилера должны быть карты
+    # 1. У дилера ОБЯЗАТЕЛЬНО должны быть карты (иначе аномалия)
     if not dealer:
+        print(
+            f"⚠️ #N{game['game_number']}: у дилера нет карт — аномалия, пропуск",
+            flush=True,
+        )
         return None
 
-    # 2. Нет аномалий (#R), ничьи (#X) и очка (#O)
-    if game.get("is_r") or game.get("is_draw") or game.get("is_ochko"):
+    # 2. В самом триггере нет аномалий (#R/#O/#G/#X)
+    if has_anomaly(game):
         return None
 
-    # 3. У игрока нет Туза (A) и Десятки (10)
+    # 3. Проверка соседних игр: N-1 и N+1 не должны содержать аномалий
+    if games_history:
+        prev_num = add_game_offset(game["game_number"], -1, cycle)
+        next_num = add_game_offset(game["game_number"], 1, cycle)
+
+        prev_game = games_history.get(prev_num)
+        next_game = games_history.get(next_num)
+
+        if prev_game and has_anomaly(prev_game):
+            print(
+                f"⚠️ #N{game['game_number']}: аномалия в предыдущей "
+                f"#N{prev_num} — пропуск",
+                flush=True,
+            )
+            return None
+
+        if next_game and has_anomaly(next_game):
+            print(
+                f"⚠️ #N{game['game_number']}: аномалия в следующей "
+                f"#N{next_num} — пропуск",
+                flush=True,
+            )
+            return None
+
+    # 4. У игрока нет Туза (A) и Десятки (10)
     for card in player:
         rank = normalize_rank(card.get("rank"))
         if rank in ("A", "10"):
             return None
 
-    # 4. Берем первую карту игрока
+    # 5. Берем первую карту игрока
     first_card = player[0]
     rank = normalize_rank(first_card.get("rank"))
-    
-    # 5. Таблица маппинга масти (Full_v1.0)
+
+    # 6. Таблица маппинга масти (Full_v1.0)
     # Q -> ♦️, J/K -> ♥️, 2/4/6/8 -> ♠️, 3/5/7/9 -> ♣️
     if rank == "Q":
         predicted_suit = normalize_suit("♦")
@@ -329,7 +378,7 @@ def get_full_v1_prediction(game, cycle):
     else:
         return None
 
-    # 6. Триггер и цель (+10 игр)
+    # 7. Триггер и цель (+10 игр)
     trigger_number = game["game_number"]
     target_number = add_game_offset(trigger_number, 10, cycle)
 
@@ -358,21 +407,21 @@ def get_full_v1_prediction(game, cycle):
 # ОБЩАЯ ФУНКЦИЯ ЗАПУСКА АЛГОРИТМОВ
 # =====================================================================
 
-def get_algorithm_predictions(game, cycle):
+def get_algorithm_predictions(game, cycle, games_history=None):
     predictions = []
-    
-    # 1. Старый алгоритм (Последняя 10) — если включен в конфиге
+
+    # 1. Старый алгоритм (Последняя 10)
     if ENABLE_LAST_10:
         p1 = get_last_card_prediction(game, cycle)
         if p1:
             predictions.append(p1)
-        
-    # 2. Новый алгоритм (Full_v1.0) — если включен в конфиге
+
+    # 2. Новый алгоритм (Full_v1.0)
     if ENABLE_FULL_V1:
-        p2 = get_full_v1_prediction(game, cycle)
+        p2 = get_full_v1_prediction(game, cycle, games_history=games_history)
         if p2:
             predictions.append(p2)
-        
+
     return predictions
 
 
